@@ -258,10 +258,14 @@ class ProjectCreator:
         modules = []
         for current, dirs, files in os.walk(root):
             current_path = Path(current)
+            # Aucun module Odoo ne vit dans un dossier caché. Un worktree, un .venv ou un .tox
+            # dans un dépôt d'addons y ferait apparaître un second module homonyme, lié à la
+            # place du vrai selon l'ordre de parcours.
             dirs[:] = sorted(
                 directory
                 for directory in dirs
-                if directory not in {".git", ".github", "__pycache__", "node_modules", "setup"}
+                if not directory.startswith(".")
+                and directory not in {"__pycache__", "node_modules", "setup"}
             )
             if "__manifest__.py" in files or "__openerp__.py" in files:
                 modules.append(current_path)

@@ -302,6 +302,17 @@ class ProjectCreatorTests(unittest.TestCase):
         self.assertIn("Préparation des liens: 2/2", runner.batch_script)
         self.assertFalse((addons / ".odoo_manager_links.sh").exists())
 
+    def test_module_directories_ignores_hidden_directories(self):
+        source = self.workspace / "repository"
+        for relative in ("module_alpha", ".sandcastle/module_alpha", ".venv/lib/module_beta"):
+            module = source / relative
+            module.mkdir(parents=True)
+            (module / "__manifest__.py").write_text("{}\n", encoding="utf-8")
+
+        found = ProjectCreator.module_directories(source)
+
+        self.assertEqual([path.relative_to(source).as_posix() for path in found], ["module_alpha"])
+
     def test_clone_reuses_objects_from_existing_local_repository(self):
         existing = self.workspace / "EXISTING" / "odoo" / "odoo"
         git_dir = existing / ".git"
