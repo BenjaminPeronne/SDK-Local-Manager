@@ -13,6 +13,29 @@ from unittest.mock import Mock, patch
 import odoo_manager_web as web
 from odoo_manager_core.traefik import reset_traefik_entrypoint_cache
 
+_ERROR_LOG_SANDBOX = None
+_ERROR_LOG_PATCH = None
+
+
+def setUpModule():
+    """Le journal d'erreurs du poste reste intact pendant les tests.
+
+    Une action volontairement mise en échec, ou une réponse HTTP d'erreur, est enregistrée
+    par `record_manager_error`. Sans cette redirection, ces entrées de test apparaissaient
+    dans l'écran « Erreurs » du gestionnaire installé sur la même machine.
+    """
+    global _ERROR_LOG_SANDBOX, _ERROR_LOG_PATCH
+    _ERROR_LOG_SANDBOX = tempfile.TemporaryDirectory(prefix="odoo-manager-tests-")
+    _ERROR_LOG_PATCH = patch.object(web, "ERROR_LOG_PATH", Path(_ERROR_LOG_SANDBOX.name) / "errors.jsonl")
+    _ERROR_LOG_PATCH.start()
+
+
+def tearDownModule():
+    if _ERROR_LOG_PATCH is not None:
+        _ERROR_LOG_PATCH.stop()
+    if _ERROR_LOG_SANDBOX is not None:
+        _ERROR_LOG_SANDBOX.cleanup()
+
 
 class CorsTests(unittest.TestCase):
     def test_allows_packaged_electron_origin(self):

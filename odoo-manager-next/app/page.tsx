@@ -889,6 +889,91 @@ function RefinedRow({
   );
 }
 
+/**
+ * Accueil affiché quand aucun projet n'est ouvert.
+ *
+ * Sans projet, les onglets ne montrent que des panneaux vides : l'écran dit plutôt ce que
+ * l'application attend, et si ses deux dépendances sont prêtes.
+ */
+function WelcomeScreen({
+  icon,
+  hasProjects,
+  docker,
+  traefik,
+  onCreateProject,
+  onOpenSettings,
+  onRefresh,
+}: {
+  icon: { src: string };
+  hasProjects: boolean;
+  docker: { ready: boolean; message: string };
+  traefik: { ready: boolean; message: string } | null;
+  onCreateProject: () => void;
+  onOpenSettings: () => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="mx-auto flex max-w-[1500px] flex-col items-center px-4 py-12 text-center sm:py-16">
+      <img src={icon.src} alt="" aria-hidden="true" className="h-16 w-16 rounded-2xl object-cover shadow-sm sm:h-[72px] sm:w-[72px]" />
+      <h2 className="mt-5 text-2xl font-semibold sm:text-3xl">SDK Local Manager</h2>
+      <p className="mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
+        {hasProjects
+          ? "Sélectionne un projet dans la barre de gauche pour ouvrir ses bases, ses modules et son activité."
+          : "Aucun projet pour l’instant. Crée ton premier environnement Odoo local : le gestionnaire prépare le code, la base et l’accès web."}
+      </p>
+
+      <div className="mt-8 grid w-full max-w-xl gap-3 sm:grid-cols-2">
+        <WelcomeStatus title="Docker" ready={docker.ready} message={docker.message} />
+        <WelcomeStatus
+          title="Traefik"
+          ready={Boolean(traefik?.ready)}
+          message={traefik?.message || "Vérification en cours…"}
+        />
+      </div>
+
+      <div className="mt-8 flex w-full max-w-xl flex-col gap-2 sm:flex-row sm:justify-center">
+        <Button className="w-full sm:w-auto" onClick={onCreateProject}>
+          <FolderPlus className="h-4 w-4" />
+          Nouveau projet
+        </Button>
+        <Button className="w-full sm:w-auto" variant="outline" onClick={onOpenSettings}>
+          <Settings className="h-4 w-4" />
+          Paramètres
+        </Button>
+        <Button className="w-full sm:w-auto" variant="ghost" onClick={onRefresh}>
+          <RefreshCcw className="h-4 w-4" />
+          Actualiser
+        </Button>
+      </div>
+
+      {hasProjects && (
+        <p className="mt-6 text-xs text-muted-foreground">
+          Échap ramène à cet écran depuis un projet éteint.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function WelcomeStatus({ title, ready, message }: { title: string; ready: boolean; message: string }) {
+  return (
+    <div className="flex min-w-0 items-start gap-3 rounded-lg border bg-card px-4 py-3 text-left">
+      {ready ? (
+        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+      ) : (
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+      )}
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          {title}
+          <Badge variant={ready ? "success" : "outline"}>{ready ? "Prêt" : "À vérifier"}</Badge>
+        </div>
+        <p className="mt-0.5 break-words text-xs text-muted-foreground">{message}</p>
+      </div>
+    </div>
+  );
+}
+
 function JobProgressPanel({ label, percent, action }: { label: string; percent: number | null; action?: ReactNode }) {
   return (
     <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
@@ -1113,6 +1198,9 @@ export default function Home() {
   const [selectingWorkspace, setSelectingWorkspace] = useState(false);
   const [projectsFilter, setProjectsFilter] = useState("");
   const [selectedProjectName, setSelectedProjectName] = useState("");
+  // Accueil demandé par Échap depuis un projet éteint : le projet reste sélectionné dans la
+  // barre, seule la zone centrale revient à l'accueil.
+  const [welcomeRequested, setWelcomeRequested] = useState(false);
   const [selectedDb, setSelectedDb] = useState("");
   const [modules, setModules] = useState<ModuleInfo[]>([]);
   const [loadingModules, setLoadingModules] = useState(false);
@@ -1892,6 +1980,7 @@ export default function Home() {
 
     setSelectedProjectName(project.name);
     setSelectedDb(pendingCreatedDatabase.database);
+    setWelcomeRequested(false);
     setActiveTab("modules");
     setPendingCreatedDatabase(null);
     pushToast("success", `Base ${pendingCreatedDatabase.database} prête. La liste des modules est disponible.`);
@@ -2908,6 +2997,24 @@ export default function Home() {
   );
   const selectedProjectReady = Boolean(selectedProject);
   const selectedProjectOnline = selectedProject?.odoo_status === "running";
+  // Sans projet ouvert, les onglets n'offrent que des panneaux vides : l'accueil prend la place.
+  const showWelcome = welcomeRequested || (!selectedProject && !pendingSelectedProjectCreation);
+
+  useEffect(() => {
+    if (showWelcome || !selectedProject || selectedProjectOnline) return;
+    function backToWelcomeOnEscape(event: KeyboardEvent) {
+      // Une fenêtre ou un menu Radix consomme déjà Échap ; un champ de saisie le garde pour lui.
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector("[role=dialog], [role=menu]")) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable=true]")) return;
+      // Échap sert d'abord à vider la sélection de modules.
+      if (selectedModules.size > 0) return;
+      setWelcomeRequested(true);
+    }
+    window.addEventListener("keydown", backToWelcomeOnEscape);
+    return () => window.removeEventListener("keydown", backToWelcomeOnEscape);
+  }, [selectedModules, selectedProject, selectedProjectOnline, showWelcome]);
   const selectedProjectHasContainers = Boolean(
     selectedProject &&
     [selectedProject.odoo_status, selectedProject.postgres_status].some((status) => status && status !== "absent" && status !== "docker off"),
@@ -3668,6 +3775,7 @@ export default function Home() {
                           setSelectedProjectName(project.name);
                           setSelectedDb(firstOdooDatabase(project));
                           setExternalLogView(null);
+                          setWelcomeRequested(false);
                           setActiveTab(project.odoo_status === "running" ? "bases" : "logs");
                         }}
                       >
@@ -3735,90 +3843,93 @@ export default function Home() {
 
         {/* overflow-x-clip borne le bandeau pleine largeur des onglets sans casser les éléments collés. */}
         <section className="min-w-0 flex-1 overflow-x-clip">
-          <header
-            ref={projectHeaderRef}
-            className={cn(
-              "sdk-project-header border-b bg-card",
-              stickyHeader && "lg:sticky lg:top-0 lg:z-30 lg:shadow-sm",
-            )}
-          >
-            <div
+          {/* Sans projet ouvert, l'en-tête et les onglets laissent la place à l'accueil. */}
+          {!showWelcome && (
+            <header
+              ref={projectHeaderRef}
               className={cn(
-                "mx-auto flex max-w-[1500px] flex-col gap-4 px-4 py-4 transition-[padding] duration-200 motion-reduce:transition-none xl:flex-row xl:items-start xl:justify-between",
-                projectHeaderCompact && "lg:gap-3 lg:py-2 xl:items-center",
+                "sdk-project-header border-b bg-card",
+                stickyHeader && "lg:sticky lg:top-0 lg:z-30 lg:shadow-sm",
               )}
             >
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 flex-wrap items-start gap-2">
-                  <h2
-                    className={cn(
-                      "min-w-0 max-w-full break-words text-2xl font-semibold leading-tight sm:text-3xl",
-                      projectHeaderCompact && "lg:text-xl",
+              <div
+                className={cn(
+                  "mx-auto flex max-w-[1500px] flex-col gap-4 px-4 py-4 transition-[padding] duration-200 motion-reduce:transition-none xl:flex-row xl:items-start xl:justify-between",
+                  projectHeaderCompact && "lg:gap-3 lg:py-2 xl:items-center",
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 flex-wrap items-start gap-2">
+                    <h2
+                      className={cn(
+                        "min-w-0 max-w-full break-words text-2xl font-semibold leading-tight sm:text-3xl",
+                        projectHeaderCompact && "lg:text-xl",
+                      )}
+                    >
+                      {pendingSelectedProjectCreation?.project || selectedProject?.name || "Aucun projet"}
+                    </h2>
+                    {pendingSelectedProjectCreation ? (
+                      <Badge className="mt-0.5 shrink-0" variant="outline">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Création en cours
+                      </Badge>
+                    ) : selectedProject?.odoo_version && (
+                      <Badge className="mt-0.5 shrink-0" variant="outline">
+                        Odoo {selectedProject.odoo_version}
+                      </Badge>
                     )}
-                  >
-                    {pendingSelectedProjectCreation?.project || selectedProject?.name || "Aucun projet"}
-                  </h2>
-                  {pendingSelectedProjectCreation ? (
-                    <Badge className="mt-0.5 shrink-0" variant="outline">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Création en cours
-                    </Badge>
-                  ) : selectedProject?.odoo_version && (
-                    <Badge className="mt-0.5 shrink-0" variant="outline">
-                      Odoo {selectedProject.odoo_version}
-                    </Badge>
+                  </div>
+                  <p className={cn("mt-1 max-w-full break-all text-sm text-muted-foreground", projectHeaderCompact && "lg:hidden")}>
+                    {pendingSelectedProjectCreation
+                      ? "Préparation du projet local en arrière-plan. Le journal détaille les étapes en cours."
+                      : selectedProject?.url || "Sélectionne un projet."}
+                  </p>
+                </div>
+                <div className="grid w-full shrink-0 grid-cols-2 items-stretch gap-2 sm:grid-cols-3 xl:w-[480px]">
+                  <Button className="w-full" variant="outline" onClick={refreshAllViews}>
+                    <RefreshCcw className="h-4 w-4" />
+                    Actualiser
+                  </Button>
+                  {selectedProjectOnline ? (
+                    <Button
+                      key="stop-project"
+                      className="w-full"
+                      variant="destructive"
+                      disabled={!selectedProjectReady || !selectedProjectHasContainers || loading || Boolean(selectedProjectLifecycleJob)}
+                      onClick={requestStopProject}
+                    >
+                      {selectedProjectStopping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
+                      {selectedProjectStopping ? "Arrêt…" : "Arrêter"}
+                    </Button>
+                  ) : (
+                    <Button
+                      key="start-project"
+                      className="w-full"
+                      disabled={!selectedProjectReady || loading || Boolean(selectedProjectLifecycleJob)}
+                      onClick={requestStartProject}
+                    >
+                      {selectedProjectStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                      {selectedProjectStarting ? "Démarrage…" : "Démarrer"}
+                    </Button>
+                  )}
+                  {selectedProject && (
+                    <Button
+                      className="col-span-2 w-full sm:col-span-1"
+                      variant="outline"
+                      disabled={
+                        !selectedProjectReady ||
+                        openingOdoo
+                      }
+                      onClick={requestOpenOdoo}
+                    >
+                      {openingOdoo ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+                      {openingOdoo ? "Ouverture…" : "Ouvrir Odoo"}
+                    </Button>
                   )}
                 </div>
-                <p className={cn("mt-1 max-w-full break-all text-sm text-muted-foreground", projectHeaderCompact && "lg:hidden")}>
-                  {pendingSelectedProjectCreation
-                    ? "Préparation du projet local en arrière-plan. Le journal détaille les étapes en cours."
-                    : selectedProject?.url || "Sélectionne un projet."}
-                </p>
               </div>
-              <div className="grid w-full shrink-0 grid-cols-2 items-stretch gap-2 sm:grid-cols-3 xl:w-[480px]">
-                <Button className="w-full" variant="outline" onClick={refreshAllViews}>
-                  <RefreshCcw className="h-4 w-4" />
-                  Actualiser
-                </Button>
-                {selectedProjectOnline ? (
-                  <Button
-                    key="stop-project"
-                    className="w-full"
-                    variant="destructive"
-                    disabled={!selectedProjectReady || !selectedProjectHasContainers || loading || Boolean(selectedProjectLifecycleJob)}
-                    onClick={requestStopProject}
-                  >
-                    {selectedProjectStopping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
-                    {selectedProjectStopping ? "Arrêt…" : "Arrêter"}
-                  </Button>
-                ) : (
-                  <Button
-                    key="start-project"
-                    className="w-full"
-                    disabled={!selectedProjectReady || loading || Boolean(selectedProjectLifecycleJob)}
-                    onClick={requestStartProject}
-                  >
-                    {selectedProjectStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                    {selectedProjectStarting ? "Démarrage…" : "Démarrer"}
-                  </Button>
-                )}
-                {selectedProject && (
-                  <Button
-                    className="col-span-2 w-full sm:col-span-1"
-                    variant="outline"
-                    disabled={
-                      !selectedProjectReady ||
-                      openingOdoo
-                    }
-                    onClick={requestOpenOdoo}
-                  >
-                    {openingOdoo ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
-                    {openingOdoo ? "Ouverture…" : "Ouvrir Odoo"}
-                  </Button>
-                )}
-              </div>
-            </div>
-          </header>
+            </header>
+          )}
 
           <div className={cn("mx-auto max-w-[1500px] px-4 py-4", showFloatingModuleActions && "pb-32 xl:pb-24")}>
             {apiUnavailable && (
@@ -4092,398 +4203,620 @@ export default function Home() {
               </div>
             )}
 
-            <Tabs
-              value={activeTab}
-              onValueChange={(value) => {
-                if (value === "logs") enableLogAutoFollow();
-                setActiveTab(value);
-              }}
-            >
-              <div
-                ref={projectTabsRef}
-                className={cn(
-                  // Fond transparent au repos : le bandeau apparaît en fondu, au rythme du défilement, sur toute la largeur de la zone.
-                  stickyHeader &&
-                    "-my-2 py-2 lg:sticky lg:z-20 lg:before:pointer-events-none lg:before:absolute lg:before:inset-y-0 lg:before:-inset-x-[100vw] lg:before:-z-10 lg:before:border-b lg:before:bg-background/90 lg:before:opacity-[var(--tabs-backdrop,0)] lg:before:backdrop-blur lg:before:transition-opacity lg:before:duration-300 lg:before:ease-out motion-reduce:lg:before:transition-none",
-                )}
-                style={stickyHeader ? { top: projectHeaderHeight } : undefined}
+            {showWelcome ? (
+              <WelcomeScreen
+                icon={selectedAppIcon}
+                hasProjects={Boolean(overview?.projects.length)}
+                docker={{
+                  ready: Boolean(systemStatus?.docker.running),
+                  message: systemStatus?.docker.message || "Vérification en cours…",
+                }}
+                traefik={systemStatus?.traefik ? { ready: systemStatus.traefik.running, message: systemStatus.traefik.message } : null}
+                onCreateProject={openCreateProjectDialog}
+                onOpenSettings={openSettingsDialog}
+                onRefresh={refreshAllViews}
+              />
+            ) : (
+              <Tabs
+                value={activeTab}
+                onValueChange={(value) => {
+                  if (value === "logs") enableLogAutoFollow();
+                  setActiveTab(value);
+                }}
               >
-              <TabsList
-                className={cn(
-                  "grid w-full overflow-hidden transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none lg:w-fit",
-                  selectedProjectOnline
-                    ? "grid-cols-4"
-                    : "[grid-template-columns:minmax(0,0fr)_minmax(0,0fr)_minmax(0,1fr)_minmax(0,1fr)]",
-                )}
-              >
-                <TabsTrigger
-                  value="bases"
-                  disabled={!selectedProjectOnline}
+                <div
+                  ref={projectTabsRef}
                   className={cn(
-                    "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-                    !selectedProjectOnline && "pointer-events-none -translate-x-1 opacity-0",
+                    // Fond transparent au repos : le bandeau apparaît en fondu, au rythme du défilement, sur toute la largeur de la zone.
+                    stickyHeader &&
+                      "-my-2 py-2 lg:sticky lg:z-20 lg:before:pointer-events-none lg:before:absolute lg:before:inset-y-0 lg:before:-inset-x-[100vw] lg:before:-z-10 lg:before:border-b lg:before:bg-background/90 lg:before:opacity-[var(--tabs-backdrop,0)] lg:before:backdrop-blur lg:before:transition-opacity lg:before:duration-300 lg:before:ease-out motion-reduce:lg:before:transition-none",
+                  )}
+                  style={stickyHeader ? { top: projectHeaderHeight } : undefined}
+                >
+                <TabsList
+                  className={cn(
+                    "grid w-full overflow-hidden transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none lg:w-fit",
+                    selectedProjectOnline
+                      ? "grid-cols-4"
+                      : "[grid-template-columns:minmax(0,0fr)_minmax(0,0fr)_minmax(0,1fr)_minmax(0,1fr)]",
                   )}
                 >
-                  <Database className="mr-1.5 h-4 w-4" />
-                  Bases
-                </TabsTrigger>
-                <TabsTrigger
-                  value="modules"
-                  disabled={!selectedProjectOnline}
-                  className={cn(
-                    "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-                    !selectedProjectOnline && "pointer-events-none -translate-x-1 opacity-0",
-                  )}
-                >
-                  <Boxes className="mr-1.5 h-4 w-4" />
-                  Modules
-                </TabsTrigger>
-                <TabsTrigger value="logs">
-                  <Logs className="mr-1.5 h-4 w-4" />
-                  {refinedInterface ? "Activité" : "Logs"}
-                </TabsTrigger>
-                <TabsTrigger value="actions">
-                  <Settings className="mr-1.5 h-4 w-4" />
-                  {refinedInterface ? "Réglages" : "Actions"}
-                </TabsTrigger>
-              </TabsList>
-              </div>
+                  <TabsTrigger
+                    value="bases"
+                    disabled={!selectedProjectOnline}
+                    className={cn(
+                      "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+                      !selectedProjectOnline && "pointer-events-none -translate-x-1 opacity-0",
+                    )}
+                  >
+                    <Database className="mr-1.5 h-4 w-4" />
+                    Bases
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="modules"
+                    disabled={!selectedProjectOnline}
+                    className={cn(
+                      "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+                      !selectedProjectOnline && "pointer-events-none -translate-x-1 opacity-0",
+                    )}
+                  >
+                    <Boxes className="mr-1.5 h-4 w-4" />
+                    Modules
+                  </TabsTrigger>
+                  <TabsTrigger value="logs">
+                    <Logs className="mr-1.5 h-4 w-4" />
+                    {refinedInterface ? "Activité" : "Logs"}
+                  </TabsTrigger>
+                  <TabsTrigger value="actions">
+                    <Settings className="mr-1.5 h-4 w-4" />
+                    {refinedInterface ? "Réglages" : "Actions"}
+                  </TabsTrigger>
+                </TabsList>
+                </div>
 
-              {selectedProjectOnline && (
-                <TabsContent value="bases">
-                  {refinedInterface ? (
-                    <div className="space-y-5">
-                      <RefinedSectionHeader
-                        title="Bases de données"
-                        count={odooDatabases.length}
-                        description="Sélectionne la base sur laquelle travailler."
-                        actions={
-                          <>
-                            {selectedProject && (
-                              <Button
-                                variant="ghost"
-                                onClick={() => openUrl(selectedProject.database_manager_url)}
-                                title="Ouvrir le gestionnaire de bases d’Odoo"
-                              >
-                                <ExternalLink className="h-4 w-4" />
-                                Gestionnaire Odoo
-                              </Button>
-                            )}
-                            <Button variant="outline" disabled={!selectedProjectReady} onClick={() => setRestoreDbOpen(true)}>
-                              <Upload className="h-4 w-4" />
-                              Restaurer
-                            </Button>
-                            <Button disabled={!selectedProjectReady} onClick={() => setCreateDbOpen(true)}>
-                              <PlusCircle className="h-4 w-4" />
-                              Créer une base
-                            </Button>
-                          </>
-                        }
-                      />
-
-                      {odooDatabases.length ? (
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          {odooDatabases.map((db) => (
-                            <div key={db} className="group relative min-w-0">
-                              <InteractiveCard
-                                aria-pressed={selectedDb === db}
-                                className={cn(
-                                  "w-full min-w-0 p-4 pr-14",
-                                  selectedDb === db
-                                    ? "border-primary bg-primary/[0.10] ring-2 ring-primary/35 hover:bg-primary/[0.10] dark:bg-primary/[0.16] dark:hover:bg-primary/[0.16]"
-                                    : "hover:border-primary/35 hover:bg-muted/60 dark:hover:bg-muted/40",
-                                )}
-                                onClick={() => setSelectedDb(db)}
-                              >
-                                <div className="flex min-w-0 items-start gap-2">
-                                  <span className={cn("min-w-0 break-all", REFINED_IDENTIFIER)}>{db}</span>
-                                  {db === selectedDb && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
-                                </div>
-                                <div
-                                  className={cn(
-                                    "mt-2 text-xs",
-                                    db === selectedDb ? "font-medium text-primary" : "text-muted-foreground",
-                                  )}
+                {selectedProjectOnline && (
+                  <TabsContent value="bases">
+                    {refinedInterface ? (
+                      <div className="space-y-5">
+                        <RefinedSectionHeader
+                          title="Bases de données"
+                          count={odooDatabases.length}
+                          description="Sélectionne la base sur laquelle travailler."
+                          actions={
+                            <>
+                              {selectedProject && (
+                                <Button
+                                  variant="ghost"
+                                  onClick={() => openUrl(selectedProject.database_manager_url)}
+                                  title="Ouvrir le gestionnaire de bases d’Odoo"
                                 >
-                                  {db === selectedDb
-                                    ? "Base de travail"
-                                    : selectedProject?.database_versions?.[db] || "Base Odoo"}
-                                </div>
-                              </InteractiveCard>
-                              <DropdownMenu.Root modal={false}>
-                                <DropdownMenu.Trigger>
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    className={cn(
-                                      "absolute right-2 top-2 h-9 w-9 transition-opacity focus-visible:opacity-100 data-[state=open]:opacity-100",
-                                      db !== selectedDb && "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100",
-                                    )}
-                                    disabled={loading}
-                                    title={`Actions sur ${db}`}
-                                    aria-label={`Actions sur ${db}`}
-                                  >
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </Button>
-                                </DropdownMenu.Trigger>
-                                <DropdownMenu.Content align="end" className="min-w-60">
-                                  <DropdownMenu.Label>Maintenance</DropdownMenu.Label>
-                                  <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "regenerate_assets")}>
-                                    <Paintbrush className="h-4 w-4" />
-                                    Régénérer les assets
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "reset_translations")}>
-                                    <Languages className="h-4 w-4" />
-                                    Réinitialiser les traductions
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "neutralize")}>
-                                    <ShieldCheck className="h-4 w-4" />
-                                    Neutraliser et contrôler
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "admin_password")}>
-                                    <KeyRound className="h-4 w-4" />
-                                    Mot de passe admin
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Separator />
-                                  <DropdownMenu.Label>Outils</DropdownMenu.Label>
-                                  <DropdownMenu.Item
-                                    disabled={selectedProject?.postgres_status !== "running" || openingPostgresql}
-                                    onSelect={() => runDatabaseAction(db, "psql")}
-                                  >
-                                    <Terminal className="h-4 w-4" />
-                                    Ouvrir psql
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Separator />
-                                  <DropdownMenu.Label>Zone dangereuse</DropdownMenu.Label>
-                                  <DropdownMenu.Item color="red" onSelect={() => runDatabaseAction(db, "drop")}>
-                                    <Trash2 className="h-4 w-4" />
-                                    Supprimer la base
-                                  </DropdownMenu.Item>
-                                </DropdownMenu.Content>
-                              </DropdownMenu.Root>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="rounded-md border border-dashed p-6 text-center">
-                          <Database className="mx-auto h-6 w-6 text-muted-foreground" />
-                          <p className="mt-3 font-medium">Aucune base Odoo</p>
-                          <p className="mt-1 text-sm text-muted-foreground">Crée une base pour commencer à utiliser ce projet.</p>
-                        </div>
-                      )}
+                                  <ExternalLink className="h-4 w-4" />
+                                  Gestionnaire Odoo
+                                </Button>
+                              )}
+                              <Button variant="outline" disabled={!selectedProjectReady} onClick={() => setRestoreDbOpen(true)}>
+                                <Upload className="h-4 w-4" />
+                                Restaurer
+                              </Button>
+                              <Button disabled={!selectedProjectReady} onClick={() => setCreateDbOpen(true)}>
+                                <PlusCircle className="h-4 w-4" />
+                                Créer une base
+                              </Button>
+                            </>
+                          }
+                        />
 
-                      <RefinedPanel>
-                        <button
-                          type="button"
-                          className={cn(
-                            "flex w-full items-center justify-between gap-3 rounded-md p-4 text-left transition-colors hover:bg-muted/60 dark:hover:bg-muted/40",
-                            REFINED_FOCUS_RING,
-                          )}
-                          aria-expanded={postgresDetailsOpen}
-                          aria-controls="refined-postgres-details"
-                          onClick={() => setPostgresDetailsOpen((open) => !open)}
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", postgresDetailsOpen && "rotate-90")} />
-                            <span className={cn("min-w-0", REFINED_ROW_TITLE)}>Infrastructure · PostgreSQL</span>
-                          </span>
-                          <Badge variant={statusVariant(selectedProject?.postgres_status || "absent")} className="shrink-0">
-                            {selectedProject?.postgres_status || "absent"}
-                          </Badge>
-                        </button>
-                        {postgresDetailsOpen && (
-                          <div id="refined-postgres-details" className="grid gap-3 border-t p-4 sm:grid-cols-2">
-                            <div className="min-w-0 rounded-md bg-muted/55 p-3">
-                              <div className="text-xs text-muted-foreground">Conteneur</div>
-                              <div className={cn("mt-1 break-all", REFINED_IDENTIFIER)}>
-                                {selectedProject ? `postgresql-${selectedProject.name}` : "-"}
-                              </div>
-                            </div>
-                            <div className="min-w-0 rounded-md bg-muted/55 p-3">
-                              <div className="text-xs text-muted-foreground">Base Odoo ciblée</div>
-                              <div
-                                className={cn(
-                                  "mt-1 break-all",
-                                  selectedDb ? REFINED_IDENTIFIER : "text-sm text-muted-foreground",
-                                )}
-                              >
-                                {selectedDb || "Aucune base sélectionnée"}
-                              </div>
-                            </div>
-                            <p className="text-xs text-muted-foreground sm:col-span-2">
-                              La console psql s’ouvre depuis le menu « ⋯ » d’une base, dans le terminal du système.
-                            </p>
-                          </div>
-                        )}
-                      </RefinedPanel>
-                    </div>
-                  ) : (
-                    <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_400px] xl:items-start">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Bases Odoo</CardTitle>
-                          <CardDescription>Sélectionne l’environnement Odoo utilisé pour les modules et les actions.</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          {odooDatabases.length ? (
-                            <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-                              {odooDatabases.map((db) => (
+                        {odooDatabases.length ? (
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {odooDatabases.map((db) => (
+                              <div key={db} className="group relative min-w-0">
                                 <InteractiveCard
-                                  key={db}
+                                  aria-pressed={selectedDb === db}
                                   className={cn(
-                                    "min-w-0 p-4",
-                                    selectedDb === db && "border-primary bg-primary/[0.08] ring-1 ring-primary/25 dark:bg-primary/[0.14]",
+                                    "w-full min-w-0 p-4 pr-14",
+                                    selectedDb === db
+                                      ? "border-primary bg-primary/[0.10] ring-2 ring-primary/35 hover:bg-primary/[0.10] dark:bg-primary/[0.16] dark:hover:bg-primary/[0.16]"
+                                      : "hover:border-primary/35 hover:bg-muted/60 dark:hover:bg-muted/40",
                                   )}
                                   onClick={() => setSelectedDb(db)}
                                 >
-                                  <div className="flex min-w-0 items-start justify-between gap-2">
-                                    <span className="min-w-0 break-words font-medium">{db}</span>
+                                  <div className="flex min-w-0 items-start gap-2">
+                                    <span className={cn("min-w-0 break-all", REFINED_IDENTIFIER)}>{db}</span>
                                     {db === selectedDb && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
                                   </div>
-                                  <div className="mt-2 text-sm text-muted-foreground">
-                                    {selectedProject?.database_versions?.[db] || "Base Odoo"}
+                                  <div
+                                    className={cn(
+                                      "mt-2 text-xs",
+                                      db === selectedDb ? "font-medium text-primary" : "text-muted-foreground",
+                                    )}
+                                  >
+                                    {db === selectedDb
+                                      ? "Base de travail"
+                                      : selectedProject?.database_versions?.[db] || "Base Odoo"}
                                   </div>
                                 </InteractiveCard>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="rounded-md border border-dashed p-6 text-center">
-                              <Database className="mx-auto h-6 w-6 text-muted-foreground" />
-                              <p className="mt-3 font-medium">Aucune base Odoo</p>
-                              <p className="mt-1 text-sm text-muted-foreground">Crée une base pour commencer à utiliser ce projet.</p>
+                                <DropdownMenu.Root modal={false}>
+                                  <DropdownMenu.Trigger>
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className={cn(
+                                        "absolute right-2 top-2 h-9 w-9 transition-opacity focus-visible:opacity-100 data-[state=open]:opacity-100",
+                                        db !== selectedDb && "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100",
+                                      )}
+                                      disabled={loading}
+                                      title={`Actions sur ${db}`}
+                                      aria-label={`Actions sur ${db}`}
+                                    >
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenu.Trigger>
+                                  <DropdownMenu.Content align="end" className="min-w-60">
+                                    <DropdownMenu.Label>Maintenance</DropdownMenu.Label>
+                                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "regenerate_assets")}>
+                                      <Paintbrush className="h-4 w-4" />
+                                      Régénérer les assets
+                                    </DropdownMenu.Item>
+                                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "reset_translations")}>
+                                      <Languages className="h-4 w-4" />
+                                      Réinitialiser les traductions
+                                    </DropdownMenu.Item>
+                                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "neutralize")}>
+                                      <ShieldCheck className="h-4 w-4" />
+                                      Neutraliser et contrôler
+                                    </DropdownMenu.Item>
+                                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "admin_password")}>
+                                      <KeyRound className="h-4 w-4" />
+                                      Mot de passe admin
+                                    </DropdownMenu.Item>
+                                    <DropdownMenu.Separator />
+                                    <DropdownMenu.Label>Outils</DropdownMenu.Label>
+                                    <DropdownMenu.Item
+                                      disabled={selectedProject?.postgres_status !== "running" || openingPostgresql}
+                                      onSelect={() => runDatabaseAction(db, "psql")}
+                                    >
+                                      <Terminal className="h-4 w-4" />
+                                      Ouvrir psql
+                                    </DropdownMenu.Item>
+                                    <DropdownMenu.Separator />
+                                    <DropdownMenu.Label>Zone dangereuse</DropdownMenu.Label>
+                                    <DropdownMenu.Item color="red" onSelect={() => runDatabaseAction(db, "drop")}>
+                                      <Trash2 className="h-4 w-4" />
+                                      Supprimer la base
+                                    </DropdownMenu.Item>
+                                  </DropdownMenu.Content>
+                                </DropdownMenu.Root>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="rounded-md border border-dashed p-6 text-center">
+                            <Database className="mx-auto h-6 w-6 text-muted-foreground" />
+                            <p className="mt-3 font-medium">Aucune base Odoo</p>
+                            <p className="mt-1 text-sm text-muted-foreground">Crée une base pour commencer à utiliser ce projet.</p>
+                          </div>
+                        )}
+
+                        <RefinedPanel>
+                          <button
+                            type="button"
+                            className={cn(
+                              "flex w-full items-center justify-between gap-3 rounded-md p-4 text-left transition-colors hover:bg-muted/60 dark:hover:bg-muted/40",
+                              REFINED_FOCUS_RING,
+                            )}
+                            aria-expanded={postgresDetailsOpen}
+                            aria-controls="refined-postgres-details"
+                            onClick={() => setPostgresDetailsOpen((open) => !open)}
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", postgresDetailsOpen && "rotate-90")} />
+                              <span className={cn("min-w-0", REFINED_ROW_TITLE)}>Infrastructure · PostgreSQL</span>
+                            </span>
+                            <Badge variant={statusVariant(selectedProject?.postgres_status || "absent")} className="shrink-0">
+                              {selectedProject?.postgres_status || "absent"}
+                            </Badge>
+                          </button>
+                          {postgresDetailsOpen && (
+                            <div id="refined-postgres-details" className="grid gap-3 border-t p-4 sm:grid-cols-2">
+                              <div className="min-w-0 rounded-md bg-muted/55 p-3">
+                                <div className="text-xs text-muted-foreground">Conteneur</div>
+                                <div className={cn("mt-1 break-all", REFINED_IDENTIFIER)}>
+                                  {selectedProject ? `postgresql-${selectedProject.name}` : "-"}
+                                </div>
+                              </div>
+                              <div className="min-w-0 rounded-md bg-muted/55 p-3">
+                                <div className="text-xs text-muted-foreground">Base Odoo ciblée</div>
+                                <div
+                                  className={cn(
+                                    "mt-1 break-all",
+                                    selectedDb ? REFINED_IDENTIFIER : "text-sm text-muted-foreground",
+                                  )}
+                                >
+                                  {selectedDb || "Aucune base sélectionnée"}
+                                </div>
+                              </div>
+                              <p className="text-xs text-muted-foreground sm:col-span-2">
+                                La console psql s’ouvre depuis le menu « ⋯ » d’une base, dans le terminal du système.
+                              </p>
                             </div>
                           )}
-                        </CardContent>
-                      </Card>
-                      <div className="grid min-w-0 content-start gap-4">
+                        </RefinedPanel>
+                      </div>
+                    ) : (
+                      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_400px] xl:items-start">
                         <Card>
                           <CardHeader>
-                            <CardTitle>Créer une base Odoo</CardTitle>
-                            <CardDescription>Ajoute une nouvelle base métier au projet sélectionné.</CardDescription>
+                            <CardTitle>Bases Odoo</CardTitle>
+                            <CardDescription>Sélectionne l’environnement Odoo utilisé pour les modules et les actions.</CardDescription>
                           </CardHeader>
-                          <CardContent className="space-y-3">
-                            <Button className="w-full" disabled={!selectedProjectReady} onClick={() => setCreateDbOpen(true)}>
-                              <PlusCircle className="h-4 w-4" />
-                              Créer une base Odoo
-                            </Button>
-                            <Button
-                              className="w-full"
-                              variant="outline"
-                              disabled={!selectedProjectReady}
-                              onClick={() => setRestoreDbOpen(true)}
-                            >
-                              <Upload className="h-4 w-4" />
-                              Restaurer une sauvegarde ZIP
-                            </Button>
-                            {selectedProject && (
-                              <Button className="w-full" variant="ghost" onClick={() => openUrl(selectedProject.database_manager_url)}>
-                                <ExternalLink className="h-4 w-4" />
-                                Gestionnaire de bases Odoo
-                              </Button>
+                          <CardContent>
+                            {odooDatabases.length ? (
+                              <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                                {odooDatabases.map((db) => (
+                                  <InteractiveCard
+                                    key={db}
+                                    className={cn(
+                                      "min-w-0 p-4",
+                                      selectedDb === db && "border-primary bg-primary/[0.08] ring-1 ring-primary/25 dark:bg-primary/[0.14]",
+                                    )}
+                                    onClick={() => setSelectedDb(db)}
+                                  >
+                                    <div className="flex min-w-0 items-start justify-between gap-2">
+                                      <span className="min-w-0 break-words font-medium">{db}</span>
+                                      {db === selectedDb && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
+                                    </div>
+                                    <div className="mt-2 text-sm text-muted-foreground">
+                                      {selectedProject?.database_versions?.[db] || "Base Odoo"}
+                                    </div>
+                                  </InteractiveCard>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="rounded-md border border-dashed p-6 text-center">
+                                <Database className="mx-auto h-6 w-6 text-muted-foreground" />
+                                <p className="mt-3 font-medium">Aucune base Odoo</p>
+                                <p className="mt-1 text-sm text-muted-foreground">Crée une base pour commencer à utiliser ce projet.</p>
+                              </div>
                             )}
                           </CardContent>
                         </Card>
+                        <div className="grid min-w-0 content-start gap-4">
+                          <Card>
+                            <CardHeader>
+                              <CardTitle>Créer une base Odoo</CardTitle>
+                              <CardDescription>Ajoute une nouvelle base métier au projet sélectionné.</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                              <Button className="w-full" disabled={!selectedProjectReady} onClick={() => setCreateDbOpen(true)}>
+                                <PlusCircle className="h-4 w-4" />
+                                Créer une base Odoo
+                              </Button>
+                              <Button
+                                className="w-full"
+                                variant="outline"
+                                disabled={!selectedProjectReady}
+                                onClick={() => setRestoreDbOpen(true)}
+                              >
+                                <Upload className="h-4 w-4" />
+                                Restaurer une sauvegarde ZIP
+                              </Button>
+                              {selectedProject && (
+                                <Button className="w-full" variant="ghost" onClick={() => openUrl(selectedProject.database_manager_url)}>
+                                  <ExternalLink className="h-4 w-4" />
+                                  Gestionnaire de bases Odoo
+                                </Button>
+                              )}
+                            </CardContent>
+                          </Card>
 
-                        <Card>
-                          <CardHeader>
-                            <CardTitle>Neutraliser la base</CardTitle>
-                            <CardDescription>
-                              Coupe les crons métier et les serveurs de messagerie, puis vérifie le résultat.
-                            </CardDescription>
-                          </CardHeader>
-                          <CardContent className="space-y-3">
-                            <div className="min-w-0 rounded-md bg-muted/55 p-3 text-sm">
-                              <div className="text-muted-foreground">Base ciblée</div>
-                              <div className="mt-1 break-words font-medium">{selectedDb || "Aucune base sélectionnée"}</div>
-                            </div>
-                            <Button
-                              className="w-full"
-                              variant="outline"
-                              disabled={!canUseDb || loading}
-                              onClick={() => setNeutralizeDbOpen(true)}
-                            >
-                              <ShieldCheck className="h-4 w-4" />
-                              Neutraliser et contrôler
-                            </Button>
-                            <Button
-                              className="w-full"
-                              variant="outline"
-                              disabled={!canUseDb || loading}
-                              onClick={regenerateOdooAssets}
-                              title="Supprime les bundles CSS/JS compilés ; Odoo redémarre et les reconstruit au prochain chargement."
-                            >
-                              <Paintbrush className="h-4 w-4" />
-                              Régénérer les assets
-                            </Button>
-                            <Button className="w-full" variant="outline" disabled={!canUseDb || loading} onClick={openAllTranslationsReset}>
-                              <Languages className="h-4 w-4" />
-                              Réinitialiser les traductions
-                            </Button>
-                            <Button className="w-full" variant="outline" disabled={!canUseDb || loading} onClick={() => setAdminPasswordOpen(true)}>
-                              <KeyRound className="h-4 w-4" />
-                              Réinitialiser le mot de passe admin
-                            </Button>
-                            <Button
-                              className="w-full text-destructive hover:text-destructive"
-                              variant="outline"
-                              disabled={!canUseDb || loading}
-                              onClick={() => setDropDbOpen(true)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Supprimer la base
-                            </Button>
-                          </CardContent>
-                        </Card>
-
-                        <Card>
-                          <CardHeader>
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <CardTitle>Serveur PostgreSQL</CardTitle>
-                                <CardDescription className="mt-1">
-                                  Service technique qui stocke les bases Odoo. Il ne se sélectionne pas comme une base métier.
-                                </CardDescription>
+                          <Card>
+                            <CardHeader>
+                              <CardTitle>Neutraliser la base</CardTitle>
+                              <CardDescription>
+                                Coupe les crons métier et les serveurs de messagerie, puis vérifie le résultat.
+                              </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                              <div className="min-w-0 rounded-md bg-muted/55 p-3 text-sm">
+                                <div className="text-muted-foreground">Base ciblée</div>
+                                <div className="mt-1 break-words font-medium">{selectedDb || "Aucune base sélectionnée"}</div>
                               </div>
-                              <Badge variant={statusVariant(selectedProject?.postgres_status || "absent")} className="shrink-0">
-                                {selectedProject?.postgres_status || "absent"}
-                              </Badge>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="space-y-4">
-                            <div className="min-w-0 rounded-md bg-muted/55 p-3 text-sm">
-                              <div className="text-muted-foreground">Conteneur</div>
-                              <div className="mt-1 break-all font-medium">{selectedProject ? `postgresql-${selectedProject.name}` : "-"}</div>
-                              <div className="mt-3 text-muted-foreground">Base Odoo ciblée</div>
-                              <div className="mt-1 break-words font-medium">{selectedDb || "Aucune base sélectionnée"}</div>
-                            </div>
-                            <Button
-                              className="w-full"
-                              variant="outline"
-                              disabled={!canUseDb || selectedProject?.postgres_status !== "running" || openingPostgresql}
-                              onClick={openPostgresqlConsole}
-                            >
-                              {openingPostgresql ? <Loader2 className="h-4 w-4 animate-spin" /> : <Terminal className="h-4 w-4" />}
-                              Ouvrir psql
-                            </Button>
-                            <p className="text-xs text-muted-foreground">La console s’ouvre dans le terminal du système avec la base Odoo sélectionnée.</p>
-                          </CardContent>
-                        </Card>
-                      </div>
-                    </div>
-                  )}
-                </TabsContent>
-              )}
+                              <Button
+                                className="w-full"
+                                variant="outline"
+                                disabled={!canUseDb || loading}
+                                onClick={() => setNeutralizeDbOpen(true)}
+                              >
+                                <ShieldCheck className="h-4 w-4" />
+                                Neutraliser et contrôler
+                              </Button>
+                              <Button
+                                className="w-full"
+                                variant="outline"
+                                disabled={!canUseDb || loading}
+                                onClick={regenerateOdooAssets}
+                                title="Supprime les bundles CSS/JS compilés ; Odoo redémarre et les reconstruit au prochain chargement."
+                              >
+                                <Paintbrush className="h-4 w-4" />
+                                Régénérer les assets
+                              </Button>
+                              <Button className="w-full" variant="outline" disabled={!canUseDb || loading} onClick={openAllTranslationsReset}>
+                                <Languages className="h-4 w-4" />
+                                Réinitialiser les traductions
+                              </Button>
+                              <Button className="w-full" variant="outline" disabled={!canUseDb || loading} onClick={() => setAdminPasswordOpen(true)}>
+                                <KeyRound className="h-4 w-4" />
+                                Réinitialiser le mot de passe admin
+                              </Button>
+                              <Button
+                                className="w-full text-destructive hover:text-destructive"
+                                variant="outline"
+                                disabled={!canUseDb || loading}
+                                onClick={() => setDropDbOpen(true)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Supprimer la base
+                              </Button>
+                            </CardContent>
+                          </Card>
 
-              {selectedProjectOnline && (
-                <TabsContent value="modules">
-                  {refinedInterface ? (
-                    <div className="space-y-4">
-                      <RefinedSectionHeader
-                        title="Modules"
-                        count={filteredModules.length}
-                        description="Les actions s’appliquent à la base de travail sélectionnée."
-                        actions={
-                          <>
+                          <Card>
+                            <CardHeader>
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <CardTitle>Serveur PostgreSQL</CardTitle>
+                                  <CardDescription className="mt-1">
+                                    Service technique qui stocke les bases Odoo. Il ne se sélectionne pas comme une base métier.
+                                  </CardDescription>
+                                </div>
+                                <Badge variant={statusVariant(selectedProject?.postgres_status || "absent")} className="shrink-0">
+                                  {selectedProject?.postgres_status || "absent"}
+                                </Badge>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                              <div className="min-w-0 rounded-md bg-muted/55 p-3 text-sm">
+                                <div className="text-muted-foreground">Conteneur</div>
+                                <div className="mt-1 break-all font-medium">{selectedProject ? `postgresql-${selectedProject.name}` : "-"}</div>
+                                <div className="mt-3 text-muted-foreground">Base Odoo ciblée</div>
+                                <div className="mt-1 break-words font-medium">{selectedDb || "Aucune base sélectionnée"}</div>
+                              </div>
+                              <Button
+                                className="w-full"
+                                variant="outline"
+                                disabled={!canUseDb || selectedProject?.postgres_status !== "running" || openingPostgresql}
+                                onClick={openPostgresqlConsole}
+                              >
+                                {openingPostgresql ? <Loader2 className="h-4 w-4 animate-spin" /> : <Terminal className="h-4 w-4" />}
+                                Ouvrir psql
+                              </Button>
+                              <p className="text-xs text-muted-foreground">La console s’ouvre dans le terminal du système avec la base Odoo sélectionnée.</p>
+                            </CardContent>
+                          </Card>
+                        </div>
+                      </div>
+                    )}
+                  </TabsContent>
+                )}
+
+                {selectedProjectOnline && (
+                  <TabsContent value="modules">
+                    {refinedInterface ? (
+                      <div className="space-y-4">
+                        <RefinedSectionHeader
+                          title="Modules"
+                          count={filteredModules.length}
+                          description="Les actions s’appliquent à la base de travail sélectionnée."
+                          actions={
+                            <>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => void refreshModules()}
+                                disabled={loadingModules}
+                                aria-label="Actualiser la liste des modules"
+                                title="Actualiser la liste des modules"
+                              >
+                                <RefreshCcw className={cn("h-4 w-4", loadingModules && "animate-spin")} />
+                              </Button>
+                              {/* Les imports de code sont regroupés : ils mènent tous à « ajouter des modules au projet ».
+                                  Menus non modaux : le verrou de défilement de Radix détache l'en-tête et la barre latérale collés. */}
+                              <DropdownMenu.Root modal={false}>
+                                <DropdownMenu.Trigger>
+                                  <Button variant="outline" disabled={!selectedProjectReady}>
+                                    <PlusCircle className="h-4 w-4" />
+                                    Ajouter des modules
+                                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                  </Button>
+                                </DropdownMenu.Trigger>
+                                <DropdownMenu.Content align="end" className="min-w-64">
+                                  <DropdownMenu.Item disabled={loading} onSelect={() => setRepositoryOpen(true)}>
+                                    <CloudDownload className="h-4 w-4" />
+                                    Depuis un dépôt Git (SSH)
+                                  </DropdownMenu.Item>
+                                  <DropdownMenu.Item onSelect={() => setZipDialogOpen(true)}>
+                                    <FileArchive className="h-4 w-4" />
+                                    Depuis un pauvre zip
+                                  </DropdownMenu.Item>
+                                </DropdownMenu.Content>
+                              </DropdownMenu.Root>
+                              <Button variant="outline" onClick={openSocleDialog} disabled={!selectedProjectReady || loading}>
+                                <Boxes className="h-4 w-4" />
+                                Installer un socle
+                              </Button>
+                              <Button
+                                disabled={!selectedProjectReady || loading || checkingUpdatePrerequisites}
+                                onClick={requestUpdateAllOdooModules}
+                              >
+                                {checkingUpdatePrerequisites ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                                MAJ complète Odoo
+                              </Button>
+                            </>
+                          }
+                        />
+                        {moduleFiltersBlock}
+                        {moduleSelectionBlock}
+                        {/* overflow-clip arrondit les coins sans créer de conteneur de défilement, contrairement à
+                            overflow-hidden qui empêcherait l'en-tête de rester collé. L'en-tête reste donc un bandeau droit :
+                            des coins arrondis collés en haut laisseraient voir les lignes qui défilent derrière. */}
+                        <RefinedPanel className="overflow-clip">
+                          <div
+                            className="z-10 hidden border-b bg-card xl:sticky xl:block"
+                            style={{ top: stickyHeader ? projectHeaderHeight + projectTabsHeight : 0 }}
+                          >
+                            <div className={cn("grid items-center gap-3 bg-muted/60 px-3 py-2", REFINED_LABEL, REFINED_MODULE_COLUMNS)}>
+                              <div>Module</div>
+                              <div>État</div>
+                              <div>Version</div>
+                              <div>Origine</div>
+                              <div className="text-right">Actions</div>
+                            </div>
+                          </div>
+                          <div className="min-w-0">
+                            {visibleModules.length ? (
+                              visibleModules.map((module) => {
+                                const sourcePath = module.source_path || module.path;
+                                const linkPath = module.link_path || (module.path_kind?.startsWith("lien") ? module.path : "");
+                                const displaySourcePath = compactWorkspacePath(sourcePath, overview?.workspace);
+                                const displayLinkPath = compactWorkspacePath(linkPath, overview?.workspace);
+                                const samePaths = Boolean(linkPath && sourcePath && linkPath === sourcePath);
+                                const origin = normalizedModuleOrigin(module.origin, sourcePath);
+                                const moduleTitle = module.title || module.name;
+                                const showTechnicalName = moduleTitle !== module.name;
+                                const moduleSelected = selectedModules.has(module.name);
+                                return (
+                                  <div
+                                    key={module.name}
+                                    className={cn(
+                                      "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 xl:items-center",
+                                      REFINED_MODULE_COLUMNS,
+                                      moduleSelected
+                                        ? "bg-primary/[0.08] dark:bg-primary/[0.14]"
+                                        : "hover:bg-muted/60 dark:hover:bg-muted/40",
+                                    )}
+                                    onClick={(event) => toggleModuleFromRow(event, module.name)}
+                                  >
+                                    <label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
+                                      <Checkbox
+                                        className="mt-1"
+                                        aria-label={`Sélectionner ${module.name}`}
+                                        checked={moduleSelected}
+                                        onCheckedChange={(checked) => toggleModuleSelection(module.name, checked === true)}
+                                      />
+                                      <span className="min-w-0">
+                                        <span
+                                          className={cn(
+                                            "block",
+                                            showTechnicalName ? cn("break-words", REFINED_ROW_TITLE) : cn("break-all", REFINED_IDENTIFIER),
+                                          )}
+                                        >
+                                          {moduleTitle}
+                                        </span>
+                                        {showTechnicalName && (
+                                          <span className="mt-0.5 block break-all font-mono text-xs text-muted-foreground">{module.name}</span>
+                                        )}
+                                        {showModuleLocations && (
+                                          <span className="mt-1.5 block space-y-0.5 text-xs">
+                                            {module.path_kind && <span className="block text-muted-foreground">{module.path_kind}</span>}
+                                            <span className="block truncate font-mono text-teal-700 dark:text-teal-300" title={sourcePath}>
+                                              {displaySourcePath || "-"}
+                                            </span>
+                                            {displayLinkPath && !samePaths && (
+                                              <span className="block truncate font-mono text-blue-700 dark:text-blue-300" title={linkPath}>
+                                                {displayLinkPath}
+                                              </span>
+                                            )}
+                                          </span>
+                                        )}
+                                      </span>
+                                    </label>
+                                    <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
+                                      <span className="text-xs font-medium text-muted-foreground xl:hidden">État</span>
+                                      <ModuleStateBadge state={module.state} />
+                                    </div>
+                                    <div className="flex min-w-0 items-start justify-between gap-3 xl:block">
+                                      <span className="text-xs font-medium text-muted-foreground xl:hidden">Version</span>
+                                      <span className="min-w-0 break-all font-mono text-xs tabular-nums">
+                                        {module.installed_version || module.version || "-"}
+                                      </span>
+                                    </div>
+                                    <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
+                                      <span className="text-xs font-medium text-muted-foreground xl:hidden">Origine</span>
+                                      <Badge className="shrink-0" variant="outline">{moduleOriginLabel(origin)}</Badge>
+                                    </div>
+                                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                                      {module.state === "installed" ? (
+                                        <Button
+                                          className="w-full"
+                                          size="sm"
+                                          variant="accent"
+                                          disabled={!canUseDb}
+                                          onClick={() => createJob("update_module", { project: selectedProject?.name, db: selectedDb, modules: module.name })}
+                                        >
+                                          <RefreshCcw className="h-4 w-4" />
+                                          Mettre à jour
+                                        </Button>
+                                      ) : (
+                                        <Button
+                                          className="w-full"
+                                          size="sm"
+                                          variant="success"
+                                          disabled={!canUseDb}
+                                          onClick={() => createJob("install_module", { project: selectedProject?.name, db: selectedDb, modules: module.name })}
+                                        >
+                                          <PlusCircle className="h-4 w-4" />
+                                          Installer
+                                        </Button>
+                                      )}
+                                      <DropdownMenu.Root modal={false}>
+                                        <DropdownMenu.Trigger>
+                                          <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" title={`Autres actions pour ${module.name}`} aria-label={`Autres actions pour ${module.name}`}>
+                                            <MoreHorizontal className="h-4 w-4" />
+                                          </Button>
+                                        </DropdownMenu.Trigger>
+                                        <DropdownMenu.Content align="end" className="min-w-52">
+                                          <DropdownMenu.Label>Actions sur {module.name}</DropdownMenu.Label>
+                                          {module.state === "installed" && (
+                                            <DropdownMenu.Item disabled={!canUseDb} onSelect={() => requestTranslationReset([module.name])}>
+                                              <Languages className="h-4 w-4" />
+                                              Réinitialiser les traductions
+                                            </DropdownMenu.Item>
+                                          )}
+                                          {module.state === "installed" && (
+                                            <DropdownMenu.Item color="red" disabled={!canUseDb} onSelect={() => requestUninstall([module.name])}>
+                                              <PackageX className="h-4 w-4" />
+                                              Désinstaller de la base
+                                            </DropdownMenu.Item>
+                                          )}
+                                          {module.removal_mode !== "link_only" && (
+                                            <DropdownMenu.Item color="red" disabled={!module.removable} onSelect={() => requestDeleteCode([module.name])}>
+                                              <Trash2 className="h-4 w-4" />
+                                              Supprimer du projet
+                                            </DropdownMenu.Item>
+                                          )}
+                                          {module.state !== "installed" && module.removal_mode === "link_only" && (
+                                            <DropdownMenu.Item disabled>Module protégé</DropdownMenu.Item>
+                                          )}
+                                        </DropdownMenu.Content>
+                                      </DropdownMenu.Root>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              moduleEmptyState
+                            )}
+                          </div>
+                          {modulePaginationBlock}
+                        </RefinedPanel>
+                      </div>
+                    ) : (
+                    <Card>
+                      <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <CardTitle>Modules</CardTitle>
                             <Button
                               type="button"
                               size="icon"
@@ -4495,773 +4828,566 @@ export default function Home() {
                             >
                               <RefreshCcw className={cn("h-4 w-4", loadingModules && "animate-spin")} />
                             </Button>
-                            {/* Les imports de code sont regroupés : ils mènent tous à « ajouter des modules au projet ».
-                                Menus non modaux : le verrou de défilement de Radix détache l'en-tête et la barre latérale collés. */}
-                            <DropdownMenu.Root modal={false}>
-                              <DropdownMenu.Trigger>
-                                <Button variant="outline" disabled={!selectedProjectReady}>
-                                  <PlusCircle className="h-4 w-4" />
-                                  Ajouter des modules
-                                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                                </Button>
-                              </DropdownMenu.Trigger>
-                              <DropdownMenu.Content align="end" className="min-w-64">
-                                <DropdownMenu.Item disabled={loading} onSelect={() => setRepositoryOpen(true)}>
-                                  <CloudDownload className="h-4 w-4" />
-                                  Depuis un dépôt Git (SSH)
-                                </DropdownMenu.Item>
-                                <DropdownMenu.Item onSelect={() => setZipDialogOpen(true)}>
-                                  <FileArchive className="h-4 w-4" />
-                                  Depuis un pauvre zip
-                                </DropdownMenu.Item>
-                              </DropdownMenu.Content>
-                            </DropdownMenu.Root>
-                            <Button variant="outline" onClick={openSocleDialog} disabled={!selectedProjectReady || loading}>
-                              <Boxes className="h-4 w-4" />
-                              Installer un socle
-                            </Button>
-                            <Button
-                              disabled={!selectedProjectReady || loading || checkingUpdatePrerequisites}
-                              onClick={requestUpdateAllOdooModules}
-                            >
-                              {checkingUpdatePrerequisites ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-                              MAJ complète Odoo
-                            </Button>
-                          </>
-                        }
-                      />
-                      {moduleFiltersBlock}
-                      {moduleSelectionBlock}
-                      {/* overflow-clip arrondit les coins sans créer de conteneur de défilement, contrairement à
-                          overflow-hidden qui empêcherait l'en-tête de rester collé. L'en-tête reste donc un bandeau droit :
-                          des coins arrondis collés en haut laisseraient voir les lignes qui défilent derrière. */}
-                      <RefinedPanel className="overflow-clip">
-                        <div
-                          className="z-10 hidden border-b bg-card xl:sticky xl:block"
-                          style={{ top: stickyHeader ? projectHeaderHeight + projectTabsHeight : 0 }}
-                        >
-                          <div className={cn("grid items-center gap-3 bg-muted/60 px-3 py-2", REFINED_LABEL, REFINED_MODULE_COLUMNS)}>
+                          </div>
+                          <CardDescription>Recherche, sélection et mise à jour des modules de la base Odoo choisie.</CardDescription>
+                        </div>
+                        <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+                          <Button
+                            className="w-full"
+                            variant="outline"
+                            onClick={openSocleDialog}
+                            disabled={!selectedProjectReady || loading}
+                          >
+                            <Boxes className="h-4 w-4" />
+                            Installer un socle
+                          </Button>
+                          <Button
+                            className="w-full"
+                            disabled={!selectedProjectReady || loading || checkingUpdatePrerequisites}
+                            onClick={requestUpdateAllOdooModules}
+                          >
+                            {checkingUpdatePrerequisites ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                            MAJ complète Odoo
+                          </Button>
+                          <Button className="w-full" variant="outline" onClick={() => setRepositoryOpen(true)} disabled={!selectedProjectReady || loading}>
+                            <CloudDownload className="h-4 w-4" />
+                            Dépôt SSH · Ajout / MAJ
+                          </Button>
+                          <Button className="w-full" variant="outline" onClick={() => setZipDialogOpen(true)} disabled={!selectedProjectReady}>
+                            <FileArchive className="h-4 w-4" />
+                            Ajouter un pauvre zip
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="mb-4">{moduleFiltersBlock}</div>
+                        <div className="mb-3 space-y-3">{moduleSelectionBlock}</div>
+                        <div className="overflow-hidden rounded-md border">
+                          <div className={cn("hidden border-b bg-muted px-3 py-2 text-xs font-medium uppercase text-muted-foreground xl:grid xl:items-center xl:gap-3", moduleTableGridColumns)}>
                             <div>Module</div>
                             <div>État</div>
                             <div>Version</div>
                             <div>Origine</div>
+                            {showModuleLocations && <div>Emplacements</div>}
                             <div className="text-right">Actions</div>
                           </div>
-                        </div>
-                        <div className="min-w-0">
-                          {visibleModules.length ? (
-                            visibleModules.map((module) => {
-                              const sourcePath = module.source_path || module.path;
-                              const linkPath = module.link_path || (module.path_kind?.startsWith("lien") ? module.path : "");
-                              const displaySourcePath = compactWorkspacePath(sourcePath, overview?.workspace);
-                              const displayLinkPath = compactWorkspacePath(linkPath, overview?.workspace);
-                              const samePaths = Boolean(linkPath && sourcePath && linkPath === sourcePath);
-                              const origin = normalizedModuleOrigin(module.origin, sourcePath);
-                              const moduleTitle = module.title || module.name;
-                              const showTechnicalName = moduleTitle !== module.name;
-                              const moduleSelected = selectedModules.has(module.name);
-                              return (
-                                <div
-                                  key={module.name}
-                                  className={cn(
-                                    "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 xl:items-center",
-                                    REFINED_MODULE_COLUMNS,
-                                    moduleSelected
-                                      ? "bg-primary/[0.08] dark:bg-primary/[0.14]"
-                                      : "hover:bg-muted/60 dark:hover:bg-muted/40",
-                                  )}
-                                  onClick={(event) => toggleModuleFromRow(event, module.name)}
-                                >
-                                  <label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
-                                    <Checkbox
-                                      className="mt-1"
-                                      aria-label={`Sélectionner ${module.name}`}
-                                      checked={moduleSelected}
-                                      onCheckedChange={(checked) => toggleModuleSelection(module.name, checked === true)}
-                                    />
-                                    <span className="min-w-0">
-                                      <span
-                                        className={cn(
-                                          "block",
-                                          showTechnicalName ? cn("break-words", REFINED_ROW_TITLE) : cn("break-all", REFINED_IDENTIFIER),
-                                        )}
-                                      >
-                                        {moduleTitle}
-                                      </span>
-                                      {showTechnicalName && (
-                                        <span className="mt-0.5 block break-all font-mono text-xs text-muted-foreground">{module.name}</span>
-                                      )}
-                                      {showModuleLocations && (
-                                        <span className="mt-1.5 block space-y-0.5 text-xs">
-                                          {module.path_kind && <span className="block text-muted-foreground">{module.path_kind}</span>}
-                                          <span className="block truncate font-mono text-teal-700 dark:text-teal-300" title={sourcePath}>
-                                            {displaySourcePath || "-"}
-                                          </span>
-                                          {displayLinkPath && !samePaths && (
-                                            <span className="block truncate font-mono text-blue-700 dark:text-blue-300" title={linkPath}>
-                                              {displayLinkPath}
-                                            </span>
-                                          )}
-                                        </span>
-                                      )}
-                                    </span>
-                                  </label>
-                                  <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                                    <span className="text-xs font-medium text-muted-foreground xl:hidden">État</span>
-                                    <ModuleStateBadge state={module.state} />
-                                  </div>
-                                  <div className="flex min-w-0 items-start justify-between gap-3 xl:block">
-                                    <span className="text-xs font-medium text-muted-foreground xl:hidden">Version</span>
-                                    <span className="min-w-0 break-all font-mono text-xs tabular-nums">
-                                      {module.installed_version || module.version || "-"}
-                                    </span>
-                                  </div>
-                                  <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                                    <span className="text-xs font-medium text-muted-foreground xl:hidden">Origine</span>
-                                    <Badge className="shrink-0" variant="outline">{moduleOriginLabel(origin)}</Badge>
-                                  </div>
-                                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                                    {module.state === "installed" ? (
-                                      <Button
-                                        className="w-full"
-                                        size="sm"
-                                        variant="accent"
-                                        disabled={!canUseDb}
-                                        onClick={() => createJob("update_module", { project: selectedProject?.name, db: selectedDb, modules: module.name })}
-                                      >
-                                        <RefreshCcw className="h-4 w-4" />
-                                        Mettre à jour
-                                      </Button>
-                                    ) : (
-                                      <Button
-                                        className="w-full"
-                                        size="sm"
-                                        variant="success"
-                                        disabled={!canUseDb}
-                                        onClick={() => createJob("install_module", { project: selectedProject?.name, db: selectedDb, modules: module.name })}
-                                      >
-                                        <PlusCircle className="h-4 w-4" />
-                                        Installer
-                                      </Button>
+                          <div className="max-h-[min(62vh,720px)] min-w-0 overflow-y-auto">
+                            {visibleModules.length ? (
+                              visibleModules.map((module) => {
+                                const sourcePath = module.source_path || module.path;
+                                const linkPath = module.link_path || (module.path_kind?.startsWith("lien") ? module.path : "");
+                                const displaySourcePath = compactWorkspacePath(sourcePath, overview?.workspace);
+                                const displayLinkPath = compactWorkspacePath(linkPath, overview?.workspace);
+                                const samePaths = Boolean(linkPath && sourcePath && linkPath === sourcePath);
+                                const origin = normalizedModuleOrigin(module.origin, sourcePath);
+                                return (
+                                  <div
+                                    key={module.name}
+                                    className={cn(
+                                      "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 hover:bg-muted/35 xl:items-center",
+                                      moduleTableGridColumns,
+                                      selectedModules.has(module.name) && "bg-primary/[0.06] dark:bg-primary/[0.12]",
                                     )}
-                                    <DropdownMenu.Root modal={false}>
-                                      <DropdownMenu.Trigger>
-                                        <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" title={`Autres actions pour ${module.name}`} aria-label={`Autres actions pour ${module.name}`}>
-                                          <MoreHorizontal className="h-4 w-4" />
-                                        </Button>
-                                      </DropdownMenu.Trigger>
-                                      <DropdownMenu.Content align="end" className="min-w-52">
-                                        <DropdownMenu.Label>Actions sur {module.name}</DropdownMenu.Label>
-                                        {module.state === "installed" && (
-                                          <DropdownMenu.Item disabled={!canUseDb} onSelect={() => requestTranslationReset([module.name])}>
-                                            <Languages className="h-4 w-4" />
-                                            Réinitialiser les traductions
-                                          </DropdownMenu.Item>
-                                        )}
-                                        {module.state === "installed" && (
-                                          <DropdownMenu.Item color="red" disabled={!canUseDb} onSelect={() => requestUninstall([module.name])}>
-                                            <PackageX className="h-4 w-4" />
-                                            Désinstaller de la base
-                                          </DropdownMenu.Item>
-                                        )}
-                                        {module.removal_mode !== "link_only" && (
-                                          <DropdownMenu.Item color="red" disabled={!module.removable} onSelect={() => requestDeleteCode([module.name])}>
-                                            <Trash2 className="h-4 w-4" />
-                                            Supprimer du projet
-                                          </DropdownMenu.Item>
-                                        )}
-                                        {module.state !== "installed" && module.removal_mode === "link_only" && (
-                                          <DropdownMenu.Item disabled>Module protégé</DropdownMenu.Item>
-                                        )}
-                                      </DropdownMenu.Content>
-                                    </DropdownMenu.Root>
-                                  </div>
-                                </div>
-                              );
-                            })
-                          ) : (
-                            moduleEmptyState
-                          )}
-                        </div>
-                        {modulePaginationBlock}
-                      </RefinedPanel>
-                    </div>
-                  ) : (
-                  <Card>
-                    <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <CardTitle>Modules</CardTitle>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => void refreshModules()}
-                            disabled={loadingModules}
-                            aria-label="Actualiser la liste des modules"
-                            title="Actualiser la liste des modules"
-                          >
-                            <RefreshCcw className={cn("h-4 w-4", loadingModules && "animate-spin")} />
-                          </Button>
-                        </div>
-                        <CardDescription>Recherche, sélection et mise à jour des modules de la base Odoo choisie.</CardDescription>
-                      </div>
-                      <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
-                        <Button
-                          className="w-full"
-                          variant="outline"
-                          onClick={openSocleDialog}
-                          disabled={!selectedProjectReady || loading}
-                        >
-                          <Boxes className="h-4 w-4" />
-                          Installer un socle
-                        </Button>
-                        <Button
-                          className="w-full"
-                          disabled={!selectedProjectReady || loading || checkingUpdatePrerequisites}
-                          onClick={requestUpdateAllOdooModules}
-                        >
-                          {checkingUpdatePrerequisites ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-                          MAJ complète Odoo
-                        </Button>
-                        <Button className="w-full" variant="outline" onClick={() => setRepositoryOpen(true)} disabled={!selectedProjectReady || loading}>
-                          <CloudDownload className="h-4 w-4" />
-                          Dépôt SSH · Ajout / MAJ
-                        </Button>
-                        <Button className="w-full" variant="outline" onClick={() => setZipDialogOpen(true)} disabled={!selectedProjectReady}>
-                          <FileArchive className="h-4 w-4" />
-                          Ajouter un pauvre zip
-                        </Button>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="mb-4">{moduleFiltersBlock}</div>
-                      <div className="mb-3 space-y-3">{moduleSelectionBlock}</div>
-                      <div className="overflow-hidden rounded-md border">
-                        <div className={cn("hidden border-b bg-muted px-3 py-2 text-xs font-medium uppercase text-muted-foreground xl:grid xl:items-center xl:gap-3", moduleTableGridColumns)}>
-                          <div>Module</div>
-                          <div>État</div>
-                          <div>Version</div>
-                          <div>Origine</div>
-                          {showModuleLocations && <div>Emplacements</div>}
-                          <div className="text-right">Actions</div>
-                        </div>
-                        <div className="max-h-[min(62vh,720px)] min-w-0 overflow-y-auto">
-                          {visibleModules.length ? (
-                            visibleModules.map((module) => {
-                              const sourcePath = module.source_path || module.path;
-                              const linkPath = module.link_path || (module.path_kind?.startsWith("lien") ? module.path : "");
-                              const displaySourcePath = compactWorkspacePath(sourcePath, overview?.workspace);
-                              const displayLinkPath = compactWorkspacePath(linkPath, overview?.workspace);
-                              const samePaths = Boolean(linkPath && sourcePath && linkPath === sourcePath);
-                              const origin = normalizedModuleOrigin(module.origin, sourcePath);
-                              return (
-                                <div
-                                  key={module.name}
-                                  className={cn(
-                                    "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 hover:bg-muted/35 xl:items-center",
-                                    moduleTableGridColumns,
-                                    selectedModules.has(module.name) && "bg-primary/[0.06] dark:bg-primary/[0.12]",
-                                  )}
-                                  onClick={(event) => toggleModuleFromRow(event, module.name)}
-                                >
-                                  <label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
-                                    <Checkbox
-                                      className="mt-1"
-                                      aria-label={`Sélectionner ${module.name}`}
-                                      checked={selectedModules.has(module.name)}
-                                      onCheckedChange={(checked) => toggleModuleSelection(module.name, checked === true)}
-                                    />
-                                    <span className="min-w-0">
-                                      <div className="break-words font-medium">{module.name}</div>
-                                      <div className="mt-0.5 break-words text-xs text-muted-foreground">{module.title || module.name}</div>
-                                    </span>
-                                  </label>
-                                  <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                                    <span className="text-xs font-medium text-muted-foreground xl:hidden">État</span>
-                                    <ModuleStateBadge state={module.state} />
-                                  </div>
-                                  <div className="flex min-w-0 items-start justify-between gap-3 text-sm xl:block">
-                                    <span className="text-xs font-medium text-muted-foreground xl:hidden">Version</span>
-                                    <span className="min-w-0 break-words">{module.installed_version || module.version || "-"}</span>
-                                  </div>
-                                  <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                                    <span className="text-xs font-medium text-muted-foreground xl:hidden">Origine</span>
-                                    <Badge className="shrink-0" variant="outline">{moduleOriginLabel(origin)}</Badge>
-                                  </div>
-                                  {showModuleLocations && (
-                                    <div className="min-w-0">
-                                      <div className="mb-1 text-xs font-medium text-muted-foreground xl:hidden">Emplacements</div>
-                                      <div className="space-y-1">
-                                        {module.path_kind && (
-                                          <Badge className="w-fit max-w-full truncate" variant="outline" title={module.path_kind}>
-                                            {module.path_kind}
-                                          </Badge>
-                                        )}
-                                        <div className="min-w-0 text-xs">
-                                          <span className="font-medium text-teal-700 dark:text-teal-300">Source</span>
-                                          <div className="truncate font-mono text-teal-800 dark:text-teal-200" title={sourcePath}>
-                                            {displaySourcePath || "-"}
-                                          </div>
-                                        </div>
-                                        {displayLinkPath && !samePaths && (
+                                    onClick={(event) => toggleModuleFromRow(event, module.name)}
+                                  >
+                                    <label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
+                                      <Checkbox
+                                        className="mt-1"
+                                        aria-label={`Sélectionner ${module.name}`}
+                                        checked={selectedModules.has(module.name)}
+                                        onCheckedChange={(checked) => toggleModuleSelection(module.name, checked === true)}
+                                      />
+                                      <span className="min-w-0">
+                                        <div className="break-words font-medium">{module.name}</div>
+                                        <div className="mt-0.5 break-words text-xs text-muted-foreground">{module.title || module.name}</div>
+                                      </span>
+                                    </label>
+                                    <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
+                                      <span className="text-xs font-medium text-muted-foreground xl:hidden">État</span>
+                                      <ModuleStateBadge state={module.state} />
+                                    </div>
+                                    <div className="flex min-w-0 items-start justify-between gap-3 text-sm xl:block">
+                                      <span className="text-xs font-medium text-muted-foreground xl:hidden">Version</span>
+                                      <span className="min-w-0 break-words">{module.installed_version || module.version || "-"}</span>
+                                    </div>
+                                    <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
+                                      <span className="text-xs font-medium text-muted-foreground xl:hidden">Origine</span>
+                                      <Badge className="shrink-0" variant="outline">{moduleOriginLabel(origin)}</Badge>
+                                    </div>
+                                    {showModuleLocations && (
+                                      <div className="min-w-0">
+                                        <div className="mb-1 text-xs font-medium text-muted-foreground xl:hidden">Emplacements</div>
+                                        <div className="space-y-1">
+                                          {module.path_kind && (
+                                            <Badge className="w-fit max-w-full truncate" variant="outline" title={module.path_kind}>
+                                              {module.path_kind}
+                                            </Badge>
+                                          )}
                                           <div className="min-w-0 text-xs">
-                                            <span className="font-medium text-blue-700 dark:text-blue-300">Lien Odoo</span>
-                                            <div className="truncate font-mono text-blue-800 dark:text-blue-200" title={linkPath}>
-                                              {displayLinkPath}
+                                            <span className="font-medium text-teal-700 dark:text-teal-300">Source</span>
+                                            <div className="truncate font-mono text-teal-800 dark:text-teal-200" title={sourcePath}>
+                                              {displaySourcePath || "-"}
                                             </div>
                                           </div>
-                                        )}
+                                          {displayLinkPath && !samePaths && (
+                                            <div className="min-w-0 text-xs">
+                                              <span className="font-medium text-blue-700 dark:text-blue-300">Lien Odoo</span>
+                                              <div className="truncate font-mono text-blue-800 dark:text-blue-200" title={linkPath}>
+                                                {displayLinkPath}
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
+                                    )}
+                                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_40px] gap-2">
+                                      {module.state === "installed" ? (
+                                        <Button
+                                          className="w-full"
+                                          size="sm"
+                                          variant="accent"
+                                          disabled={!canUseDb}
+                                          onClick={() => createJob("update_module", { project: selectedProject?.name, db: selectedDb, modules: module.name })}
+                                        >
+                                          <RefreshCcw className="h-4 w-4" />
+                                          Mettre à jour
+                                        </Button>
+                                      ) : (
+                                        <Button
+                                          className="w-full"
+                                          size="sm"
+                                          variant="success"
+                                          disabled={!canUseDb}
+                                          onClick={() => createJob("install_module", { project: selectedProject?.name, db: selectedDb, modules: module.name })}
+                                        >
+                                          <PlusCircle className="h-4 w-4" />
+                                          Installer
+                                        </Button>
+                                      )}
+                                      <DropdownMenu.Root modal={false}>
+                                        <DropdownMenu.Trigger>
+                                          <Button size="icon" variant="outline" title={`Autres actions pour ${module.name}`} aria-label={`Autres actions pour ${module.name}`}>
+                                            <MoreHorizontal className="h-4 w-4" />
+                                          </Button>
+                                        </DropdownMenu.Trigger>
+                                        <DropdownMenu.Content align="end" className="min-w-52">
+                                          <DropdownMenu.Label>Actions sur {module.name}</DropdownMenu.Label>
+                                          {module.state === "installed" && (
+                                            <DropdownMenu.Item disabled={!canUseDb} onSelect={() => requestTranslationReset([module.name])}>
+                                              <Languages className="h-4 w-4" />
+                                              Réinitialiser les traductions
+                                            </DropdownMenu.Item>
+                                          )}
+                                          {module.state === "installed" && (
+                                            <DropdownMenu.Item color="red" disabled={!canUseDb} onSelect={() => requestUninstall([module.name])}>
+                                              <PackageX className="h-4 w-4" />
+                                              Désinstaller de la base
+                                            </DropdownMenu.Item>
+                                          )}
+                                          {module.removal_mode !== "link_only" && (
+                                            <DropdownMenu.Item color="red" disabled={!module.removable} onSelect={() => requestDeleteCode([module.name])}>
+                                              <Trash2 className="h-4 w-4" />
+                                              Supprimer du projet
+                                            </DropdownMenu.Item>
+                                          )}
+                                          {module.state !== "installed" && module.removal_mode === "link_only" && (
+                                            <DropdownMenu.Item disabled>Module protégé</DropdownMenu.Item>
+                                          )}
+                                        </DropdownMenu.Content>
+                                      </DropdownMenu.Root>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              moduleEmptyState
+                            )}
+                          </div>
+                          {modulePaginationBlock}
+                        </div>
+                      </CardContent>
+                    </Card>
+                    )}
+                  </TabsContent>
+                )}
+
+                <TabsContent value="logs">
+                  {refinedInterface ? (
+                    <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
+                      <div className="min-w-0 space-y-3">
+                        <RefinedSectionHeader
+                          title="Activité du projet"
+                          count={projectJobs.length}
+                          actions={
+                            projectJobs.length ? (
+                              <Button variant="outline" size="sm" onClick={clearJobs}>
+                                <Trash2 className="h-4 w-4" />
+                                Effacer
+                              </Button>
+                            ) : undefined
+                          }
+                        />
+                        {projectJobs.length ? (
+                          <div className="max-h-[min(62vh,680px)] min-w-0 space-y-2 overflow-y-auto pr-1">
+                            {projectJobs.map((job) => {
+                              const jobSelected = !scopedExternalLogView && selectedJob?.id === job.id;
+                              return (
+                                <div
+                                  key={job.id}
+                                  className={cn(
+                                    "min-w-0 rounded-md border bg-card transition-colors",
+                                    jobSelected
+                                      ? "border-primary bg-primary/[0.10] ring-2 ring-primary/35 dark:bg-primary/[0.16]"
+                                      : "hover:border-primary/35 hover:bg-muted/60 dark:hover:bg-muted/40",
+                                  )}
+                                >
+                                  <div className="flex min-w-0 items-start gap-1">
+                                    <button
+                                      type="button"
+                                      className={cn("min-w-0 flex-1 rounded-md p-3 text-left", REFINED_FOCUS_RING)}
+                                      aria-pressed={jobSelected}
+                                      title={job.title}
+                                      onClick={() => selectJob(job.id)}
+                                    >
+                                      <Badge variant={statusVariant(job.status)}>{statusLabel(job.status)}</Badge>
+                                      <span className="mt-2 line-clamp-2 break-words text-sm font-medium leading-5">{job.title}</span>
+                                      <span className="mt-1 block text-xs tabular-nums text-muted-foreground">{job.started_at}</span>
+                                      {job.status === "queued" && job.waiting_for && (
+                                        <span className="mt-1 block break-words text-xs text-muted-foreground">{job.waiting_for}</span>
+                                      )}
+                                    </button>
+                                    {!isJobUnfinished(job) && (
+                                      <Button
+                                        className="m-1 h-8 w-8 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                        variant="ghost"
+                                        size="icon"
+                                        title={`Supprimer l'historique ${job.title}`}
+                                        aria-label={`Supprimer l'historique ${job.title}`}
+                                        onClick={() => deleteJob(job.id)}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                  </div>
+                                  {isJobUnfinished(job) && (
+                                    <div className="px-3 pb-3">
+                                      <JobStopButton job={job} className="w-full" onRequest={setJobToCancelId} />
+                                      {job.status !== "cancelling" && jobStopUnavailableReason(job) && (
+                                        <p className="mt-1.5 break-words text-xs text-muted-foreground">{jobStopUnavailableReason(job)}</p>
+                                      )}
                                     </div>
                                   )}
-                                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_40px] gap-2">
-                                    {module.state === "installed" ? (
-                                      <Button
-                                        className="w-full"
-                                        size="sm"
-                                        variant="accent"
-                                        disabled={!canUseDb}
-                                        onClick={() => createJob("update_module", { project: selectedProject?.name, db: selectedDb, modules: module.name })}
-                                      >
-                                        <RefreshCcw className="h-4 w-4" />
-                                        Mettre à jour
-                                      </Button>
-                                    ) : (
-                                      <Button
-                                        className="w-full"
-                                        size="sm"
-                                        variant="success"
-                                        disabled={!canUseDb}
-                                        onClick={() => createJob("install_module", { project: selectedProject?.name, db: selectedDb, modules: module.name })}
-                                      >
-                                        <PlusCircle className="h-4 w-4" />
-                                        Installer
-                                      </Button>
-                                    )}
-                                    <DropdownMenu.Root modal={false}>
-                                      <DropdownMenu.Trigger>
-                                        <Button size="icon" variant="outline" title={`Autres actions pour ${module.name}`} aria-label={`Autres actions pour ${module.name}`}>
-                                          <MoreHorizontal className="h-4 w-4" />
-                                        </Button>
-                                      </DropdownMenu.Trigger>
-                                      <DropdownMenu.Content align="end" className="min-w-52">
-                                        <DropdownMenu.Label>Actions sur {module.name}</DropdownMenu.Label>
-                                        {module.state === "installed" && (
-                                          <DropdownMenu.Item disabled={!canUseDb} onSelect={() => requestTranslationReset([module.name])}>
-                                            <Languages className="h-4 w-4" />
-                                            Réinitialiser les traductions
-                                          </DropdownMenu.Item>
-                                        )}
-                                        {module.state === "installed" && (
-                                          <DropdownMenu.Item color="red" disabled={!canUseDb} onSelect={() => requestUninstall([module.name])}>
-                                            <PackageX className="h-4 w-4" />
-                                            Désinstaller de la base
-                                          </DropdownMenu.Item>
-                                        )}
-                                        {module.removal_mode !== "link_only" && (
-                                          <DropdownMenu.Item color="red" disabled={!module.removable} onSelect={() => requestDeleteCode([module.name])}>
-                                            <Trash2 className="h-4 w-4" />
-                                            Supprimer du projet
-                                          </DropdownMenu.Item>
-                                        )}
-                                        {module.state !== "installed" && module.removal_mode === "link_only" && (
-                                          <DropdownMenu.Item disabled>Module protégé</DropdownMenu.Item>
-                                        )}
-                                      </DropdownMenu.Content>
-                                    </DropdownMenu.Root>
-                                  </div>
                                 </div>
                               );
-                            })
-                          ) : (
-                            moduleEmptyState
-                          )}
-                        </div>
-                        {modulePaginationBlock}
-                      </div>
-                    </CardContent>
-                  </Card>
-                  )}
-                </TabsContent>
-              )}
-
-              <TabsContent value="logs">
-                {refinedInterface ? (
-                  <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
-                    <div className="min-w-0 space-y-3">
-                      <RefinedSectionHeader
-                        title="Activité du projet"
-                        count={projectJobs.length}
-                        actions={
-                          projectJobs.length ? (
-                            <Button variant="outline" size="sm" onClick={clearJobs}>
-                              <Trash2 className="h-4 w-4" />
-                              Effacer
-                            </Button>
-                          ) : undefined
-                        }
-                      />
-                      {projectJobs.length ? (
-                        <div className="max-h-[min(62vh,680px)] min-w-0 space-y-2 overflow-y-auto pr-1">
-                          {projectJobs.map((job) => {
-                            const jobSelected = !scopedExternalLogView && selectedJob?.id === job.id;
-                            return (
-                              <div
-                                key={job.id}
-                                className={cn(
-                                  "min-w-0 rounded-md border bg-card transition-colors",
-                                  jobSelected
-                                    ? "border-primary bg-primary/[0.10] ring-2 ring-primary/35 dark:bg-primary/[0.16]"
-                                    : "hover:border-primary/35 hover:bg-muted/60 dark:hover:bg-muted/40",
-                                )}
-                              >
-                                <div className="flex min-w-0 items-start gap-1">
-                                  <button
-                                    type="button"
-                                    className={cn("min-w-0 flex-1 rounded-md p-3 text-left", REFINED_FOCUS_RING)}
-                                    aria-pressed={jobSelected}
-                                    title={job.title}
-                                    onClick={() => selectJob(job.id)}
-                                  >
-                                    <Badge variant={statusVariant(job.status)}>{statusLabel(job.status)}</Badge>
-                                    <span className="mt-2 line-clamp-2 break-words text-sm font-medium leading-5">{job.title}</span>
-                                    <span className="mt-1 block text-xs tabular-nums text-muted-foreground">{job.started_at}</span>
-                                    {job.status === "queued" && job.waiting_for && (
-                                      <span className="mt-1 block break-words text-xs text-muted-foreground">{job.waiting_for}</span>
-                                    )}
-                                  </button>
-                                  {!isJobUnfinished(job) && (
-                                    <Button
-                                      className="m-1 h-8 w-8 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                                      variant="ghost"
-                                      size="icon"
-                                      title={`Supprimer l'historique ${job.title}`}
-                                      aria-label={`Supprimer l'historique ${job.title}`}
-                                      onClick={() => deleteJob(job.id)}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  )}
-                                </div>
-                                {isJobUnfinished(job) && (
-                                  <div className="px-3 pb-3">
-                                    <JobStopButton job={job} className="w-full" onRequest={setJobToCancelId} />
-                                    {job.status !== "cancelling" && jobStopUnavailableReason(job) && (
-                                      <p className="mt-1.5 break-words text-xs text-muted-foreground">{jobStopUnavailableReason(job)}</p>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <RefinedPanel className="border-dashed p-6 text-center">
-                          <Logs className="mx-auto h-6 w-6 text-muted-foreground" />
-                          <p className="mt-3 font-medium">Aucune action enregistrée</p>
-                          <p className="mt-1 text-sm text-muted-foreground">Les prochaines opérations apparaîtront ici avec leur statut.</p>
-                        </RefinedPanel>
-                      )}
-                    </div>
-
-                    <RefinedPanel>
-                      <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
-                        <div className="min-w-[min(100%,18rem)] flex-1">
-                          <h3 className="break-words text-sm font-semibold">{displayedOutputTitle}</h3>
-                          {outputTitleIsLong && (
-                            <button
-                              type="button"
-                              className={cn("mt-1 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline", REFINED_FOCUS_RING)}
-                              aria-expanded={logDescriptionExpanded}
-                              onClick={() => setLogDescriptionExpanded((expanded) => !expanded)}
-                            >
-                              {logDescriptionExpanded ? "Voir moins" : "Voir plus"}
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button variant="outline" size="sm" onClick={showDiagnostics} disabled={!selectedProjectReady}>
-                            <Activity className="h-4 w-4" />
-                            Diagnostic
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={() => showLogs()} disabled={!selectedProjectReady}>
-                            <Logs className="h-4 w-4" />
-                            Logs Odoo
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={copyOutput}>
-                            <Copy className="h-4 w-4" />
-                            Copier
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="min-w-0 p-4">
-                        {!scopedExternalLogView && selectedJob && <JobCancelState job={selectedJob} action={selectedJobStop} />}
-                        {!scopedExternalLogView && selectedJob && isJobActive(selectedJob) && (
-                          <JobProgressPanel
-                            label={outputProgress?.label || selectedJob.last_line || selectedJob.lines.at(-1) || "Traitement en cours"}
-                            percent={outputProgressPercent}
-                            action={selectedJobStop}
-                          />
-                        )}
-                        {finishedJobSummary && (
-                          <div
-                            className={cn(
-                              "mb-3 rounded-md border p-4",
-                              finishedJobSummary.status === "error"
-                                ? "border-destructive/30 bg-destructive/[0.08]"
-                                : finishedJobSummary.status === "cancelled"
-                                  ? "border-amber-500/30 bg-amber-500/[0.08]"
-                                  : "border-emerald-500/25 bg-emerald-500/[0.08]",
-                            )}
-                          >
-                            <div className="flex items-center gap-2 text-sm font-semibold">
-                              {finishedJobSummary.status === "error" ? (
-                                <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-                              ) : finishedJobSummary.status === "cancelled" ? (
-                                <Square className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                              ) : (
-                                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-                              )}
-                              {finishedJobSummary.status === "error"
-                                ? "Opération en erreur"
-                                : finishedJobSummary.status === "cancelled"
-                                  ? "Opération arrêtée"
-                                  : "Opération réussie"}
-                            </div>
-                            <p className="mt-1 break-words text-sm text-muted-foreground">
-                              {finishedJobSummary.error_message || (
-                                <>
-                                  Terminée le{" "}
-                                  <span className="tabular-nums">{finishedJobSummary.finished_at || finishedJobSummary.started_at}</span>.
-                                </>
-                              )}
-                            </p>
-                            <Button
-                              className="mt-3"
-                              variant="outline"
-                              size="sm"
-                              aria-expanded={rawOutputVisible}
-                              onClick={() => setRawOutputVisible((visible) => !visible)}
-                            >
-                              {rawOutputVisible ? "Masquer la sortie brute" : "Afficher la sortie brute"}
-                            </Button>
+                            })}
                           </div>
-                        )}
-                        <OdooLogsModeBar view={scopedExternalLogView} onShowFull={() => showLogs(true)} onShowSummary={() => showLogs()} />
-                        <JobOutputPre
-                          outputRef={logOutputRef}
-                          content={outputContent}
-                          hidden={rawOutputHidden}
-                          onScroll={handleLogOutputScroll}
-                        />
-                      </div>
-                    </RefinedPanel>
-                  </div>
-                ) : (
-                  <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(340px,400px)_minmax(0,1fr)]">
-                    <Card className="min-w-0">
-                      <CardHeader className="gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0">
-                          <CardTitle>Historique</CardTitle>
-                          <CardDescription>Actions du projet sélectionné.</CardDescription>
-                        </div>
-                        <Button className="w-full shrink-0 sm:w-auto" variant="outline" size="sm" onClick={clearJobs}>
-                          <Trash2 className="h-4 w-4" />
-                          Effacer
-                        </Button>
-                      </CardHeader>
-                      <CardContent className="max-h-[min(62vh,680px)] min-w-0 space-y-3 overflow-y-auto">
-                        {projectJobs.length ? projectJobs.map((job) => (
-                          <div
-                            key={job.id}
-                            className={cn(
-                              "group grid h-[172px] min-w-0 grid-rows-[minmax(0,1fr)_36px] gap-2 rounded-md border bg-card p-3 shadow-sm transition-[background-color,border-color,box-shadow] hover:border-primary/40 hover:shadow-md",
-                              !scopedExternalLogView && selectedJob?.id === job.id && "border-primary bg-primary/[0.08] ring-1 ring-primary/25 dark:bg-primary/[0.14]",
-                            )}
-                          >
-                            <button
-                              type="button"
-                              className="grid min-h-0 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md p-2 text-left transition-colors hover:bg-primary/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-primary/[0.12]"
-                              aria-pressed={!scopedExternalLogView && selectedJob?.id === job.id}
-                              title={job.title}
-                              onClick={() => selectJob(job.id)}
-                            >
-                              <span className="flex h-full min-w-0 flex-col justify-between gap-2">
-                                <span className="line-clamp-3 break-words text-sm font-semibold leading-5">{job.title}</span>
-                                <span className="block text-xs tabular-nums text-muted-foreground">
-                                  {job.status === "queued" && job.waiting_for ? job.waiting_for : job.started_at}
-                                </span>
-                              </span>
-                              <Badge className="min-w-[74px] shrink-0 justify-self-end" variant={statusVariant(job.status)}>
-                                {statusLabel(job.status)}
-                              </Badge>
-                            </button>
-                            {isJobUnfinished(job) ? (
-                              <JobStopButton job={job} className="w-full" onRequest={setJobToCancelId} />
-                            ) : (
-                              <Button
-                                className="w-full border-red-300 text-red-700 hover:border-red-400 hover:bg-red-50 hover:text-red-800 active:bg-red-100 focus-visible:ring-red-500 dark:border-red-800 dark:text-red-300 dark:hover:border-red-700 dark:hover:bg-red-950/60 dark:hover:text-red-200 dark:active:bg-red-950"
-                                variant="outline"
-                                size="sm"
-                                title={`Supprimer l'historique ${job.title}`}
-                                aria-label={`Supprimer l'historique ${job.title}`}
-                                onClick={() => deleteJob(job.id)}
-                              >
-                                Supprimer
-                              </Button>
-                            )}
-                          </div>
-                        )) : (
-                          <div className="rounded-md border border-dashed p-6 text-center">
+                        ) : (
+                          <RefinedPanel className="border-dashed p-6 text-center">
                             <Logs className="mx-auto h-6 w-6 text-muted-foreground" />
                             <p className="mt-3 font-medium">Aucune action enregistrée</p>
                             <p className="mt-1 text-sm text-muted-foreground">Les prochaines opérations apparaîtront ici avec leur statut.</p>
-                          </div>
+                          </RefinedPanel>
                         )}
-                      </CardContent>
-                    </Card>
-                    <Card className="min-w-0">
-                      <CardHeader className="min-w-0 gap-3 min-[1900px]:flex-row min-[1900px]:items-start min-[1900px]:justify-between">
-                        <div className="min-w-0 flex-1">
-                          <CardTitle>Sortie</CardTitle>
-                          <CardDescription className="break-words">{displayedOutputTitle}</CardDescription>
-                          {outputTitleIsLong && (
-                            <button
-                              type="button"
-                              className="mt-1 text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                              aria-expanded={logDescriptionExpanded}
-                              onClick={() => setLogDescriptionExpanded((expanded) => !expanded)}
-                            >
-                              {logDescriptionExpanded ? "Voir moins" : "Voir plus"}
-                            </button>
-                          )}
-                        </div>
-                        <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-3 min-[1900px]:w-auto min-[1900px]:shrink-0">
-                          <Button className="w-full justify-start sm:justify-center" variant="outline" size="sm" onClick={showDiagnostics} disabled={!selectedProjectReady}>
-                            <Activity className="h-4 w-4" />
-                            Diagnostic
-                          </Button>
-                          <Button className="w-full justify-start sm:justify-center" variant="outline" size="sm" onClick={() => showLogs()} disabled={!selectedProjectReady}>
-                            <Logs className="h-4 w-4" />
-                            Logs Odoo
-                          </Button>
-                          <Button
-                            className="w-full justify-start sm:justify-center"
-                            variant="outline"
-                            size="sm"
-                            onClick={copyOutput}
-                          >
-                            <Copy className="h-4 w-4" />
-                            Copier
-                          </Button>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="min-w-0">
-                        {!scopedExternalLogView && selectedJob && <JobCancelState job={selectedJob} action={selectedJobStop} />}
-                        {!scopedExternalLogView && selectedJob && isJobActive(selectedJob) && (
-                          <JobProgressPanel
-                            label={outputProgress?.label || selectedJob.last_line || selectedJob.lines.at(-1) || "Traitement en cours"}
-                            percent={outputProgressPercent}
-                            action={selectedJobStop}
-                          />
-                        )}
-                        <OdooLogsModeBar view={scopedExternalLogView} onShowFull={() => showLogs(true)} onShowSummary={() => showLogs()} />
-                        <JobOutputPre outputRef={logOutputRef} content={outputContent} onScroll={handleLogOutputScroll} />
-                      </CardContent>
-                    </Card>
-                  </div>
-                )}
-              </TabsContent>
+                      </div>
 
-              <TabsContent value="actions">
-                {refinedInterface ? (
-                  <div className="space-y-5">
-                    <RefinedSectionHeader
-                      title="Réglages du projet"
-                      description={selectedProject ? `Paramètres et actions de ${selectedProject.name}.` : undefined}
-                    />
-                    <RefinedPanel>
-                      <RefinedRow
-                        title="Environnement"
-                        description={selectedProject?.odoo_version ? `Odoo ${selectedProject.odoo_version} · Docker` : "Docker"}
-                      >
-                        {selectedProject && (
-                          <Button variant="outline" onClick={() => openUrl(selectedProject.url)}>
-                            <ExternalLink className="h-4 w-4" />
-                            Ouvrir Odoo
+                      <RefinedPanel>
+                        <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
+                          <div className="min-w-[min(100%,18rem)] flex-1">
+                            <h3 className="break-words text-sm font-semibold">{displayedOutputTitle}</h3>
+                            {outputTitleIsLong && (
+                              <button
+                                type="button"
+                                className={cn("mt-1 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline", REFINED_FOCUS_RING)}
+                                aria-expanded={logDescriptionExpanded}
+                                onClick={() => setLogDescriptionExpanded((expanded) => !expanded)}
+                              >
+                                {logDescriptionExpanded ? "Voir moins" : "Voir plus"}
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button variant="outline" size="sm" onClick={showDiagnostics} disabled={!selectedProjectReady}>
+                              <Activity className="h-4 w-4" />
+                              Diagnostic
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => showLogs()} disabled={!selectedProjectReady}>
+                              <Logs className="h-4 w-4" />
+                              Logs Odoo
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={copyOutput}>
+                              <Copy className="h-4 w-4" />
+                              Copier
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="min-w-0 p-4">
+                          {!scopedExternalLogView && selectedJob && <JobCancelState job={selectedJob} action={selectedJobStop} />}
+                          {!scopedExternalLogView && selectedJob && isJobActive(selectedJob) && (
+                            <JobProgressPanel
+                              label={outputProgress?.label || selectedJob.last_line || selectedJob.lines.at(-1) || "Traitement en cours"}
+                              percent={outputProgressPercent}
+                              action={selectedJobStop}
+                            />
+                          )}
+                          {finishedJobSummary && (
+                            <div
+                              className={cn(
+                                "mb-3 rounded-md border p-4",
+                                finishedJobSummary.status === "error"
+                                  ? "border-destructive/30 bg-destructive/[0.08]"
+                                  : finishedJobSummary.status === "cancelled"
+                                    ? "border-amber-500/30 bg-amber-500/[0.08]"
+                                    : "border-emerald-500/25 bg-emerald-500/[0.08]",
+                              )}
+                            >
+                              <div className="flex items-center gap-2 text-sm font-semibold">
+                                {finishedJobSummary.status === "error" ? (
+                                  <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+                                ) : finishedJobSummary.status === "cancelled" ? (
+                                  <Square className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                                ) : (
+                                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                                )}
+                                {finishedJobSummary.status === "error"
+                                  ? "Opération en erreur"
+                                  : finishedJobSummary.status === "cancelled"
+                                    ? "Opération arrêtée"
+                                    : "Opération réussie"}
+                              </div>
+                              <p className="mt-1 break-words text-sm text-muted-foreground">
+                                {finishedJobSummary.error_message || (
+                                  <>
+                                    Terminée le{" "}
+                                    <span className="tabular-nums">{finishedJobSummary.finished_at || finishedJobSummary.started_at}</span>.
+                                  </>
+                                )}
+                              </p>
+                              <Button
+                                className="mt-3"
+                                variant="outline"
+                                size="sm"
+                                aria-expanded={rawOutputVisible}
+                                onClick={() => setRawOutputVisible((visible) => !visible)}
+                              >
+                                {rawOutputVisible ? "Masquer la sortie brute" : "Afficher la sortie brute"}
+                              </Button>
+                            </div>
+                          )}
+                          <OdooLogsModeBar view={scopedExternalLogView} onShowFull={() => showLogs(true)} onShowSummary={() => showLogs()} />
+                          <JobOutputPre
+                            outputRef={logOutputRef}
+                            content={outputContent}
+                            hidden={rawOutputHidden}
+                            onScroll={handleLogOutputScroll}
+                          />
+                        </div>
+                      </RefinedPanel>
+                    </div>
+                  ) : (
+                    <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(340px,400px)_minmax(0,1fr)]">
+                      <Card className="min-w-0">
+                        <CardHeader className="gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <CardTitle>Historique</CardTitle>
+                            <CardDescription>Actions du projet sélectionné.</CardDescription>
+                          </div>
+                          <Button className="w-full shrink-0 sm:w-auto" variant="outline" size="sm" onClick={clearJobs}>
+                            <Trash2 className="h-4 w-4" />
+                            Effacer
                           </Button>
+                        </CardHeader>
+                        <CardContent className="max-h-[min(62vh,680px)] min-w-0 space-y-3 overflow-y-auto">
+                          {projectJobs.length ? projectJobs.map((job) => (
+                            <div
+                              key={job.id}
+                              className={cn(
+                                "group grid h-[172px] min-w-0 grid-rows-[minmax(0,1fr)_36px] gap-2 rounded-md border bg-card p-3 shadow-sm transition-[background-color,border-color,box-shadow] hover:border-primary/40 hover:shadow-md",
+                                !scopedExternalLogView && selectedJob?.id === job.id && "border-primary bg-primary/[0.08] ring-1 ring-primary/25 dark:bg-primary/[0.14]",
+                              )}
+                            >
+                              <button
+                                type="button"
+                                className="grid min-h-0 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md p-2 text-left transition-colors hover:bg-primary/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-primary/[0.12]"
+                                aria-pressed={!scopedExternalLogView && selectedJob?.id === job.id}
+                                title={job.title}
+                                onClick={() => selectJob(job.id)}
+                              >
+                                <span className="flex h-full min-w-0 flex-col justify-between gap-2">
+                                  <span className="line-clamp-3 break-words text-sm font-semibold leading-5">{job.title}</span>
+                                  <span className="block text-xs tabular-nums text-muted-foreground">
+                                    {job.status === "queued" && job.waiting_for ? job.waiting_for : job.started_at}
+                                  </span>
+                                </span>
+                                <Badge className="min-w-[74px] shrink-0 justify-self-end" variant={statusVariant(job.status)}>
+                                  {statusLabel(job.status)}
+                                </Badge>
+                              </button>
+                              {isJobUnfinished(job) ? (
+                                <JobStopButton job={job} className="w-full" onRequest={setJobToCancelId} />
+                              ) : (
+                                <Button
+                                  className="w-full border-red-300 text-red-700 hover:border-red-400 hover:bg-red-50 hover:text-red-800 active:bg-red-100 focus-visible:ring-red-500 dark:border-red-800 dark:text-red-300 dark:hover:border-red-700 dark:hover:bg-red-950/60 dark:hover:text-red-200 dark:active:bg-red-950"
+                                  variant="outline"
+                                  size="sm"
+                                  title={`Supprimer l'historique ${job.title}`}
+                                  aria-label={`Supprimer l'historique ${job.title}`}
+                                  onClick={() => deleteJob(job.id)}
+                                >
+                                  Supprimer
+                                </Button>
+                              )}
+                            </div>
+                          )) : (
+                            <div className="rounded-md border border-dashed p-6 text-center">
+                              <Logs className="mx-auto h-6 w-6 text-muted-foreground" />
+                              <p className="mt-3 font-medium">Aucune action enregistrée</p>
+                              <p className="mt-1 text-sm text-muted-foreground">Les prochaines opérations apparaîtront ici avec leur statut.</p>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                      <Card className="min-w-0">
+                        <CardHeader className="min-w-0 gap-3 min-[1900px]:flex-row min-[1900px]:items-start min-[1900px]:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <CardTitle>Sortie</CardTitle>
+                            <CardDescription className="break-words">{displayedOutputTitle}</CardDescription>
+                            {outputTitleIsLong && (
+                              <button
+                                type="button"
+                                className="mt-1 text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                aria-expanded={logDescriptionExpanded}
+                                onClick={() => setLogDescriptionExpanded((expanded) => !expanded)}
+                              >
+                                {logDescriptionExpanded ? "Voir moins" : "Voir plus"}
+                              </button>
+                            )}
+                          </div>
+                          <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-3 min-[1900px]:w-auto min-[1900px]:shrink-0">
+                            <Button className="w-full justify-start sm:justify-center" variant="outline" size="sm" onClick={showDiagnostics} disabled={!selectedProjectReady}>
+                              <Activity className="h-4 w-4" />
+                              Diagnostic
+                            </Button>
+                            <Button className="w-full justify-start sm:justify-center" variant="outline" size="sm" onClick={() => showLogs()} disabled={!selectedProjectReady}>
+                              <Logs className="h-4 w-4" />
+                              Logs Odoo
+                            </Button>
+                            <Button
+                              className="w-full justify-start sm:justify-center"
+                              variant="outline"
+                              size="sm"
+                              onClick={copyOutput}
+                            >
+                              <Copy className="h-4 w-4" />
+                              Copier
+                            </Button>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="min-w-0">
+                          {!scopedExternalLogView && selectedJob && <JobCancelState job={selectedJob} action={selectedJobStop} />}
+                          {!scopedExternalLogView && selectedJob && isJobActive(selectedJob) && (
+                            <JobProgressPanel
+                              label={outputProgress?.label || selectedJob.last_line || selectedJob.lines.at(-1) || "Traitement en cours"}
+                              percent={outputProgressPercent}
+                              action={selectedJobStop}
+                            />
+                          )}
+                          <OdooLogsModeBar view={scopedExternalLogView} onShowFull={() => showLogs(true)} onShowSummary={() => showLogs()} />
+                          <JobOutputPre outputRef={logOutputRef} content={outputContent} onScroll={handleLogOutputScroll} />
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="actions">
+                  {refinedInterface ? (
+                    <div className="space-y-5">
+                      <RefinedSectionHeader
+                        title="Réglages du projet"
+                        description={selectedProject ? `Paramètres et actions de ${selectedProject.name}.` : undefined}
+                      />
+                      <RefinedPanel>
+                        <RefinedRow
+                          title="Environnement"
+                          description={selectedProject?.odoo_version ? `Odoo ${selectedProject.odoo_version} · Docker` : "Docker"}
+                        >
+                          {selectedProject && (
+                            <Button variant="outline" onClick={() => openUrl(selectedProject.url)}>
+                              <ExternalLink className="h-4 w-4" />
+                              Ouvrir Odoo
+                            </Button>
+                          )}
+                        </RefinedRow>
+                        {settings?.show_technical_details && (
+                          <RefinedRow
+                            className="border-t"
+                            title="Code et images"
+                            description="Met à jour les sources et images Docker."
+                          >
+                            <Button variant="outline" disabled={!selectedProjectReady} onClick={() => createJob("update_project", { project: selectedProject?.name })}>
+                              <CloudDownload className="h-4 w-4" />
+                              MAJ projet
+                            </Button>
+                            <Button variant="outline" onClick={() => createJob("update_all")}>
+                              <CloudDownload className="h-4 w-4" />
+                              MAJ tous les projets
+                            </Button>
+                          </RefinedRow>
                         )}
-                      </RefinedRow>
-                      {settings?.show_technical_details && (
                         <RefinedRow
                           className="border-t"
-                          title="Code et images"
-                          description="Met à jour les sources et images Docker."
+                          title="Suppression du projet"
+                          description={
+                            <>
+                              Action définitive. Le projet est déplacé dans <code className="text-xs">.odoo_manager_deleted</code> et le
+                              nom devra être saisi pour confirmer.
+                            </>
+                          }
                         >
-                          <Button variant="outline" disabled={!selectedProjectReady} onClick={() => createJob("update_project", { project: selectedProject?.name })}>
-                            <CloudDownload className="h-4 w-4" />
-                            MAJ projet
-                          </Button>
-                          <Button variant="outline" onClick={() => createJob("update_all")}>
-                            <CloudDownload className="h-4 w-4" />
-                            MAJ tous les projets
+                          <Button variant="destructive" disabled={!selectedProjectReady} onClick={() => setDeleteDialogOpen(true)}>
+                            <Trash2 className="h-4 w-4" />
+                            Supprimer le projet…
                           </Button>
                         </RefinedRow>
+                      </RefinedPanel>
+                    </div>
+                  ) : (
+                    <div className={cn("grid gap-4", settings?.show_technical_details && "xl:grid-cols-2")}>
+                      {settings?.show_technical_details && (
+                        <Card>
+                          <CardHeader>
+                            <CardTitle>Code et images</CardTitle>
+                            <CardDescription>Met à jour les sources et images Docker.</CardDescription>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            <Button className="w-full" variant="outline" disabled={!selectedProjectReady} onClick={() => createJob("update_project", { project: selectedProject?.name })}>
+                              <CloudDownload className="h-4 w-4" />
+                              MAJ projet
+                            </Button>
+                            <Button className="w-full" onClick={() => createJob("update_all")}>
+                              <CloudDownload className="h-4 w-4" />
+                              MAJ tous les projets
+                            </Button>
+                          </CardContent>
+                        </Card>
                       )}
-                      <RefinedRow
-                        className="border-t"
-                        title="Suppression du projet"
-                        description={
-                          <>
-                            Action définitive. Le projet est déplacé dans <code className="text-xs">.odoo_manager_deleted</code> et le
-                            nom devra être saisi pour confirmer.
-                          </>
-                        }
-                      >
-                        <Button variant="destructive" disabled={!selectedProjectReady} onClick={() => setDeleteDialogOpen(true)}>
-                          <Trash2 className="h-4 w-4" />
-                          Supprimer le projet…
-                        </Button>
-                      </RefinedRow>
-                    </RefinedPanel>
-                  </div>
-                ) : (
-                  <div className={cn("grid gap-4", settings?.show_technical_details && "xl:grid-cols-2")}>
-                    {settings?.show_technical_details && (
                       <Card>
                         <CardHeader>
-                          <CardTitle>Code et images</CardTitle>
-                          <CardDescription>Met à jour les sources et images Docker.</CardDescription>
+                          <CardTitle>Zone sensible</CardTitle>
+                          <CardDescription>Suppression du projet local sélectionné.</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-2">
-                          <Button className="w-full" variant="outline" disabled={!selectedProjectReady} onClick={() => createJob("update_project", { project: selectedProject?.name })}>
-                            <CloudDownload className="h-4 w-4" />
-                            MAJ projet
-                          </Button>
-                          <Button className="w-full" onClick={() => createJob("update_all")}>
-                            <CloudDownload className="h-4 w-4" />
-                            MAJ tous les projets
+                          <Button className="w-full" variant="destructive" disabled={!selectedProjectReady} onClick={() => setDeleteDialogOpen(true)}>
+                            <Trash2 className="h-4 w-4" />
+                            Supprimer projet
                           </Button>
                         </CardContent>
                       </Card>
-                    )}
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Zone sensible</CardTitle>
-                        <CardDescription>Suppression du projet local sélectionné.</CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-2">
-                        <Button className="w-full" variant="destructive" disabled={!selectedProjectReady} onClick={() => setDeleteDialogOpen(true)}>
-                          <Trash2 className="h-4 w-4" />
-                          Supprimer projet
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  </div>
-                )}
-              </TabsContent>
-            </Tabs>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            )}
           </div>
         </section>
       </div>
