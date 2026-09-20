@@ -29,6 +29,26 @@ const PREPARE_STEP_LABELS = {
   provision: 'Configuration de Docker et Git',
   done: 'Environnement prêt',
 };
+/**
+ * Pourquoi l'environnement Linux n'a pas démarré, en une phrase actionnable.
+ *
+ * Une distribution installée peut cesser de démarrer du jour au lendemain : virtualisation
+ * désactivée dans le BIOS, composant « Plateforme d'ordinateur virtuel » retiré, ou WSL
+ * cassé par une mise à jour. Le gestionnaire repasse alors sur le backend Windows, et
+ * l'utilisateur doit savoir pourquoi c'est devenu lent.
+ */
+function wslStartFailureReason(error) {
+  const message = String(error?.message || error || '');
+  if (/HCS_E_HYPERV_NOT_INSTALLED|0x80370102|virtualis/i.test(message)) {
+    return "La virtualisation est désactivée sur ce poste : WSL ne peut plus démarrer. Active-la dans le BIOS ou l'UEFI, "
+      + "puis vérifie le composant Windows « Plateforme d'ordinateur virtuel ».";
+  }
+  if (/Wsl\/|wsl\.exe|WSL/i.test(message)) {
+    return "WSL n'a pas pu démarrer sur ce poste. Le détail figure dans le journal du gestionnaire.";
+  }
+  return '';
+}
+
 // Clés recherchées dans %USERPROFILE%\.ssh, dans l'ordre de préférence de ssh-keygen.
 const SSH_KEY_NAMES = ['id_ed25519', 'id_ecdsa', 'id_rsa'];
 // wsl.exe écrit ses listes en UTF-16LE, y compris dans un tube.
@@ -343,6 +363,7 @@ module.exports = {
   WslEnvironment,
   backendCommand,
   PREPARE_STEP_LABELS,
+  wslStartFailureReason,
   decodeWslOutput,
   expectedChecksum,
   imageFiles,

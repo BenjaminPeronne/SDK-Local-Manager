@@ -6,6 +6,8 @@ export interface DesktopBridge {
   backendDiagnostics(): Promise<{ log_path: string; details: string }>;
   openExternalUrl(url: string): Promise<void>;
   openDockerDesktop(): Promise<void>;
+  /** Backend réellement utilisé, et pourquoi l'environnement Linux a été écarté. */
+  backendMode?(): Promise<{ wsl: boolean; degradedReason: string }>;
   pickDirectory(defaultPath?: string): Promise<string | null>;
   notificationsSupported(): Promise<boolean>;
   notify(title: string, body: string): Promise<void>;

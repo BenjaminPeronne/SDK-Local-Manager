@@ -68,11 +68,15 @@ function contentPolicy(html, endpoint) {
 class Backend {
   // `command` remplace executable/args quand le backend tourne ailleurs que sur
   // Windows : dans la distribution WSL, la commande dépend du port retenu.
-  constructor({ executable, args = [], logDir, env = process.env, command = null, preferredPort = null, beforeStart = null }) {
+  constructor({ executable, args = [], logDir, env = process.env, command = null, preferredPort = null,
+    beforeStart = null, onFallback = null }) {
     this.executable = executable;
     this.args = args;
     this.command = command;
     this.beforeStart = beforeStart;
+    // Repli sur `executable` quand `command` échoue : l'environnement Linux installé peut
+    // cesser de démarrer, et le backend natif reste utilisable.
+    this.onFallback = onFallback;
     this.preferredPort = preferredPort;
     this.logDir = logDir;
     this.logPath = path.join(logDir, 'backend.log');
@@ -100,7 +104,27 @@ class Backend {
     return this.endpoint;
   }
 
+  /**
+   * Démarre le backend, et retombe sur l'exécutable natif si la commande dédiée échoue.
+   *
+   * Un poste dont la virtualisation vient d'être désactivée gardait une application inutilisable
+   * alors que le backend Windows était installé à côté.
+   */
   async start() {
+    try {
+      await this.launch();
+    } catch (error) {
+      if (!this.command || !this.onFallback) throw error;
+      this.log(error.stack || error.message);
+      this.command = null;
+      this.beforeStart = null;
+      this.error = null;
+      this.onFallback(error);
+      await this.launch();
+    }
+  }
+
+  async launch() {
     await this.reserve();
     // Préparation de l'environnement du backend (distribution WSL) : la fenêtre, elle, est déjà affichée.
     if (this.beforeStart) await this.beforeStart();

@@ -1201,6 +1201,9 @@ export default function Home() {
   // Accueil demandé par Échap depuis un projet éteint : le projet reste sélectionné dans la
   // barre, seule la zone centrale revient à l'accueil.
   const [welcomeRequested, setWelcomeRequested] = useState(false);
+  // Environnement Linux installé mais impossible à démarrer : le backend Windows a pris le relais.
+  const [degradedBackendReason, setDegradedBackendReason] = useState("");
+
   const [selectedDb, setSelectedDb] = useState("");
   const [modules, setModules] = useState<ModuleInfo[]>([]);
   const [loadingModules, setLoadingModules] = useState(false);
@@ -1942,6 +1945,16 @@ export default function Home() {
     const bridge = desktopBridge();
     if (initializing || !bridge?.wslStatus) return;
     bridge.wslStatus().then(setWslStatus).catch(() => setWslStatus(null));
+  }, [initializing]);
+
+  // Le repli sur le backend Windows se décide au démarrage : l'interface dit pourquoi le poste
+  // est redevenu lent, au lieu de laisser l'utilisateur le découvrir à l'usage.
+  useEffect(() => {
+    const bridge = desktopBridge();
+    if (initializing || !bridge?.backendMode) return;
+    bridge.backendMode()
+      .then((mode) => setDegradedBackendReason(mode?.degradedReason || ""))
+      .catch(() => setDegradedBackendReason(""));
   }, [initializing]);
 
   useEffect(() => {
@@ -3968,6 +3981,29 @@ export default function Home() {
                   <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={!desktopRuntime} onClick={requestDockerStart}>
                     <Play className="h-4 w-4" />
                     Ouvrir Docker
+                  </Button>
+                </div>
+              </div>
+            )}
+            {degradedBackendReason && (
+              <div className="mb-4 flex flex-col gap-3 border-y border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-start gap-3">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                  <div className="min-w-0">
+                    <div className="font-semibold">Mode Windows, plus lent</div>
+                    <div className="mt-0.5 break-words text-amber-800 dark:text-amber-200">
+                      {degradedBackendReason} Les projets restent utilisables depuis Windows, mais Odoo y démarre en une minute environ, contre quelques secondes dans l’environnement Linux.
+                    </div>
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                  <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl("https://aka.ms/enablevirtualization")}>
+                    <ExternalLink className="h-4 w-4" />
+                    Guide Microsoft
+                  </Button>
+                  <Button className="w-full sm:w-auto" size="sm" disabled={!desktopBridge()?.relaunch} onClick={() => desktopBridge()?.relaunch?.()}>
+                    <RefreshCcw className="h-4 w-4" />
+                    Relancer
                   </Button>
                 </div>
               </div>

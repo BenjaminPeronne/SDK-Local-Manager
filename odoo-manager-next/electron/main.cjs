@@ -6,7 +6,7 @@ const { execFile, spawn } = require('node:child_process');
 const { APP_ORIGIN, Backend, configPath, externalUrl, staticPath, contentPolicy } = require('./runtime.cjs');
 const { CredentialStore } = require('./credentials.cjs');
 const { GitLabClient } = require('./gitlab.cjs');
-const { LINUX_WORKSPACE, WslEnvironment, imageFiles } = require('./wsl.cjs');
+const { LINUX_WORKSPACE, WslEnvironment, imageFiles, wslStartFailureReason } = require('./wsl.cjs');
 
 app.setName('SDK Local Manager');
 app.setAppUserModelId('com.sudokeys.odoo-manager');
@@ -20,6 +20,8 @@ if (smokePath) app.setPath('userData', path.join(process.env.ODOO_MANAGER_CONFIG
 let window;
 let backend;
 let wsl;
+// Motif lisible quand l'environnement Linux a échoué et que le backend Windows a pris le relais.
+let degradedBackend = '';
 let quitting = false;
 const notifications = new Set();
 
@@ -115,6 +117,8 @@ function installHandlers() {
     if (!wsl) throw new Error("L'environnement Linux n'existe que sous Windows.");
     return callback(...args);
   };
+  // L'interface prévient l'utilisateur que le poste tourne en mode lent, et pourquoi.
+  handle('backend-mode', () => ({ wsl: Boolean(backend.command), degradedReason: degradedBackend }));
   handle('wsl-status', onWindows(() => wsl.status()));
   handle('wsl-install-wsl', onWindows(() => wsl.installWsl()));
   handle('wsl-prepare', onWindows(() => prepareWslEnvironment()));
@@ -184,6 +188,12 @@ async function start() {
       options.beforeStart = () => prepareWslEnvironment().catch(error => {
         fs.appendFileSync(path.join(logDir, 'backend.log'), `Préparation de l'environnement : ${error.message}\n`);
       });
+      // Virtualisation désactivée, « Plateforme d'ordinateur virtuel » retirée : le backend
+      // Windows reprend la main, et l'interface explique pourquoi le poste est redevenu lent.
+      options.onFallback = error => {
+        degradedBackend = wslStartFailureReason(error) || "L'environnement Linux n'a pas démarré sur ce poste.";
+        fs.appendFileSync(path.join(logDir, 'backend.log'), `Bascule sur le backend Windows. ${degradedBackend}\n`);
+      };
     }
     // Sinon le backend Windows prend le relais, et l'interface propose de préparer le poste.
   }

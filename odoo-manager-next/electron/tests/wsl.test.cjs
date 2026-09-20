@@ -7,6 +7,7 @@ const { createHash } = require('node:crypto');
 const {
   BACKEND_PATH,
   WslEnvironment,
+  wslStartFailureReason,
   backendCommand,
   decodeWslOutput,
   expectedChecksum,
@@ -176,6 +177,19 @@ test('a new build of the same version still replaces the backend', async () => {
   } finally {
     fs.rmSync(build.directory, { recursive: true, force: true });
   }
+});
+
+test('a Linux environment that stops starting is explained in terms the user can act on', () => {
+  const windowsError = new Error(
+    "WSL2 ne peut pas démarrer, car la virtualisation n’est pas activée sur cet ordinateur.\n"
+    + "Code d'erreur : Wsl/Service/CreateInstance/CreateVm/HCS/HCS_E_HYPERV_NOT_INSTALLED",
+  );
+
+  assert.match(wslStartFailureReason(windowsError), /virtualisation est désactivée/);
+  assert.match(wslStartFailureReason(new Error('Wsl/Service/CreateInstance/0x8007019e')), /WSL n'a pas pu démarrer/);
+  // Une panne sans rapport ne doit pas être présentée comme un problème de virtualisation.
+  assert.equal(wslStartFailureReason(new Error('EACCES: permission denied')), '');
+  assert.equal(wslStartFailureReason(null), '');
 });
 
 test('preparation announces its steps, in order, so the wait is never blind', async () => {

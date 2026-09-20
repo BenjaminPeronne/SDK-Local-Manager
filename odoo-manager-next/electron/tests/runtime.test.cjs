@@ -1,8 +1,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const net = require('node:net');
+const os = require('node:os');
 const path = require('node:path');
-const { configPath, selectPort, externalUrl, staticPath, contentPolicy } = require('../runtime.cjs');
+const { Backend, configPath, selectPort, externalUrl, staticPath, contentPolicy } = require('../runtime.cjs');
 
 test('preserves configuration paths and explicit overrides', () => {
   assert.equal(configPath({}, 'darwin', '/users/test'), path.join('/users/test', 'Library/Application Support/Odoo Manager/config.json'));
@@ -38,4 +40,38 @@ test('CSP authorizes exact bootstrap scripts without unsafe script execution', (
   assert.match(policy, /script-src 'self' 'sha256-/);
   assert.doesNotMatch(policy.split(';').find(part => part.includes('script-src')), /unsafe-inline|unsafe-eval/);
   assert.match(policy, /connect-src 'self' http:\/\/127\.0\.0\.1:19876;/);
+});
+
+test('a backend command that fails falls back to the native executable', async t => {
+  // Cas vécu sous Windows : la distribution WSL est installée mais ne démarre plus, et
+  // l'application restait inutilisable alors que le backend natif était là, à côté.
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-runtime-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const fakeBackend = path.join(directory, 'backend.cjs');
+  fs.writeFileSync(fakeBackend, `
+    const http = require('node:http');
+    http.createServer((request, response) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ ok: true, instance_id: process.env.ODOO_MANAGER_INSTANCE_ID }));
+    }).listen(Number(process.env.ODOO_GUI_PORT), '127.0.0.1');
+  `);
+
+  const failures = [];
+  const backend = new Backend({
+    executable: process.execPath,
+    args: [fakeBackend],
+    logDir: directory,
+    env: { ...process.env, ODOO_MANAGER_CONFIG_DIR: directory },
+    // La commande dédiée échoue immédiatement, comme wsl.exe sans virtualisation.
+    command: () => ({ executable: process.execPath, args: ['-e', 'process.exit(1)'] }),
+    onFallback: error => failures.push(error),
+  });
+  t.after(() => backend.stop?.());
+
+  await backend.start();
+
+  assert.equal(backend.ready, true, 'le backend natif doit répondre après le repli');
+  assert.equal(backend.command, null, 'la commande défaillante ne doit pas être réessayée');
+  assert.equal(failures.length, 1);
+  assert.match(fs.readFileSync(path.join(directory, 'backend.log'), 'utf8'), /Backend opérationnel/);
 });

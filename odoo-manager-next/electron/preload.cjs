@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('sdkDesktop', Object.freeze({
   backendDiagnostics: () => ipcRenderer.invoke('sdk:backend-diagnostics'),
   openExternalUrl: url => ipcRenderer.invoke('sdk:open-external', url),
   openDockerDesktop: () => ipcRenderer.invoke('sdk:open-docker'),
+  backendMode: () => ipcRenderer.invoke('sdk:backend-mode'),
   ...wslCapabilities,
   relaunch: () => ipcRenderer.invoke('sdk:relaunch'),
   stopLegacyTraefik: () => ipcRenderer.invoke('sdk:stop-legacy-traefik'),
