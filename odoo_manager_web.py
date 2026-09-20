@@ -3227,12 +3227,13 @@ def migration_snapshot():
     """Projets restés sur le disque Windows, proposés à la migration."""
     source = legacy_workspace_path()
     if not source or not safe_path_is_dir(source):
-        return {"available": False, "source": str(source or ""), "projects": []}
+        return {"available": False, "source": str(source or ""), "projects": [], "dismissed": False}
     # Lus une fois pour tout l'instantané : un `docker ps` par projet coûterait une seconde.
     states = migration_container_states()
     return {
         "available": True,
         "source": str(source),
+        "dismissed": bool(getattr(SETTINGS, "migration_banner_dismissed", False)),
         "projects": migration_candidates(
             source, WORKSPACE, migration_privileges(),
             container_state=lambda project: container_state_of(states, project),
@@ -6111,8 +6112,9 @@ class Handler(BaseHTTPRequestHandler):
                 with JOBS_LOCK:
                     running = [job.title for job in JOBS.values() if job.status in JOB_UNFINISHED_STATUSES]
                 # Closing onboarding changes no path used by a running job; the
-                # first project creation sends it right after starting its job.
-                interface_only = set(payload) <= {"onboarding_completed", "create_workspace"}
+                # first project creation sends it right after starting its job. Masquer le
+                # bandeau de migration se fait souvent pendant la copie qu'il a lancée.
+                interface_only = set(payload) <= {"onboarding_completed", "create_workspace", "migration_banner_dismissed"}
                 if running and not interface_only:
                     raise ValueError(
                         "Traitement en cours : "

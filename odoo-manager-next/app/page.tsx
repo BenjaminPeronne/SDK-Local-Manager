@@ -147,7 +147,7 @@ type MigrationCandidate = { name: string; source: string; already_migrated: bool
   // Faux quand le verrou PostgreSQL est le seul indice : aucun moteur Docker joignable ne
   // connaît les conteneurs du projet, et un verrou survit à un conteneur tué.
   engine_confirmed: boolean };
-type MigrationSnapshot = { available: boolean; source: string; projects: MigrationCandidate[] };
+type MigrationSnapshot = { available: boolean; source: string; projects: MigrationCandidate[]; dismissed: boolean };
 
 type BootstrapSnapshot = {
   overview: Overview;
@@ -173,6 +173,7 @@ type ManagerSettings = {
   interface_icon: InterfaceIcon;
   interface_layout: "classic" | "refined";
   onboarding_completed: boolean;
+  migration_banner_dismissed: boolean;
   config_file?: string;
   platform?: string;
   workspace_exists?: boolean;
@@ -816,6 +817,7 @@ function fallbackManagerSettings(
     interface_icon: current?.interface_icon === "local" ? "local" : "manager",
     interface_layout: current?.interface_layout === "refined" ? "refined" : "classic",
     onboarding_completed: current?.onboarding_completed ?? false,
+    migration_banner_dismissed: current?.migration_banner_dismissed ?? false,
     config_file: current?.config_file,
     platform: current?.platform || systemStatus?.docker.platform || "",
     workspace_exists: current?.workspace_exists ?? systemStatus?.workspace_exists,
@@ -1131,6 +1133,12 @@ function JobOutputPre({
   );
 }
 
+// Titres des jobs qui font apparaître un projet dans le workspace. Une entrée provisoire
+// les accompagne : sans elle, « Suivre » sélectionnait un projet encore inexistant et
+// laissait l'écran d'accueil affiché, sans rien ouvrir.
+const MIGRATION_JOB_PREFIX = "Migrer ";
+const PROJECT_ARRIVAL_PREFIXES = ["Créer le projet ", MIGRATION_JOB_PREFIX] as const;
+
 const SETTINGS_SECTIONS = [
   { id: "general", label: "Général", icon: FolderOpen },
   { id: "appearance", label: "Apparence", icon: Palette },
@@ -1151,7 +1159,58 @@ const SETTINGS_SAVED_KEYS = [
   "sticky_header",
   "interface_icon",
   "interface_layout",
+  "migration_banner_dismissed",
 ] as const;
+
+// Proposition de copie d'un projet resté sur le disque d'origine. Partagée par le bandeau
+// d'accueil et les réglages : masquer le bandeau ne doit jamais retirer l'accès à la copie.
+function MigrationProposal({ candidates, loading, onMigrate }: {
+  candidates: MigrationCandidate[];
+  loading: boolean;
+  onMigrate: (project: string, force: boolean) => void;
+}) {
+  const open = candidates.filter((candidate) => !candidate.stopped && candidate.engine_confirmed);
+  const unsure = candidates.filter((candidate) => !candidate.stopped && !candidate.engine_confirmed);
+  return (
+    <>
+      <div className="flex flex-wrap gap-2">
+        {candidates.map((candidate) => (
+          <Button
+            key={candidate.name}
+            size="sm"
+            variant="outline"
+            disabled={(!candidate.stopped && candidate.engine_confirmed) || loading}
+            onClick={() => onMigrate(candidate.name, !candidate.stopped)}
+          >
+            <Rocket className="h-4 w-4" />
+            {candidate.name}
+            {!candidate.stopped && (candidate.engine_confirmed ? " (ouvert)" : " (à vérifier)")}
+          </Button>
+        ))}
+      </div>
+      {/* Un bouton désactivé n'affiche pas son title : la raison doit rester lisible sans survol. */}
+      {open.length > 0 && (
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {formatNameList(open.map((candidate) => candidate.name))} {open.length > 1 ? "tournent" : "tourne"} en ce moment.
+            {" "}{open.length > 1 ? "Arrête-les" : "Arrête-le"} avant de copier : la copie partirait en plein travail. Le bouton se réactive tout seul.
+          </span>
+        </div>
+      )}
+      {unsure.length > 0 && (
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {formatNameList(unsure.map((candidate) => candidate.name))} {unsure.length > 1 ? "se sont mal arrêtés" : "s’est mal arrêté"} la
+            {" "}dernière fois : il en reste une trace, mais plus rien ne tourne. Vérifie que personne ne {unsure.length > 1 ? "les" : "l’"}utilise,
+            {" "}puis lance la copie — le dossier d’origine n’est pas modifié.
+          </span>
+        </div>
+      )}
+    </>
+  );
+}
 
 function SettingsSection({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
@@ -1186,6 +1245,9 @@ export default function Home() {
   const [wslSetupOpen, setWslSetupOpen] = useState(false);
   const [wslStatus, setWslStatus] = useState<WslStatus | null>(null);
   const [migration, setMigration] = useState<MigrationSnapshot | null>(null);
+  // Fermeture simple : le bandeau revient au prochain démarrage. Le masquage définitif, lui,
+  // est un réglage enregistré (migration_banner_dismissed).
+  const [migrationBannerClosed, setMigrationBannerClosed] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [creationPrerequisites, setCreationPrerequisites] = useState<ProjectCreationPrerequisites | null>(null);
   const [loadingCreationPrerequisites, setLoadingCreationPrerequisites] = useState(false);
@@ -1376,20 +1438,29 @@ export default function Home() {
     () => jobs.filter(isJobUnfinished),
     [jobs],
   );
-  const pendingProjectCreations = useMemo(
+  const pendingProjectArrivals = useMemo(
     () => jobs.filter(
       (job) =>
         isJobUnfinished(job) &&
-        job.title.startsWith("Créer le projet ") &&
+        PROJECT_ARRIVAL_PREFIXES.some((prefix) => job.title.startsWith(prefix)) &&
         Boolean(job.project) &&
         !(overview?.projects.some((project) => project.name === job.project)),
     ),
     [jobs, overview?.projects],
   );
-  const pendingSelectedProjectCreation = useMemo(
-    () => pendingProjectCreations.find((job) => job.project === selectedProjectName),
-    [pendingProjectCreations, selectedProjectName],
+  const pendingSelectedProjectArrival = useMemo(
+    () => pendingProjectArrivals.find((job) => job.project === selectedProjectName),
+    [pendingProjectArrivals, selectedProjectName],
   );
+  const pendingSelectedArrivalIsMigration = Boolean(pendingSelectedProjectArrival?.title.startsWith(MIGRATION_JOB_PREFIX));
+  const migrationCandidates = useMemo(
+    () => (migration?.projects || []).filter((candidate) => !candidate.already_migrated),
+    [migration],
+  );
+  // La proposition disparaît d'elle-même quand les projets ont quitté l'ancien dossier ; la
+  // masquer ne fait que retirer le bandeau, jamais l'entrée des réglages.
+  const migrationBannerVisible =
+    Boolean(migration?.available) && migrationCandidates.length > 0 && !migration?.dismissed && !migrationBannerClosed;
   const projectLifecycleJobs = useMemo(() => {
     const runningJobs = new Map<string, Job>();
     for (const job of jobs) {
@@ -2278,6 +2349,22 @@ export default function Home() {
     }
   }
 
+  /** Masque la proposition pour de bon. Seul ce réglage part : les autres sont verrouillés pendant un job. */
+  async function dismissMigrationProposal() {
+    try {
+      const payload = await api<{ settings: ManagerSettings }>("/api/settings", {
+        method: "POST",
+        body: JSON.stringify({ migration_banner_dismissed: true }),
+      });
+      setSettings(payload.settings);
+      setSettingsDraft(payload.settings);
+      await refreshMigration();
+      pushToast("success", "Proposition masquée. Les projets restent copiables depuis les paramètres.");
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : "Impossible de masquer la proposition.");
+    }
+  }
+
   // La clé GitLab déjà déclarée reste côté Windows : sans elle, l'environnement Linux ne clone rien.
   async function requestSshKeyImport() {
     try {
@@ -2473,6 +2560,11 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify({ ...settingsDraft, execution_mode: "native", create_workspace: true }),
       });
+      // Réafficher la proposition depuis les réglages la ramène tout de suite, sans attendre
+      // le redémarrage que demande la simple fermeture du bandeau.
+      if (settings?.migration_banner_dismissed && !payload.settings.migration_banner_dismissed) {
+        setMigrationBannerClosed(false);
+      }
       setSettings(payload.settings);
       setSettingsDraft(payload.settings);
       setSettingsOpen(false);
@@ -2480,7 +2572,7 @@ export default function Home() {
       setSelectedDb("");
       setModules([]);
       pushToast("success", apiPortChanged ? "Paramètres enregistrés. Redémarre le gestionnaire pour appliquer le nouveau port." : "Paramètres enregistrés.");
-      await Promise.all([refreshOverview(), refreshSystemStatus()]);
+      await Promise.all([refreshOverview(), refreshSystemStatus(), refreshMigration()]);
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : "Enregistrement impossible.");
     } finally {
@@ -3014,7 +3106,7 @@ export default function Home() {
   const selectedProjectReady = Boolean(selectedProject);
   const selectedProjectOnline = selectedProject?.odoo_status === "running";
   // Sans projet ouvert, les onglets n'offrent que des panneaux vides : l'accueil prend la place.
-  const showWelcome = welcomeRequested || (!selectedProject && !pendingSelectedProjectCreation);
+  const showWelcome = welcomeRequested || (!selectedProject && !pendingSelectedProjectArrival);
 
   useEffect(() => {
     if (showWelcome || !selectedProject || selectedProjectOnline) return;
@@ -3735,7 +3827,7 @@ export default function Home() {
               </div>
             </div>
             <div className="min-h-0 max-h-[260px] flex-1 overflow-auto px-2 py-1 sm:max-h-[340px] lg:max-h-none">
-              {pendingProjectCreations.map((job) => (
+              {pendingProjectArrivals.map((job) => (
                 <div
                   key={`creating-${job.id}`}
                   className={cn(
@@ -3758,7 +3850,7 @@ export default function Home() {
                       <span className="block truncate text-sm font-semibold">{job.project}</span>
                       <span className="mt-0.5 flex items-center gap-1.5 text-xs text-primary">
                         <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
-                        Création en cours…
+                        {job.title.startsWith(MIGRATION_JOB_PREFIX) ? "Copie en cours…" : "Création en cours…"}
                       </span>
                     </span>
                     <Badge className="shrink-0" variant="outline">Préparation</Badge>
@@ -3882,12 +3974,12 @@ export default function Home() {
                         projectHeaderCompact && "lg:text-xl",
                       )}
                     >
-                      {pendingSelectedProjectCreation?.project || selectedProject?.name || "Aucun projet"}
+                      {pendingSelectedProjectArrival?.project || selectedProject?.name || "Aucun projet"}
                     </h2>
-                    {pendingSelectedProjectCreation ? (
+                    {pendingSelectedProjectArrival ? (
                       <Badge className="mt-0.5 shrink-0" variant="outline">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        Création en cours
+                        {pendingSelectedArrivalIsMigration ? "Copie en cours" : "Création en cours"}
                       </Badge>
                     ) : selectedProject?.odoo_version && (
                       <Badge className="mt-0.5 shrink-0" variant="outline">
@@ -3896,8 +3988,10 @@ export default function Home() {
                     )}
                   </div>
                   <p className={cn("mt-1 max-w-full break-all text-sm text-muted-foreground", projectHeaderCompact && "lg:hidden")}>
-                    {pendingSelectedProjectCreation
-                      ? "Préparation du projet local en arrière-plan. Le journal détaille les étapes en cours."
+                    {pendingSelectedProjectArrival
+                      ? pendingSelectedArrivalIsMigration
+                        ? "Copie du projet vers son nouvel emplacement. Le journal détaille les étapes en cours."
+                        : "Préparation du projet local en arrière-plan. Le journal détaille les étapes en cours."
                       : selectedProject?.url || "Sélectionne un projet."}
                   </p>
                 </div>
@@ -4104,53 +4198,41 @@ export default function Home() {
                 </div>
               </div>
             )}
-            {migration?.available && migration.projects.some((candidate) => !candidate.already_migrated) && (
+            {migrationBannerVisible && (
               <div className="mb-4 flex flex-col gap-3 border-y border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/45 dark:text-emerald-100">
                 <div className="flex min-w-0 items-start gap-3">
                   <Rocket className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
-                  <div className="min-w-0">
-                    <div className="font-semibold">Projets à migrer vers l’environnement Linux</div>
-                    <div className="mt-0.5 break-words text-emerald-800 dark:text-emerald-200">
-                      Ces projets sont encore servis depuis {migration.source}. Odoo y démarre en une minute environ, contre quelques secondes une fois migré. La copie ne modifie pas l’original.
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold">Ces projets peuvent démarrer bien plus vite</div>
+                    <div className="mt-0.5 break-words text-emerald-800 dark:text-emerald-200" title={migration?.source}>
+                      Ils sont encore rangés sur ton disque Windows, où Odoo met près d’une minute à démarrer ; ici, quelques secondes.
+                      Le gestionnaire en fait une copie et ne touche pas au dossier d’origine.
                     </div>
                   </div>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="-mr-1 -mt-1 h-7 w-7 shrink-0 text-emerald-800 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
+                    title="Masquer jusqu’au prochain démarrage"
+                    onClick={() => setMigrationBannerClosed(true)}
+                  >
+                    <X className="h-4 w-4" />
+                    <span className="sr-only">Masquer jusqu’au prochain démarrage</span>
+                  </Button>
                 </div>
-                <div className="flex flex-wrap gap-2 sm:pl-8">
-                  {migration.projects.filter((candidate) => !candidate.already_migrated).map((candidate) => (
-                    <Button
-                      key={candidate.name}
-                      size="sm"
-                      variant="outline"
-                      disabled={(!candidate.stopped && candidate.engine_confirmed) || loading}
-                      onClick={() => requestProjectMigration(candidate.name, !candidate.stopped)}
+                <div className="flex flex-col gap-3 text-emerald-800 dark:text-emerald-200 sm:pl-8">
+                  <MigrationProposal candidates={migrationCandidates} loading={loading} onMigrate={requestProjectMigration} />
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                    <button
+                      type="button"
+                      className="underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => void dismissMigrationProposal()}
                     >
-                      <Rocket className="h-4 w-4" />
-                      {candidate.name}
-                      {!candidate.stopped && (candidate.engine_confirmed ? " (en cours d’exécution)" : " (verrou restant)")}
-                    </Button>
-                  ))}
+                      Ne plus proposer
+                    </button>
+                    <span>Les projets resteront copiables depuis Paramètres, section Général.</span>
+                  </div>
                 </div>
-                {/* Un bouton désactivé n'affiche pas son title : la raison doit rester lisible sans survol. */}
-                {migration.projects.some((candidate) => !candidate.already_migrated && !candidate.stopped && candidate.engine_confirmed) && (
-                  <div className="flex items-start gap-2 text-emerald-800 dark:text-emerald-200 sm:pl-8">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>
-                      Arrête {formatNameList(migration.projects.filter((candidate) => !candidate.already_migrated && !candidate.stopped && candidate.engine_confirmed).map((candidate) => candidate.name))} avant de
-                      {" "}migrer : la base serait copiée dans un état incohérent. Le bouton reste inactif tant que le projet tourne.
-                    </span>
-                  </div>
-                )}
-                {/* Verrou sans conteneur connu : PostgreSQL ne l'efface qu'en s'arrêtant proprement,
-                    il survit donc à un conteneur tué. Le bouton reste actif, la copie ne touchant pas l'original. */}
-                {migration.projects.some((candidate) => !candidate.already_migrated && !candidate.stopped && !candidate.engine_confirmed) && (
-                  <div className="flex items-start gap-2 text-emerald-800 dark:text-emerald-200 sm:pl-8">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>
-                      {formatNameList(migration.projects.filter((candidate) => !candidate.already_migrated && !candidate.stopped && !candidate.engine_confirmed).map((candidate) => candidate.name))}
-                      {" "}garde un verrou PostgreSQL, et aucun moteur Docker joignable ne connaît ses conteneurs : le verrou reste souvent après un arrêt brutal. Vérifie que le projet est arrêté, puis migre — l’original n’est pas modifié.
-                    </span>
-                  </div>
-                )}
               </div>
             )}
             {(systemStatus?.abandoned_staging?.count ?? 0) > 0 && (
@@ -5814,6 +5896,43 @@ export default function Home() {
                       </div>
 
                       <SettingsGroup>
+                        {migration?.available && migrationCandidates.length > 0 && (
+                          <div className="grid gap-3">
+                            <div>
+                              <div className="text-sm font-medium">Projets restés sur le disque Windows</div>
+                              <p className="mt-1 text-xs leading-relaxed text-muted-foreground" title={migration.source}>
+                                Les copier ici fait démarrer Odoo en quelques secondes au lieu d’une minute. Le dossier
+                                d’origine n’est pas modifié : tant qu’il est là, la proposition reste disponible.
+                              </p>
+                            </div>
+                            <div className="grid gap-2 text-sm">
+                              <MigrationProposal
+                                candidates={migrationCandidates}
+                                loading={loading}
+                                onMigrate={(project, force) => {
+                                  setSettingsOpen(false);
+                                  void requestProjectMigration(project, force);
+                                }}
+                              />
+                            </div>
+                            <label className="flex cursor-pointer items-start gap-3 text-sm">
+                              <Checkbox
+                                className="mt-0.5"
+                                checked={!settingsDraft.migration_banner_dismissed}
+                                onCheckedChange={(checked) =>
+                                  setSettingsDraft({ ...settingsDraft, migration_banner_dismissed: checked !== true })
+                                }
+                              />
+                              <span className="min-w-0">
+                                <span className="block font-medium">Proposer la copie sur l’écran d’accueil</span>
+                                <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
+                                  Décoché, le bandeau ne revient plus. La copie reste possible depuis ici.
+                                </span>
+                              </span>
+                            </label>
+                          </div>
+                        )}
+
                         <div className="grid gap-3">
                           <div>
                             <div className="text-sm font-medium">Configuration initiale</div>
