@@ -92,6 +92,29 @@ except Exception:
 PY
 }
 
+# GitHub Actions compile le commit du tag : une branche en retard sur origin produit un
+# installateur sans les derniers changements, sans qu'aucune erreur n'apparaisse.
+check_branch_synchronized() {
+  branch=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)
+  [ "$branch" != "HEAD" ] || die "HEAD est détaché : place-toi sur une branche avant de construire."
+  upstream=$(git -C "$ROOT" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
+  [ -n "$upstream" ] || die "la branche $branch ne suit aucune branche distante. Pousse-la d abord: git push -u origin $branch"
+  git -C "$ROOT" fetch --quiet origin || die "impossible de contacter origin pour vérifier que $branch est à jour."
+  behind=$(git -C "$ROOT" rev-list --count "HEAD..$upstream")
+  ahead=$(git -C "$ROOT" rev-list --count "$upstream..HEAD")
+  if [ "$behind" != "0" ]; then
+    printf 'Erreur: %s est en retard de %s commit(s) sur %s.\n' "$branch" "$behind" "$upstream" >&2
+    printf 'Le build compilerait un état ancien. Mets à jour puis relance:\n  git pull --rebase\n\n' >&2
+    exit 1
+  fi
+  if [ "$ahead" != "0" ]; then
+    printf 'Erreur: %s a %s commit(s) non poussé(s) vers %s.\n' "$branch" "$ahead" "$upstream" >&2
+    printf 'GitHub Actions ne les verrait pas. Pousse puis relance:\n  git push\n\n' >&2
+    exit 1
+  fi
+  printf 'Branche %s synchronisée avec %s.\n' "$branch" "$upstream"
+}
+
 repo_slug() {
   url=$(git -C "$ROOT" config --get remote.origin.url || true)
   case "$url" in
@@ -201,6 +224,8 @@ fi
 
 # next-env.d.ts est réécrit par `next dev` (chemin .next/dev/types) : ce n'est pas un vrai
 # changement, la CI régénère sa propre version au build.
+check_branch_synchronized
+
 if ! git diff --quiet -- . ':!dist' ':!odoo-manager-next/next-env.d.ts' \
   || ! git diff --cached --quiet -- . ':!dist' ':!odoo-manager-next/next-env.d.ts' \
   || [ -n "$(git ls-files --others --exclude-standard)" ]; then
