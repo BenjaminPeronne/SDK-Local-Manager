@@ -14,6 +14,9 @@ from odoo_manager_core.migration import (
     is_project_directory,
     measure_project,
     migration_candidates,
+    container_state_of,
+    project_status,
+    legacy_engine_states,
     project_is_stopped,
 )
 
@@ -140,6 +143,10 @@ class ProjectMigrationTests(unittest.TestCase):
 
 
 SUDO = ["/usr/bin/sudo", "-n"]
+# Sortie de `docker ps -a` sur le moteur d'origine, vue depuis la distribution.
+LEGACY_PS_OUTPUT = """postgresql-Caritel|exited
+traefik|running
+"""
 
 
 def completed(stdout="", returncode=0):
@@ -252,6 +259,105 @@ class PrivilegedMigrationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "No space left"):
                 copy_project_privileged("/src", Path(temporary) / "DEMO", SUDO,
                                         popen=lambda *_a, **_k: Process(), run=lambda *_a, **_k: completed())
+
+
+class ContainerStateTests(unittest.TestCase):
+    """Relevé réel : `postgresql-Caritel` en « Exited (255) » et un postmaster.pid du 12 septembre.
+
+    Le conteneur avait été tué avec Docker, sans laisser PostgreSQL effacer son verrou : le
+    projet restait affiché « en cours d'exécution », donc ni migrable ni arrêtable.
+    """
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.windows = Path(self.temporary.name) / "windows"
+        self.linux = Path(self.temporary.name) / "linux"
+        self.windows.mkdir()
+        self.linux.mkdir()
+        self.addCleanup(self.temporary.cleanup)
+
+    def test_a_stale_lock_no_longer_blocks_a_killed_project(self):
+        build_project(self.windows, "CARITEL", running=True, with_links=False)
+        candidates = migration_candidates(self.windows, self.linux, container_state=lambda _name: "exited")
+        self.assertTrue(candidates[0]["stopped"])
+
+    def test_a_running_container_blocks_the_migration_even_without_a_lock(self):
+        build_project(self.windows, "DEMO_01", with_links=False)
+        self.assertFalse(project_is_stopped(self.windows / "DEMO_01", container_state=lambda _name: "running"))
+
+    def test_a_container_unknown_to_this_engine_leaves_the_lock_in_charge(self):
+        # Le projet peut tourner sous Docker Desktop pendant que le backend interroge la distribution.
+        build_project(self.windows, "SIMPAC", running=True, with_links=False)
+        self.assertFalse(project_is_stopped(self.windows / "SIMPAC", container_state=lambda _name: "absent"))
+
+    def test_an_unreachable_engine_leaves_the_lock_in_charge(self):
+        build_project(self.windows, "SIMPAC", running=True, with_links=False)
+        self.assertFalse(project_is_stopped(self.windows / "SIMPAC", container_state=lambda _name: None))
+
+    def test_an_unconfirmed_lock_is_flagged_for_the_interface(self):
+        build_project(self.windows, "CARITEL", running=True, with_links=False)
+        candidate = migration_candidates(self.windows, self.linux, container_state=lambda _name: "absent")[0]
+        self.assertFalse(candidate["stopped"])
+        self.assertFalse(candidate["engine_confirmed"])
+
+    def test_a_state_read_from_an_engine_is_confirmed(self):
+        build_project(self.windows, "DEMO_01", running=True, with_links=False)
+        self.assertEqual((True, True), project_status(self.windows / "DEMO_01", container_state=lambda _name: "exited"))
+        self.assertEqual((False, True), project_status(self.windows / "DEMO_01", container_state=lambda _name: "running"))
+
+    def test_the_engine_is_asked_about_the_project_name(self):
+        build_project(self.windows, "CARITEL", running=True, with_links=False)
+        asked = []
+
+        def state(name):
+            asked.append(name)
+            return "exited"
+
+        migration_candidates(self.windows, self.linux, container_state=state)
+        self.assertEqual(["CARITEL"], asked)
+
+
+class LegacyEngineTests(unittest.TestCase):
+    """Relevé réel : depuis la distribution, `postgresql-Caritel` n'existe que pour Docker Desktop."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.socket = Path(self.temporary.name) / "docker.proxy.sock"
+        self.socket.write_text("", encoding="utf-8")
+        self.addCleanup(self.temporary.cleanup)
+
+    def test_the_original_engine_is_read_through_sudo_on_its_own_socket(self):
+        calls = []
+
+        def run(command, **_kwargs):
+            calls.append(command)
+            return completed(LEGACY_PS_OUTPUT)
+
+        states = legacy_engine_states(SUDO, run, str(self.socket))
+
+        self.assertEqual({"postgresql-Caritel": "exited", "traefik": "running"}, states)
+        self.assertEqual(SUDO, calls[0][:2])
+        self.assertIn(f"unix://{self.socket}", calls[0])
+
+    def test_no_socket_means_no_second_engine_and_no_docker_call(self):
+        called = []
+        states = legacy_engine_states(SUDO, lambda *_a, **_k: called.append(1) or completed(), "/introuvable/docker.sock")
+        self.assertEqual({}, states)
+        self.assertEqual([], called)
+
+    def test_an_unreachable_engine_is_not_an_answer(self):
+        self.assertEqual({}, legacy_engine_states(SUDO, lambda *_a, **_k: completed("", returncode=1), str(self.socket)))
+
+    def test_a_project_is_running_as_soon_as_one_of_its_containers_runs(self):
+        self.assertEqual("running", container_state_of({"postgresql-DEMO_01": "running"}, "DEMO_01"))
+        self.assertEqual("running", container_state_of({"odoo-DEMO_01": "running", "postgresql-DEMO_01": "exited"}, "DEMO_01"))
+
+    def test_a_killed_project_keeps_its_last_known_state(self):
+        self.assertEqual("exited", container_state_of({"postgresql-CARITEL": "exited"}, "CARITEL"))
+
+    def test_an_unknown_project_and_a_silent_engine_are_distinguished(self):
+        self.assertEqual("absent", container_state_of({"traefik": "running"}, "CARITEL"))
+        self.assertIsNone(container_state_of(None, "CARITEL"))
 
 
 if __name__ == "__main__":

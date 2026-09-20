@@ -143,7 +143,10 @@ type SystemStatus = {
   abandoned_staging?: { count: number; names: string[]; oldest_modified_at: number };
 };
 
-type MigrationCandidate = { name: string; source: string; already_migrated: boolean; stopped: boolean };
+type MigrationCandidate = { name: string; source: string; already_migrated: boolean; stopped: boolean;
+  // Faux quand le verrou PostgreSQL est le seul indice : aucun moteur Docker joignable ne
+  // connaît les conteneurs du projet, et un verrou survit à un conteneur tué.
+  engine_confirmed: boolean };
 type MigrationSnapshot = { available: boolean; source: string; projects: MigrationCandidate[] };
 
 type BootstrapSnapshot = {
@@ -2267,8 +2270,8 @@ export default function Home() {
     if (!initializing) void refreshMigration();
   }, [initializing, refreshMigration]);
 
-  async function requestProjectMigration(project: string) {
-    const job = await createJob("migrate_project", { project });
+  async function requestProjectMigration(project: string, force = false) {
+    const job = await createJob("migrate_project", { project, force });
     if (job) {
       schedule(refreshMigration, 3000);
       schedule(refreshOverview, 4000);
@@ -4118,22 +4121,33 @@ export default function Home() {
                       key={candidate.name}
                       size="sm"
                       variant="outline"
-                      disabled={!candidate.stopped || loading}
-                      onClick={() => requestProjectMigration(candidate.name)}
+                      disabled={(!candidate.stopped && candidate.engine_confirmed) || loading}
+                      onClick={() => requestProjectMigration(candidate.name, !candidate.stopped)}
                     >
                       <Rocket className="h-4 w-4" />
                       {candidate.name}
-                      {!candidate.stopped && " (en cours d’exécution)"}
+                      {!candidate.stopped && (candidate.engine_confirmed ? " (en cours d’exécution)" : " (verrou restant)")}
                     </Button>
                   ))}
                 </div>
                 {/* Un bouton désactivé n'affiche pas son title : la raison doit rester lisible sans survol. */}
-                {migration.projects.some((candidate) => !candidate.already_migrated && !candidate.stopped) && (
+                {migration.projects.some((candidate) => !candidate.already_migrated && !candidate.stopped && candidate.engine_confirmed) && (
                   <div className="flex items-start gap-2 text-emerald-800 dark:text-emerald-200 sm:pl-8">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                     <span>
-                      Arrête {formatNameList(migration.projects.filter((candidate) => !candidate.already_migrated && !candidate.stopped).map((candidate) => candidate.name))} avant de
+                      Arrête {formatNameList(migration.projects.filter((candidate) => !candidate.already_migrated && !candidate.stopped && candidate.engine_confirmed).map((candidate) => candidate.name))} avant de
                       {" "}migrer : la base serait copiée dans un état incohérent. Le bouton reste inactif tant que le projet tourne.
+                    </span>
+                  </div>
+                )}
+                {/* Verrou sans conteneur connu : PostgreSQL ne l'efface qu'en s'arrêtant proprement,
+                    il survit donc à un conteneur tué. Le bouton reste actif, la copie ne touchant pas l'original. */}
+                {migration.projects.some((candidate) => !candidate.already_migrated && !candidate.stopped && !candidate.engine_confirmed) && (
+                  <div className="flex items-start gap-2 text-emerald-800 dark:text-emerald-200 sm:pl-8">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>
+                      {formatNameList(migration.projects.filter((candidate) => !candidate.already_migrated && !candidate.stopped && !candidate.engine_confirmed).map((candidate) => candidate.name))}
+                      {" "}garde un verrou PostgreSQL, et aucun moteur Docker joignable ne connaît ses conteneurs : le verrou reste souvent après un arrêt brutal. Vérifie que le projet est arrêté, puis migre — l’original n’est pas modifié.
                     </span>
                   </div>
                 )}

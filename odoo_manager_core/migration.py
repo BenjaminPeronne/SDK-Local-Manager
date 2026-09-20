@@ -24,6 +24,15 @@ COMPOSE_NAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "co
 POSTGRES_DATA_DIRECTORY = "postgresql_data"
 POSTMASTER_FILE = "postmaster.pid"
 MIGRATION_MARKER = ".odoo_manager_migrated_from"
+# États Docker qui interdisent la copie : la base peut encore écrire.
+RUNNING_CONTAINER_STATES = frozenset({"running", "restarting", "paused", "removing"})
+# Conteneur inconnu du moteur interrogé : il tourne peut-être sous l'autre moteur.
+CONTAINER_ABSENT = "absent"
+# Moteur de Docker Desktop, vu depuis la distribution. Les projets restés sur le disque
+# Windows tournent sous ce moteur-là, que le moteur de la distribution ne voit pas : sans
+# lui, un conteneur tué depuis des jours restait indiscernable d'une base ouverte. Le
+# socket appartient à root, d'où le même `sudo -n` que pour postgresql_data.
+LEGACY_ENGINE_SOCKET = "/mnt/wsl/docker-desktop/shared-sockets/host-services/docker.proxy.sock"
 # Le projet d'origine reste intact : ces dossiers sont recopiés à l'identique.
 PROGRESS_EVERY_FILES = 500
 
@@ -55,12 +64,34 @@ def privileged_prefix(run=subprocess.run, which=shutil.which):
     return list(_PRIVILEGE_CACHE["prefix"])
 
 
-def project_is_stopped(path, prefix=None, run=subprocess.run):
-    """Faux tant que PostgreSQL tourne : son fichier de verrou est présent.
+def project_status(path, prefix=None, run=subprocess.run, container_state=None):
+    """(arrêté, confirmé par un moteur) pour un projet candidat à la migration.
 
-    Un verrou illisible sans droits suffisants compte comme « en cours » : mieux vaut
-    refuser une migration que copier une base ouverte.
+    Docker tranche quand il connaît le conteneur du projet : `postmaster.pid` survit à un
+    conteneur tué — arrêt de Docker Desktop, distribution coupée — parce que PostgreSQL ne
+    l'efface qu'en s'arrêtant proprement. Pris seul, ce verrou laissait des projets marqués
+    « en cours d'exécution » pour toujours, donc impossibles à migrer et impossibles à
+    arrêter puisqu'ils ne tournaient plus.
+
+    Quand aucun moteur joignable ne connaît le conteneur, le verrou tranche mais la réponse
+    n'est pas confirmée : le projet peut tourner sous l'autre moteur, que celui-ci ne voit
+    pas. L'appelant décide alors s'il fait confiance au verrou. Un verrou illisible sans
+    droits suffisants compte comme « en cours ».
     """
+    if container_state is not None:
+        state = container_state(Path(path).name)
+        if state and state != CONTAINER_ABSENT:
+            return state not in RUNNING_CONTAINER_STATES, True
+    return lock_is_free(path, prefix, run), False
+
+
+def project_is_stopped(path, prefix=None, run=subprocess.run, container_state=None):
+    """Faux tant que PostgreSQL tourne, confirmé ou non. Voir project_status."""
+    return project_status(path, prefix, run, container_state)[0]
+
+
+def lock_is_free(path, prefix=None, run=subprocess.run):
+    """Vrai quand `postmaster.pid` est absent : PostgreSQL s'est arrêté proprement."""
     lock = Path(path) / POSTGRES_DATA_DIRECTORY / POSTMASTER_FILE
     try:
         return not lock.exists()
@@ -75,7 +106,47 @@ def project_is_stopped(path, prefix=None, run=subprocess.run):
     return result.returncode == 0 and result.stdout.strip() == "stopped"
 
 
-def migration_candidates(source_root, destination_root, prefix=None, run=subprocess.run):
+def legacy_engine_states(prefix=None, run=subprocess.run, socket_path=LEGACY_ENGINE_SOCKET):
+    """Conteneurs du moteur d'origine : nom -> état, ou {} s'il n'est pas joignable.
+
+    Hors distribution, le socket n'existe pas et la lecture est sautée sans lancer docker.
+    """
+    try:
+        if not Path(socket_path).exists():
+            return {}
+    except OSError:
+        return {}
+    command = [*(prefix or []), "docker", "-H", f"unix://{socket_path}", "ps", "-a", "--format", "{{.Names}}|{{.State}}"]
+    try:
+        result = run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if result.returncode != 0:
+        return {}
+    states = {}
+    for line in result.stdout.splitlines():
+        name, separator, state = line.partition("|")
+        if separator:
+            states[name.strip()] = state.strip() or CONTAINER_ABSENT
+    return states
+
+
+def container_state_of(states, project):
+    """État retenu pour un projet : « running » dès qu'un de ses conteneurs tourne.
+
+    None quand aucun moteur n'a répondu, CONTAINER_ABSENT quand aucun ne connaît le projet :
+    dans les deux cas le verrou tranche.
+    """
+    if states is None:
+        return None
+    observed = [states.get(f"postgresql-{project}", CONTAINER_ABSENT), states.get(f"odoo-{project}", CONTAINER_ABSENT)]
+    if any(state in RUNNING_CONTAINER_STATES for state in observed):
+        return "running"
+    known = [state for state in observed if state != CONTAINER_ABSENT]
+    return known[0] if known else CONTAINER_ABSENT
+
+
+def migration_candidates(source_root, destination_root, prefix=None, run=subprocess.run, container_state=None):
     """Projets présents côté Windows et absents de l'environnement Linux."""
     source_root = Path(source_root)
     destination_root = Path(destination_root)
@@ -87,11 +158,15 @@ def migration_candidates(source_root, destination_root, prefix=None, run=subproc
     for entry in entries:
         if entry.name.startswith(".") or not is_project_directory(entry):
             continue
+        stopped, confirmed = project_status(entry, prefix, run, container_state)
         candidates.append({
             "name": entry.name,
             "source": str(entry),
             "already_migrated": (destination_root / entry.name).exists(),
-            "stopped": project_is_stopped(entry, prefix, run),
+            "stopped": stopped,
+            # Un « en cours » que personne n'a confirmé vient du seul verrou : l'interface
+            # le dit et laisse migrer, la copie ne touchant de toute façon pas l'original.
+            "engine_confirmed": confirmed,
         })
     return candidates
 

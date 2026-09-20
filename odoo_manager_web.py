@@ -67,15 +67,18 @@ from odoo_manager_core.project_creator import (
     validate_odoo_version,
 )
 from odoo_manager_core.migration import (
+    CONTAINER_ABSENT,
     compare_projects,
+    container_state_of,
     copy_project,
     copy_project_privileged,
     is_project_directory,
+    legacy_engine_states,
     list_tree,
     measure_project,
     migration_candidates,
     privileged_prefix,
-    project_is_stopped,
+    project_status,
 )
 from odoo_manager_core import jobs as job_control
 from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
@@ -3225,11 +3228,42 @@ def migration_snapshot():
     source = legacy_workspace_path()
     if not source or not safe_path_is_dir(source):
         return {"available": False, "source": str(source or ""), "projects": []}
+    # Lus une fois pour tout l'instantané : un `docker ps` par projet coûterait une seconde.
+    states = migration_container_states()
     return {
         "available": True,
         "source": str(source),
-        "projects": migration_candidates(source, WORKSPACE, migration_privileges()),
+        "projects": migration_candidates(
+            source, WORKSPACE, migration_privileges(),
+            container_state=lambda project: container_state_of(states, project),
+        ),
     }
+
+
+def migration_container_states():
+    """Conteneurs connus des deux moteurs, ou None si aucun ne répond.
+
+    Le moteur d'origine fait foi pour ces projets : ils tournaient sous Docker Desktop, que
+    le moteur de la distribution ne voit pas. Sans lui, un conteneur tué laissait son
+    `postmaster.pid` derrière lui et le projet restait marqué « en cours d'exécution ».
+    """
+    local = container_states_via_api()
+    if local is None:
+        code, output = run_capture(
+            docker_command(SETTINGS, "ps", "-a", "--format", "{{.Names}}|{{.State}}"),
+            timeout=8,
+        )
+        local = {} if code == 0 else None
+        for line in output.splitlines() if code == 0 else []:
+            name, separator, state = line.partition("|")
+            if separator:
+                local[name.strip()] = state.strip() or CONTAINER_ABSENT
+    legacy = legacy_engine_states(migration_privileges())
+    if local is None and not legacy:
+        return None
+    states = dict(local or {})
+    states.update(legacy)
+    return states
 
 
 def migration_privileges():
@@ -3237,8 +3271,12 @@ def migration_privileges():
     return privileged_prefix() if platform_id() == "linux" else []
 
 
-def migrate_project_job(job, project):
-    """Copie un projet du disque Windows vers l'environnement Linux, sans toucher à l'original."""
+def migrate_project_job(job, project, force=False):
+    """Copie un projet du disque Windows vers l'environnement Linux, sans toucher à l'original.
+
+    `force` ne passe outre qu'un verrou que personne n'a pu confirmer : un conteneur que le
+    moteur dit en cours d'exécution refuse la copie, forcée ou non.
+    """
     source_root = legacy_workspace_path()
     if not source_root:
         raise RuntimeError("Aucun ancien dossier de projets n'est connu.")
@@ -3246,11 +3284,20 @@ def migrate_project_job(job, project):
     if not is_project_directory(source):
         raise ValueError(f"{project} n'est pas un projet Odoo dans {source_root}.")
     prefix = migration_privileges()
-    if not project_is_stopped(source, prefix):
+    states = migration_container_states()
+    stopped, confirmed = project_status(source, prefix, container_state=lambda name: container_state_of(states, name))
+    if not stopped and confirmed:
         raise RuntimeError(
             f"{project} tourne encore : arrête-le dans l'ancienne application avant de le migrer, "
             "sinon sa base serait copiée dans un état incohérent."
         )
+    if not stopped and not force:
+        raise RuntimeError(
+            f"Le verrou PostgreSQL de {project} est encore là et aucun moteur Docker joignable ne "
+            "connaît ses conteneurs. Vérifie qu'il est bien arrêté, puis relance la migration."
+        )
+    if not stopped:
+        job.add(f"Verrou PostgreSQL présent mais non confirmé : migration de {project} demandée malgré tout.")
     destination = WORKSPACE / project
 
     job.add(f"Mesure de {project}...")
@@ -6376,7 +6423,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
             elif action == "migrate_project":
                 name = validate_new_project_name(payload.get("project", ""))
-                job = Job(f"Migrer {name} vers l'environnement Linux", migrate_project_job, (name,), project=name)
+                job = Job(f"Migrer {name} vers l'environnement Linux", migrate_project_job,
+                          (name, bool(payload.get("force"))), project=name)
             elif action == "cleanup_staging":
                 job = Job("Nettoyer les créations interrompues", cleanup_staging_job)
             elif action == "install_traefik":
