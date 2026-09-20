@@ -1,6 +1,7 @@
 import http.client
 import os
 import json
+import re
 import threading
 import time
 import tempfile
@@ -115,6 +116,132 @@ class LocalApiRequestGuardTests(unittest.TestCase):
         self.assertEqual("", web.untrusted_request_reason({"Host": "localhost:18765"}))
         for host in ("192.168.1.16:18765", "127.0.0.1.evil.example", "", "[::1"):
             self.assertTrue(web.untrusted_request_reason({"Host": host}), host)
+
+
+class ApiContractTests(unittest.TestCase):
+    """L'API publie sa version et ses capacités, et le contrat suit le code."""
+
+    SOURCE = (Path(__file__).resolve().parents[1] / "odoo_manager_web.py").read_text(encoding="utf-8")
+
+    def setUp(self):
+        self.server = web.ManagerHTTPServer(("127.0.0.1", 0), web.Handler)
+        self.port = self.server.server_address[1]
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def get(self, path):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        connection.request("GET", path, headers={"Host": f"127.0.0.1:{self.port}"})
+        response = connection.getresponse()
+        status, body = response.status, response.read().decode("utf-8")
+        connection.close()
+        return status, json.loads(body)
+
+    def declared_actions(self):
+        """Actions réellement acceptées par POST /api/jobs, lues dans le code."""
+        found = set(re.findall(r'action == "([a-z_]+)"', self.SOURCE))
+        for group in re.findall(r"action in \(([^)]*)\)", self.SOURCE):
+            found.update(re.findall(r'"([a-z_]+)"', group))
+        return found
+
+    def routed_paths(self):
+        """Chemins servis, littéraux et gabarits, dans la forme publiée."""
+        literals = set(re.findall(r'path == "(/api/[^"]*)"', self.SOURCE))
+        for pattern in re.findall(r're\.match\(r"\^(/api/[^"]*)\$"', self.SOURCE):
+            literals.add(pattern.replace("([^/]+)", "{project}").replace("([0-9]+)", "{job}"))
+        return literals
+
+    def test_version_identifies_the_service_before_any_other_call(self):
+        status, payload = self.get("/api/version")
+
+        self.assertEqual(200, status)
+        self.assertEqual(web.APP_VERSION, payload["application"])
+        self.assertEqual(web.API_VERSION, payload["api"])
+        self.assertIn("instance_id", payload)
+
+    def test_capabilities_publish_the_routes_and_the_actions(self):
+        status, payload = self.get("/api/capabilities")
+
+        self.assertEqual(200, status)
+        self.assertEqual(web.APP_VERSION, payload["application"])
+        self.assertEqual(sorted(web.API_ACTIONS), sorted(payload["actions"]))
+        self.assertIn("/api/capabilities", payload["endpoints"]["GET"])
+        self.assertIn("/api/jobs", payload["endpoints"]["POST"])
+        self.assertEqual(web.platform_id(), payload["features"]["platform"])
+
+    def test_published_actions_match_the_dispatcher(self):
+        self.assertEqual(sorted(self.declared_actions()), sorted(web.API_ACTIONS))
+
+    def test_published_endpoints_cover_every_served_route(self):
+        published = {path for paths in web.API_ENDPOINTS.values() for path in paths}
+
+        self.assertEqual(set(), self.routed_paths() - published)
+
+    def test_application_version_follows_the_manifests(self):
+        package = json.loads(
+            (Path(__file__).resolve().parents[1] / "odoo-manager-next" / "package.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(package["version"], web.APP_VERSION)
+
+
+class OutputProgressTests(unittest.TestCase):
+    """La barre d'avancement lit ce que les commandes longues écrivent."""
+
+    def test_git_phases_drive_the_bar_without_filling_the_history(self):
+        cases = {
+            "remote: Compressing objects:  45% (9/20)": ("Compression des objets", 9, 20, True),
+            "Receiving objects:  17% (2451/14000), 12.00 MiB | 3.00 MiB/s": ("Réception des objets", 2451, 14000, True),
+            "Receiving objects: 100% (14000/14000), 48.00 MiB | 3.00 MiB/s, done.": ("Réception des objets", 14000, 14000, False),
+            "Resolving deltas:  60% (600/1000)": ("Application des différences", 600, 1000, True),
+            "Updating files:  99% (1400/1416)": ("Écriture des fichiers", 1400, 1416, True),
+            "Filtering content:  20%": ("Récupération des fichiers volumineux", 20, 100, True),
+        }
+        for line, expected in cases.items():
+            with self.subTest(line=line):
+                progress = web.parse_output_progress(line)
+                self.assertIsNotNone(progress)
+                self.assertEqual(
+                    expected,
+                    (progress["label"], progress["current"], progress["total"], progress["transient"]),
+                )
+
+    def test_manager_counters_drive_the_bar_and_stay_in_the_history(self):
+        progress = web.parse_output_progress("Préparation des liens: 1200/1416")
+
+        self.assertEqual(("Préparation des liens", 1200, 1416, False),
+                         (progress["label"], progress["current"], progress["total"], progress["transient"]))
+
+    def test_ordinary_output_is_never_mistaken_for_progress(self):
+        for line in (
+            "Cloning into '/home/sdk/Odoo-projects/DEMO/odoo/addons-store/odoo_entreprise'...",
+            "$ git clone --progress --depth 1 git@example.invalid:sudokeys/addons.git",
+            "Code retour: 0",
+            "Modules à ajouter (2) : sale, stock",
+            "Dépôt récupéré en 42.0 s.",
+            "Unpacking objects: 100% (12/12)",
+        ):
+            with self.subTest(line=line):
+                self.assertIsNone(web.parse_output_progress(line))
+
+    def test_rewritten_lines_feed_the_bar_only(self):
+        job = web.Job.__new__(web.Job)
+        job.lines, job.output, job.output_total, job.progress = [], "", 0, None
+        job.control = Mock()
+
+        job.add("Receiving objects:  17% (2451/14000)\n")
+        job.add("Receiving objects: 100% (14000/14000), done.\n")
+        job.add("Préparation des liens: 1200/1416\n")
+
+        self.assertEqual(
+            ["Receiving objects: 100% (14000/14000), done.", "Préparation des liens: 1200/1416"],
+            job.lines,
+        )
+        self.assertEqual({"label": "Préparation des liens", "current": 1200, "total": 1416}, job.progress)
 
 
 class ManagerErrorLogTests(unittest.TestCase):

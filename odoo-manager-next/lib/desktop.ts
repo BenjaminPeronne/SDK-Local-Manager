@@ -27,6 +27,16 @@ export interface DesktopBridge {
   wslImportSshKey?(): Promise<{ ok: boolean; key: string; alreadyPresent?: boolean }>;
   wslOpenEditor?(project: string): Promise<void>;
   wslOpenExplorer?(project: string): Promise<void>;
+  /** S'abonne à l'avancement de la préparation ; la fonction rendue se désabonne. */
+  onWslProgress?(callback: (step: WslPrepareStep) => void): () => void;
+}
+
+/** Étape en cours de la préparation du poste, telle que l'écran l'affiche. */
+export interface WslPrepareStep {
+  step: "import" | "backend" | "provision" | "done";
+  label: string;
+  index: number;
+  total: number;
 }
 
 export type { WslStatus } from "./wsl-setup";

@@ -21,6 +21,14 @@ const BUILD_ID_FILE = '.build-id';
 const PROVISION_PATH = SDK_DIRECTORY + '/provision.sh';
 const RELEASE_PATH = '/etc/sdk-manager-release';
 const LINUX_WORKSPACE = '/home/sdk/Odoo-projects';
+// Étapes de la préparation, dans leur ordre d'exécution. Windows ne publie aucun avancement
+// pendant `wsl --import` : l'écran affiche l'étape en cours, pas un pourcentage inventé.
+const PREPARE_STEP_LABELS = {
+  import: "Installation de l'environnement Linux",
+  backend: 'Copie du gestionnaire',
+  provision: 'Configuration de Docker et Git',
+  done: 'Environnement prêt',
+};
 // Clés recherchées dans %USERPROFILE%\.ssh, dans l'ordre de préférence de ssh-keygen.
 const SSH_KEY_NAMES = ['id_ed25519', 'id_ecdsa', 'id_rsa'];
 // wsl.exe écrit ses listes en UTF-16LE, y compris dans un tube.
@@ -95,12 +103,14 @@ class WslEnvironment {
     runner = defaultRunner,
     log = () => {},
     mountPath = WslEnvironment.mountedWindowsPath,
+    onProgress = () => {},
   } = {}) {
     this.distribution = distribution;
     this.installRoot = installRoot;
     this.run = runner;
     this.log = log;
     this.mountPath = mountPath;
+    this.onProgress = onProgress;
   }
 
   async wslVersion() {
@@ -231,16 +241,26 @@ class WslEnvironment {
   async prepare({ version, backendSource, archive, checksum }) {
     const state = await this.status();
     if (!state.wslInstalled) throw new Error("WSL n'est pas installé.");
-    if (!state.distributionInstalled) {
-      await this.importDistribution({ archive, checksum });
-    }
+    // Le plan est établi avant d'agir : l'écran annonce le nombre d'étapes dès le départ,
+    // au lieu de laisser l'utilisateur devant une attente de durée inconnue.
     const expected = await sha256OfFile(path.join(backendSource, BACKEND_EXECUTABLE));
-    if (await this.installedBackendId() !== expected) {
-      await this.installBackend(backendSource);
-    }
-    if (state.release !== version) {
-      await this.provision(version);
-    }
+    const planned = !state.distributionInstalled
+      ? ['import', 'backend', 'provision']
+      : [
+        await this.installedBackendId() !== expected ? 'backend' : null,
+        state.release !== version ? 'provision' : null,
+      ].filter(Boolean);
+    const run = async (step, action) => {
+      const index = planned.indexOf(step);
+      if (index < 0) return;
+      this.onProgress({ step, label: PREPARE_STEP_LABELS[step], index: index + 1, total: planned.length });
+      await action();
+    };
+
+    await run('import', () => this.importDistribution({ archive, checksum }));
+    await run('backend', () => this.installBackend(backendSource));
+    await run('provision', () => this.provision(version));
+    this.onProgress({ step: 'done', label: PREPARE_STEP_LABELS.done, index: planned.length, total: planned.length });
     return this.status();
   }
 
@@ -322,6 +342,7 @@ module.exports = {
   LINUX_WORKSPACE,
   WslEnvironment,
   backendCommand,
+  PREPARE_STEP_LABELS,
   decodeWslOutput,
   expectedChecksum,
   imageFiles,

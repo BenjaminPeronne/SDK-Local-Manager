@@ -10,6 +10,12 @@ const wslCapabilities = process.platform !== 'win32' ? {} : {
   wslImportSshKey: () => ipcRenderer.invoke('sdk:wsl-import-ssh-key'),
   wslOpenEditor: project => ipcRenderer.invoke('sdk:wsl-open-editor', project),
   wslOpenExplorer: project => ipcRenderer.invoke('sdk:wsl-open-explorer', project),
+  // Avancement de la préparation. Seule la charge utile passe au rendu, jamais l'événement IPC.
+  onWslProgress: callback => {
+    const listener = (_event, step) => callback(step);
+    ipcRenderer.on('sdk:wsl-progress', listener);
+    return () => ipcRenderer.removeListener('sdk:wsl-progress', listener);
+  },
 };
 
 // Expose capabilities individually; the renderer never receives raw IPC or Node access.

@@ -226,6 +226,9 @@ class ProjectCreator:
         self.log(log, f"Récupération de {repository.rsplit('/', 1)[-1]} ({branch})...")
         clone_arguments = [
             "clone",
+            # Git ne publie son avancement que sur un terminal : sans cette option, une
+            # récupération de plusieurs minutes n'affiche qu'une ligne « Cloning into ».
+            "--progress",
             "--config",
             "core.longpaths=true",
             "--depth",

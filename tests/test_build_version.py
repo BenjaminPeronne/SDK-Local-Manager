@@ -33,6 +33,9 @@ class AppVersionTests(unittest.TestCase):
                 '[[package]]\nname = "odoo-manager"\nversion = "0.1.1"\n',
                 encoding="utf-8",
             )
+            core = root / "odoo_manager_core"
+            core.mkdir()
+            (core / "version.py").write_text('"""Doc."""\n\nAPP_VERSION = "0.1.1"\n', encoding="utf-8")
 
             MODULE.set_app_version(root, "0.1.2")
 
@@ -42,6 +45,8 @@ class AppVersionTests(unittest.TestCase):
             self.assertEqual(package_lock["packages"][""]["version"], "0.1.2")
             self.assertIn('version = "0.1.2"', (tauri / "Cargo.toml").read_text())
             self.assertIn('version = "0.1.2"', (tauri / "Cargo.lock").read_text())
+            # Le backend publie cette version sur /api/version.
+            self.assertIn('APP_VERSION = "0.1.2"', (root / "odoo_manager_core" / "version.py").read_text())
 
     def test_rejects_non_semantic_versions(self):
         with self.assertRaises(ValueError):

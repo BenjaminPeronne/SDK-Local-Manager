@@ -80,6 +80,7 @@ from odoo_manager_core.migration import (
 from odoo_manager_core import jobs as job_control
 from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
 from odoo_manager_core.traefik import url_with_port
+from odoo_manager_core.version import APP_VERSION
 from odoo_manager_core.odoo_log_display import OdooLogDisplay, compact_odoo_log_text
 from odoo_manager_core.docker_api import EngineUnavailable
 from odoo_manager_core.system import (
@@ -95,6 +96,97 @@ from odoo_manager_core.windows_links import (
     is_wsl_symlink,
     native_symlinks_supported,
     wsl_symlinks,
+)
+
+
+# Contrat public de l'API locale, publié par /api/version et /api/capabilities.
+#
+# Un intégrateur lit ces listes au lieu de deviner ce que le Manager sait faire. API_VERSION
+# change dès qu'une route ou une action disparaît ou change de forme ; un ajout ne la change
+# pas. `{project}` est un nom de projet, `{job}` un identifiant de tâche.
+API_VERSION = 1
+
+API_ENDPOINTS = {
+    "GET": (
+        "/api/version",
+        "/api/capabilities",
+        "/api/health",
+        "/api/bootstrap",
+        "/api/overview",
+        "/api/settings",
+        "/api/errors",
+        "/api/jobs",
+        "/api/stream",
+        "/api/system/status",
+        "/api/system/project-creation-prerequisites",
+        "/api/system/migration",
+        "/api/system/ssh-keys",
+        "/api/projects/{project}/modules",
+        "/api/projects/{project}/addon-links",
+        "/api/projects/{project}/languages",
+        "/api/projects/{project}/socle",
+        "/api/projects/{project}/socle/plan",
+        "/api/projects/{project}/databases",
+        "/api/projects/{project}/database-versions",
+        "/api/projects/{project}/logs",
+        "/api/projects/{project}/logs/stream",
+        "/api/projects/{project}/diagnostics",
+    ),
+    "POST": (
+        "/api/jobs",
+        "/api/jobs/{job}/cancel",
+        "/api/settings",
+        "/api/errors/report",
+        "/api/system/shutdown",
+        "/api/system/docker/start",
+        "/api/system/ssh-key/generate",
+        "/api/projects/{project}/postgresql/open",
+        "/api/projects/{project}/database-restore",
+        "/api/projects/{project}/repository/inspect",
+        "/api/projects/{project}/module-zip/inspect",
+        "/api/projects/{project}/module-zip",
+    ),
+    "DELETE": (
+        "/api/errors",
+        "/api/jobs",
+        "/api/jobs/{job}",
+    ),
+}
+
+# Actions acceptées par POST /api/jobs. tests/test_web_runtime.py compare cette liste au
+# code de répartition : une action ajoutée sans être publiée fait échouer les tests.
+API_ACTIONS = (
+    "cleanup_staging",
+    "convert_wsl_addon_links",
+    "create_database",
+    "create_project",
+    "delete_module_code",
+    "delete_project",
+    "drop_database",
+    "ignore_missing_modules_locally",
+    "install_git",
+    "install_module",
+    "install_socle",
+    "install_traefik",
+    "link_modules",
+    "migrate_project",
+    "neutralize_database",
+    "regenerate_assets",
+    "repair_enterprise_links",
+    "repository_modules",
+    "reset_admin_password",
+    "reset_all_translations",
+    "reset_module_translations",
+    "restore_module_update_exclusions",
+    "start_project",
+    "stop_project",
+    "uninstall_module",
+    "update_all",
+    "update_all_modules",
+    "update_imported_modules",
+    "update_local_modules",
+    "update_module",
+    "update_project",
 )
 
 
@@ -2486,6 +2578,38 @@ def overview(docker=None, databases_max_age=None):
     }
 
 
+def api_version_payload():
+    """Identité du service, lue avant tout autre appel.
+
+    `application` suit les manifestes de l'application ; `api` ne bouge que si une route
+    ou une action publiée disparaît ou change de forme.
+    """
+    return {
+        "application": APP_VERSION,
+        "api": API_VERSION,
+        "instance_id": os.environ.get("ODOO_MANAGER_INSTANCE_ID", ""),
+    }
+
+
+def api_capabilities_payload():
+    """Contrat publié : ce que ce Manager sait faire, sans rien sonder.
+
+    Aucun appel à Docker, à WSL ni au disque : un intégrateur interroge cette route à
+    chaque démarrage, elle doit rester immédiate.
+    """
+    return {
+        **api_version_payload(),
+        "endpoints": {method: list(paths) for method, paths in API_ENDPOINTS.items()},
+        "actions": list(API_ACTIONS),
+        "features": {
+            "platform": platform_id(),
+            "execution_mode": SETTINGS.execution_mode,
+            "job_cancellation": True,
+            "job_queue": True,
+        },
+    }
+
+
 def bootstrap_snapshot():
     """Return one coherent startup snapshot backed by a single Docker probe."""
     docker = docker_status(SETTINGS)
@@ -2624,6 +2748,59 @@ def cancel_job(job_id):
     return job
 
 
+# Étapes de `git clone --progress`, dans l'ordre où Git les parcourt. Chacune repart de 0 :
+# la barre affiche l'étape en cours plutôt qu'un total inventé sur l'ensemble.
+GIT_PROGRESS_PHASES = {
+    "Counting objects": "Recensement des objets",
+    "Enumerating objects": "Recensement des objets",
+    "Compressing objects": "Compression des objets",
+    "Receiving objects": "Réception des objets",
+    "Resolving deltas": "Application des différences",
+    "Updating files": "Écriture des fichiers",
+    "Filtering content": "Récupération des fichiers volumineux",
+}
+GIT_PROGRESS_RE = re.compile(
+    r"^(?P<phase>[A-Za-z][A-Za-z ]+):\s+(?P<percent>\d{1,3})%\s*(?:\((?P<current>\d+)/(?P<total>\d+)\))?"
+)
+COUNTED_PROGRESS_RE = re.compile(r"^(?P<label>[^:]{3,60}):\s+(?P<current>\d+)/(?P<total>\d+)\s*$")
+
+
+def parse_output_progress(text):
+    """Avancement chiffré lu dans une ligne de sortie, ou None.
+
+    Les étapes les plus longues sont des commandes externes : leur seule mesure d'avancement
+    est ce qu'elles écrivent. `transient` marque une ligne que la commande réécrit en place,
+    des centaines de fois : elle nourrit la barre, pas l'historique.
+
+    Cette lecture ne fait que compléter `set_progress`, que les actions appellent déjà
+    directement quand elles connaissent leur propre avancement.
+    """
+    line = text.strip()
+    # Le serveur Git préfixe ses propres étapes, réécrites elles aussi en place.
+    if line.startswith("remote: "):
+        line = line[len("remote: "):]
+    match = GIT_PROGRESS_RE.match(line)
+    if match:
+        label = GIT_PROGRESS_PHASES.get(match.group("phase"))
+        if label is None:
+            return None
+        if match.group("total") and int(match.group("total")):
+            current, total = int(match.group("current")), int(match.group("total"))
+        else:
+            current, total = min(int(match.group("percent")), 100), 100
+        return {"label": label, "current": current, "total": total, "transient": not line.endswith("done.")}
+    match = COUNTED_PROGRESS_RE.match(line)
+    if match and int(match.group("total")):
+        return {
+            "label": match.group("label").strip(),
+            "current": int(match.group("current")),
+            "total": int(match.group("total")),
+            # Une ligne écrite par le gestionnaire lui-même : elle reste dans l'historique.
+            "transient": False,
+        }
+    return None
+
+
 class Job:
     def __init__(self, title, target, args=(), project=None, resources=None):
         global NEXT_JOB_ID
@@ -2660,9 +2837,16 @@ class Job:
         schedule_jobs()
 
     def add(self, line):
-        with JOBS_LOCK:
-            self.lines.append(line.rstrip("\n"))
-            self._append_output(line.rstrip("\n") + "\n")
+        text = line.rstrip("\n")
+        progress = parse_output_progress(text)
+        if progress is not None:
+            self.set_progress(progress["label"], progress["current"], progress["total"])
+        # Seules les lignes réécrites en place par la commande sont retenues hors de
+        # l'historique ; tout ce que le gestionnaire écrit lui-même y reste.
+        if progress is None or not progress["transient"]:
+            with JOBS_LOCK:
+                self.lines.append(text)
+                self._append_output(text + "\n")
         # Chaque ligne écrite par l'action est un point d'arrêt : les longues sorties Odoo s'interrompent vite.
         if job_control.current_control() is self.control:
             self.control.checkpoint()
@@ -5624,6 +5808,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/favicon.ico":
                 # Demandé d'office par le navigateur sur la page de secours : ce n'est pas une erreur du service.
                 return empty_response(self)
+            if path == "/api/version":
+                return json_response(self, api_version_payload())
+            if path == "/api/capabilities":
+                return json_response(self, api_capabilities_payload())
             if path == "/api/health":
                 return json_response(
                     self,

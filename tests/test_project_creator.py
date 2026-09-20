@@ -121,9 +121,11 @@ class ProjectCreatorTests(unittest.TestCase):
                 "gc.auto=0",
             ):
                 self.assertIn(setting, command)
+            # --progress fait écrire l'avancement à Git hors terminal ; longpaths reste le
+            # premier réglage, il conditionne la réussite du clone sous Windows.
             self.assertEqual(
-                command[command.index("clone") + 1 : command.index("clone") + 3],
-                ["--config", "core.longpaths=true"],
+                command[command.index("clone") + 1 : command.index("clone") + 4],
+                ["--progress", "--config", "core.longpaths=true"],
             )
             self.assertIn("--no-tags", command)
 

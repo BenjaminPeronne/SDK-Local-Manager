@@ -178,6 +178,48 @@ test('a new build of the same version still replaces the backend', async () => {
   }
 });
 
+test('preparation announces its steps, in order, so the wait is never blind', async () => {
+  const build = backendBuild();
+  try {
+    const { runner } = fakeEnvironment({ release: '', backendId: 'aucun' });
+    const steps = [];
+    const environment = new WslEnvironment({
+      runner, installRoot: 'C:\\data\\wsl', mountPath: () => '/mnt/c/app/backend-linux',
+      onProgress: step => steps.push(step),
+    });
+    const archive = path.join(build.directory, 'image.wsl');
+    fs.writeFileSync(archive, 'image');
+    fs.writeFileSync(archive + '.sha256', `${createHash('sha256').update('image').digest('hex')}  image.wsl\n`);
+
+    await environment.prepare({ version: '0.6.0', backendSource: build.directory, archive, checksum: archive + '.sha256' });
+
+    assert.deepEqual(steps.map(step => step.step), ['import', 'backend', 'provision', 'done']);
+    assert.deepEqual(steps.map(step => `${step.index}/${step.total}`), ['1/3', '2/3', '3/3', '3/3']);
+    assert.ok(steps.every(step => step.label));
+  } finally {
+    fs.rmSync(build.directory, { recursive: true, force: true });
+  }
+});
+
+test('a partial preparation counts only the steps it will really run', async () => {
+  const build = backendBuild();
+  try {
+    // Distribution à jour, backend identique : seul le provisionnement reste à faire.
+    const { runner } = fakeEnvironment({ distributions: ['SDK-Manager'], release: '0.5.0', backendId: build.id });
+    const steps = [];
+    const environment = new WslEnvironment({
+      runner, installRoot: 'C:\\data\\wsl', mountPath: () => '/mnt/c/app/backend-linux',
+      onProgress: step => steps.push(step),
+    });
+
+    await environment.prepare({ version: '0.6.0', backendSource: build.directory, archive: 'C:\\img.wsl', checksum: 'C:\\img.wsl.sha256' });
+
+    assert.deepEqual(steps.map(step => `${step.step} ${step.index}/${step.total}`), ['provision 1/1', 'done 1/1']);
+  } finally {
+    fs.rmSync(build.directory, { recursive: true, force: true });
+  }
+});
+
 test('a new application version reprovisions without touching the projects', async () => {
   const build = backendBuild();
   try {

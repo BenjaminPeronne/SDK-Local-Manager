@@ -5,7 +5,7 @@ const Module = require('node:module');
 const PRELOAD = require.resolve('../preload.cjs');
 const WSL_CAPABILITIES = [
   'wslStatus', 'wslInstallWsl', 'wslPrepare', 'wslLegacyWorkspace',
-  'wslImportSshKey', 'wslOpenEditor', 'wslOpenExplorer',
+  'wslImportSshKey', 'wslOpenEditor', 'wslOpenExplorer', 'onWslProgress',
 ];
 
 /** Charge le préchargement comme Electron le ferait, sur le système demandé. */

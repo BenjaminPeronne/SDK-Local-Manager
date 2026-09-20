@@ -121,6 +121,12 @@ type TraefikStatus = {
   can_start: boolean;
 };
 
+const NAME_LIST = new Intl.ListFormat("fr", { style: "long", type: "conjunction" });
+
+function formatNameList(names: string[]) {
+  return NAME_LIST.format(names);
+}
+
 // Liens de odoo/addons créés par WSL dans les anciennes versions Windows.
 type AddonLinksStatus = {
   supported: boolean;
@@ -3966,7 +3972,6 @@ export default function Home() {
                       size="sm"
                       variant="outline"
                       disabled={!candidate.stopped || loading}
-                      title={candidate.stopped ? undefined : "Arrête ce projet avant de le migrer : sa base serait copiée dans un état incohérent."}
                       onClick={() => requestProjectMigration(candidate.name)}
                     >
                       <Rocket className="h-4 w-4" />
@@ -3975,6 +3980,16 @@ export default function Home() {
                     </Button>
                   ))}
                 </div>
+                {/* Un bouton désactivé n'affiche pas son title : la raison doit rester lisible sans survol. */}
+                {migration.projects.some((candidate) => !candidate.already_migrated && !candidate.stopped) && (
+                  <div className="flex items-start gap-2 text-emerald-800 dark:text-emerald-200 sm:pl-8">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>
+                      Arrête {formatNameList(migration.projects.filter((candidate) => !candidate.already_migrated && !candidate.stopped).map((candidate) => candidate.name))} avant de
+                      {" "}migrer : la base serait copiée dans un état incohérent. Le bouton reste inactif tant que le projet tourne.
+                    </span>
+                  </div>
+                )}
               </div>
             )}
             {(systemStatus?.abandoned_staging?.count ?? 0) > 0 && (

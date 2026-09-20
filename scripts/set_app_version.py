@@ -48,6 +48,12 @@ def set_app_version(root: Path, version: str) -> None:
         r'(^\[\[package\]\]\nname = "odoo-manager"\nversion = ")[^"]+("$)',
         rf"\g<1>{version}\g<2>",
     )
+    # Le backend publie cette version sur /api/version : elle doit suivre les manifestes.
+    replace_once(
+        root / "odoo_manager_core" / "version.py",
+        r'(^APP_VERSION = ")[^"]+("$)',
+        rf"\g<1>{version}\g<2>",
+    )
 
 
 def main() -> None:

@@ -169,6 +169,8 @@ async function start() {
     wsl = new WslEnvironment({
       installRoot: path.join(app.getPath('userData'), 'wsl'),
       log: message => fs.appendFileSync(path.join(logDir, 'backend.log'), message + '\n'),
+      // L'écran de préparation attend plusieurs minutes : il doit dire où en est l'installation.
+      onProgress: step => window?.webContents.send('sdk:wsl-progress', step),
     });
     // `wsl --list` suffit pour choisir le backend et ne démarre pas la distribution : lire sa
     // version l'aurait démarrée avant même l'affichage de la fenêtre.
