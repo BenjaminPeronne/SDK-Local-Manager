@@ -19,6 +19,9 @@ const BACKEND_EXECUTABLE = 'odoo-manager-backend';
 const BACKEND_PATH = BACKEND_DIRECTORY + '/' + BACKEND_EXECUTABLE;
 const BUILD_ID_FILE = '.build-id';
 const PROVISION_PATH = SDK_DIRECTORY + '/provision.sh';
+// Empreinte du script de provisionnement réellement installé : il vit dans l'image, donc
+// une correction apportée au script n'atteignait jamais un environnement déjà en place.
+const PROVISION_ID_FILE = SDK_DIRECTORY + '/.provision-id';
 const RELEASE_PATH = '/etc/sdk-manager-release';
 const LINUX_WORKSPACE = '/home/sdk/Odoo-projects';
 // Étapes de la préparation, dans leur ordre d'exécution. Windows ne publie aucun avancement
@@ -113,7 +116,9 @@ function expectedChecksum(text) {
 
 function imageFiles(resourcesRoot, version) {
   const archive = path.join(resourcesRoot, 'wsl', `sdk-manager-${version}.wsl`);
-  return { archive, checksum: archive + '.sha256' };
+  // Le script de provisionnement est livré à côté de l'image : il suit les builds, comme le
+  // backend, au lieu d'être figé dans la distribution importée.
+  return { archive, checksum: archive + '.sha256', provisionScript: path.join(resourcesRoot, 'wsl', 'provision.sh') };
 }
 
 class WslEnvironment {
@@ -246,9 +251,41 @@ class WslEnvironment {
     }
   }
 
-  /** Met la distribution au niveau de la version de l'application. Rejouable. */
-  async provision(version) {
+  async installedProvisionId() {
+    try {
+      const { stdout } = await this.runInDistribution(['cat', PROVISION_ID_FILE]);
+      return decodeWslOutput(stdout).trim();
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Met la distribution au niveau de ce build. Rejouable.
+   *
+   * Le script du build remplace celui de l'image avant d'être exécuté : sans cela, un
+   * environnement installé une fois gardait éternellement l'ancien provisionnement.
+   */
+  async provision(version, script = '', scriptId = '') {
+    if (script) {
+      const mounted = this.mountPath(script);
+      if (!mounted) throw new Error(`Script de provisionnement introuvable : ${script}`);
+      const copy = [
+        'set -eu',
+        `mkdir -p ${SDK_DIRECTORY}`,
+        `cp -- "$1" ${PROVISION_PATH}.tmp`,
+        `chmod 0755 ${PROVISION_PATH}.tmp`,
+        `mv ${PROVISION_PATH}.tmp ${PROVISION_PATH}`,
+      ].join('\n');
+      await this.runInDistribution(['sh', '-c', copy, 'install-provision', mounted], { asRoot: true });
+    }
     await this.runInDistribution(['env', `SDK_MANAGER_VERSION=${version}`, 'sh', PROVISION_PATH], { asRoot: true });
+    if (scriptId) {
+      await this.runInDistribution(
+        ['sh', '-c', `printf '%s\\n' "$1" > ${PROVISION_ID_FILE}`, 'write-provision-id', scriptId],
+        { asRoot: true },
+      );
+    }
     this.log(`Environnement provisionné en version ${version}.`);
   }
 
@@ -258,17 +295,22 @@ class WslEnvironment {
    * Le backend est comparé par l'empreinte de son exécutable, pas par le numéro de version :
    * deux builds d'une même version (0.5.0-build8, build9…) embarquent des backends différents.
    */
-  async prepare({ version, backendSource, archive, checksum }) {
+  async prepare({ version, backendSource, archive, checksum, provisionScript = '' }) {
     const state = await this.status();
     if (!state.wslInstalled) throw new Error("WSL n'est pas installé.");
     // Le plan est établi avant d'agir : l'écran annonce le nombre d'étapes dès le départ,
     // au lieu de laisser l'utilisateur devant une attente de durée inconnue.
     const expected = await sha256OfFile(path.join(backendSource, BACKEND_EXECUTABLE));
+    // Le provisionnement suit la version ET le script : deux builds d'une même version peuvent
+    // corriger l'environnement, et cette correction doit atteindre les postes déjà installés.
+    const provisionId = provisionScript ? await sha256OfFile(provisionScript) : '';
+    const provisionOutdated = state.release !== version
+      || (provisionId !== '' && await this.installedProvisionId() !== provisionId);
     const planned = !state.distributionInstalled
       ? ['import', 'backend', 'provision']
       : [
         await this.installedBackendId() !== expected ? 'backend' : null,
-        state.release !== version ? 'provision' : null,
+        provisionOutdated ? 'provision' : null,
       ].filter(Boolean);
     const run = async (step, action) => {
       const index = planned.indexOf(step);
@@ -279,7 +321,7 @@ class WslEnvironment {
 
     await run('import', () => this.importDistribution({ archive, checksum }));
     await run('backend', () => this.installBackend(backendSource));
-    await run('provision', () => this.provision(version));
+    await run('provision', () => this.provision(version, provisionScript, provisionId));
     this.onProgress({ step: 'done', label: PREPARE_STEP_LABELS.done, index: planned.length, total: planned.length });
     return this.status();
   }

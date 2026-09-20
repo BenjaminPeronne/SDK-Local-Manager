@@ -67,6 +67,9 @@ def main():
     # Ressources de l'environnement WSL : présentes ou non, electron-builder doit les trouver.
     for directory in ("wsl", "backend-linux"):
         (FRONTEND / "electron" / "binaries" / directory).mkdir(parents=True, exist_ok=True)
+    # Le script de provisionnement voyage avec le build, pas seulement dans l'image : un
+    # environnement déjà installé doit recevoir ses corrections sans être réimporté.
+    shutil.copy2(ROOT / "wsl" / "provision.sh", FRONTEND / "electron" / "binaries" / "wsl" / "provision.sh")
     sidecar = [sys.executable, str(ROOT / "scripts/build_electron_sidecar.py")]
     if not args.no_clean:
         sidecar.append("--clean")

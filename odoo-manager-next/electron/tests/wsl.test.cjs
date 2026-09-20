@@ -49,10 +49,11 @@ test('backend runs inside the distribution with its port, since wsl.exe passes n
     'ODOO_MANAGER_INSTANCE_ID=abc-123', BACKEND_PATH]);
 });
 
-test('packaged image and checksum sit next to each other', () => {
+test('packaged image, checksum and provisioning script sit next to each other', () => {
   const files = imageFiles('C:\\app\\resources', '0.5.0');
   assert.equal(files.archive, path.join('C:\\app\\resources', 'wsl', 'sdk-manager-0.5.0.wsl'));
   assert.equal(files.checksum, files.archive + '.sha256');
+  assert.equal(files.provisionScript, path.join('C:\\app\\resources', 'wsl', 'provision.sh'));
 });
 
 test('checksum file is read strictly', () => {
@@ -68,14 +69,16 @@ test('the Windows projects folder is seen from the distribution under /mnt', () 
   assert.equal(WslEnvironment.mountedWindowsPath(''), '');
 });
 
-function fakeEnvironment({ distributions = [], release = '', version = '2.4.12.0', backendId = '' } = {}) {
+function fakeEnvironment({ distributions = [], release = '', version = '2.4.12.0', backendId = '', provisionId = '' } = {}) {
   const calls = [];
   const runner = async (executable, args) => {
     calls.push([executable, ...args].join(' '));
     if (args.includes('--version')) return { stdout: utf16(`Version WSL : ${version}\r\n`), stderr: '', code: 0 };
     if (args.includes('--list')) return { stdout: utf16(distributions.join('\r\n') + '\r\n'), stderr: '', code: 0 };
     if (args.includes('cat')) {
-      const value = args.some(arg => arg.endsWith('.build-id')) ? backendId : release;
+      const value = args.some(arg => arg.endsWith('.build-id')) ? backendId
+        : args.some(arg => arg.endsWith('.provision-id')) ? provisionId
+          : release;
       if (!value) throw new Error('fichier absent');
       return { stdout: Buffer.from(value + '\n'), stderr: '', code: 0 };
     }
@@ -190,6 +193,55 @@ test('a Linux environment that stops starting is explained in terms the user can
   // Une panne sans rapport ne doit pas être présentée comme un problème de virtualisation.
   assert.equal(wslStartFailureReason(new Error('EACCES: permission denied')), '');
   assert.equal(wslStartFailureReason(null), '');
+});
+
+test('a corrected provisioning script reaches a machine already installed', async () => {
+  // L'image porte provision.sh : sans empreinte, une correction du script n'atteignait jamais
+  // un environnement déjà en place, même après plusieurs builds.
+  const build = backendBuild();
+  try {
+    const script = path.join(build.directory, 'provision.sh');
+    fs.writeFileSync(script, '#!/bin/sh\necho corrigé\n');
+    const scriptId = createHash('sha256').update(fs.readFileSync(script)).digest('hex');
+    const { calls, runner } = fakeEnvironment({
+      distributions: ['SDK-Manager'], release: '0.6.0', backendId: build.id, provisionId: 'ancienne-empreinte',
+    });
+    const environment = new WslEnvironment({ runner, installRoot: 'C:\\data\\wsl', mountPath: () => '/mnt/c/app/wsl/provision.sh' });
+
+    await environment.prepare({
+      version: '0.6.0', backendSource: build.directory, archive: 'C:\\img.wsl', checksum: 'C:\\img.wsl.sha256',
+      provisionScript: script,
+    });
+
+    assert.ok(calls.some(call => call.includes('install-provision')), 'le script du build doit être copié');
+    assert.ok(calls.some(call => call.includes('provision.sh') && call.includes('SDK_MANAGER_VERSION=0.6.0')));
+    assert.ok(calls.some(call => call.includes('write-provision-id') && call.includes(scriptId)));
+    assert.ok(calls.every(call => !call.includes('--from-file')), 'la distribution ne doit pas être réimportée');
+  } finally {
+    fs.rmSync(build.directory, { recursive: true, force: true });
+  }
+});
+
+test('an unchanged provisioning script is not replayed at every start', async () => {
+  const build = backendBuild();
+  try {
+    const script = path.join(build.directory, 'provision.sh');
+    fs.writeFileSync(script, '#!/bin/sh\necho inchangé\n');
+    const scriptId = createHash('sha256').update(fs.readFileSync(script)).digest('hex');
+    const { calls, runner } = fakeEnvironment({
+      distributions: ['SDK-Manager'], release: '0.6.0', backendId: build.id, provisionId: scriptId,
+    });
+    const environment = new WslEnvironment({ runner, installRoot: 'C:\\data\\wsl', mountPath: () => '/mnt/c/app/wsl/provision.sh' });
+
+    await environment.prepare({
+      version: '0.6.0', backendSource: build.directory, archive: 'C:\\img.wsl', checksum: 'C:\\img.wsl.sha256',
+      provisionScript: script,
+    });
+
+    assert.ok(calls.every(call => !call.includes('provision.sh')), 'rien à refaire : aucun provisionnement');
+  } finally {
+    fs.rmSync(build.directory, { recursive: true, force: true });
+  }
 });
 
 test('preparation announces its steps, in order, so the wait is never blind', async () => {
