@@ -109,15 +109,21 @@ function installHandlers() {
   handle('backend-diagnostics', () => backend.diagnostics());
   handle('open-external', url => shell.openExternal(externalUrl(url)));
   handle('open-docker', openDocker);
-  handle('wsl-status', () => (wsl ? wsl.status() : { wslInstalled: false, distributionInstalled: false, supported: false }));
-  handle('wsl-install-wsl', () => (wsl ? wsl.installWsl() : { ok: false, message: 'Windows uniquement.' }));
-  handle('wsl-prepare', () => prepareWslEnvironment());
-  handle('wsl-legacy-workspace', () => windowsWorkspaceSeenFromWsl());
+  // L'environnement Linux n'existe que sous Windows. Le préchargement ne propose même pas ces
+  // commandes ailleurs ; un appel malgré tout est refusé, jamais traité comme un WSL manquant.
+  const onWindows = callback => (...args) => {
+    if (!wsl) throw new Error("L'environnement Linux n'existe que sous Windows.");
+    return callback(...args);
+  };
+  handle('wsl-status', onWindows(() => wsl.status()));
+  handle('wsl-install-wsl', onWindows(() => wsl.installWsl()));
+  handle('wsl-prepare', onWindows(() => prepareWslEnvironment()));
+  handle('wsl-legacy-workspace', onWindows(() => windowsWorkspaceSeenFromWsl()));
   handle('relaunch', () => { app.relaunch(); app.quit(); });
   handle('stop-legacy-traefik', stopLegacyTraefik);
-  handle('wsl-import-ssh-key', () => wsl.importSshKey(path.join(app.getPath('home'), '.ssh')));
-  handle('wsl-open-editor', project => wsl.openEditor(`${LINUX_WORKSPACE}/${projectName(project)}`));
-  handle('wsl-open-explorer', project => shell.openPath(wsl.explorerPath(`${LINUX_WORKSPACE}/${projectName(project)}`)));
+  handle('wsl-import-ssh-key', onWindows(() => wsl.importSshKey(path.join(app.getPath('home'), '.ssh'))));
+  handle('wsl-open-editor', onWindows(project => wsl.openEditor(`${LINUX_WORKSPACE}/${projectName(project)}`)));
+  handle('wsl-open-explorer', onWindows(project => shell.openPath(wsl.explorerPath(`${LINUX_WORKSPACE}/${projectName(project)}`))));
   handle('pick-directory', async defaultPath => {
     if (defaultPath !== undefined && (typeof defaultPath !== 'string' || defaultPath.length > 32768)) throw new Error('Chemin invalide.');
     const result = await dialog.showOpenDialog(window, {

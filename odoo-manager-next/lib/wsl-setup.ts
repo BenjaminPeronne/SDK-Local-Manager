@@ -5,6 +5,8 @@
 // voit qu'un bouton ; cette logique dit lequel afficher.
 
 export interface WslStatus {
+  /** Absent sous Windows ; faux quand le système ne connaît pas d'environnement Linux. */
+  supported?: boolean;
   wslInstalled: boolean;
   wslVersion: string;
   supportsFileImport: boolean;
@@ -33,7 +35,9 @@ const READY: WslSetupState = {
 };
 
 export function wslSetupState(status: WslStatus | null, applicationVersion: string): WslSetupState {
-  if (!status) {
+  // Hors Windows, il n'y a rien à préparer : un statut absent, ou qui se déclare non pris en
+  // charge, ne doit jamais être lu comme un WSL qu'il resterait à installer.
+  if (!status || status.supported === false) {
     return {
       step: "unsupported",
       title: "Environnement Linux indisponible",
