@@ -63,6 +63,7 @@ import { WslSetupDialog } from "@/components/wsl-setup";
 import { desktopBridge, desktopErrorMessage, type WslStatus } from "@/lib/desktop";
 import { isWslSetupPending } from "@/lib/wsl-setup";
 import { databaseToKeep, readRememberedDatabases, writeRememberedDatabases } from "@/lib/database-selection";
+import { handleListKeys } from "@/lib/list-navigation";
 import { cn } from "@/lib/utils";
 import { mergeIncrementalJobOutput, type JobOutputCache } from "@/lib/job-output";
 import appIcon from "./icon.png";
@@ -1006,6 +1007,39 @@ function Notice({
 }
 
 /**
+ * Premier pas d'un projet démarré sans base : la création est l'action recommandée.
+ *
+ * Tant qu'aucune base n'existe, les modules et l'activité n'ont rien à montrer : l'onglet Bases
+ * guide vers la seule étape utile, avec la restauration d'une sauvegarde en alternative.
+ */
+function FirstDatabaseCallout({ disabled, onCreate, onRestore }: { disabled: boolean; onCreate: () => void; onRestore: () => void }) {
+  return (
+    <div className="rounded-lg border border-primary/40 bg-selected/60 p-6 text-center sm:p-8">
+      <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/15 text-primary">
+        <Database className="h-6 w-6" aria-hidden="true" />
+      </span>
+      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+        <h3 className="text-lg font-semibold">Crée la première base de ce projet</h3>
+        <Badge variant="outline" className="border-primary/50 text-primary">Recommandé</Badge>
+      </div>
+      <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+        Odoo tourne, mais aucune base n’existe encore. Une fois la base créée, ses modules et son activité apparaissent dans les autres onglets.
+      </p>
+      <div className="mt-5 flex flex-col items-center justify-center gap-2 sm:flex-row">
+        <Button className="w-full px-6 sm:w-auto" disabled={disabled} onClick={onCreate}>
+          <PlusCircle className="h-4 w-4" />
+          Créer une base
+        </Button>
+        <Button className="w-full sm:w-auto" variant="outline" disabled={disabled} onClick={onRestore}>
+          <Upload className="h-4 w-4" />
+          Restaurer une sauvegarde
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Accueil affiché quand aucun projet n'est ouvert.
  *
  * Sans projet, les onglets ne montrent que des panneaux vides : l'écran dit plutôt ce que
@@ -1435,6 +1469,43 @@ export default function Home() {
   const [gitlabProject, setGitlabProject] = useState<GitLabProject | null>(null);
   const [gitlabRefSearch, setGitlabRefSearch] = useState("");
   const [gitlabRefs, setGitlabRefs] = useState<GitLabRefs | null>(null);
+  // Ligne active au clavier dans les listes GitLab : flèches pour parcourir, Entrée pour choisir,
+  // sans quitter le champ de recherche.
+  const [gitlabActiveIndex, setGitlabActiveIndex] = useState(0);
+  const [gitlabRefActiveIndex, setGitlabRefActiveIndex] = useState(0);
+  const gitlabRefOptions = useMemo(
+    () =>
+      gitlabRefs
+        ? [
+            ...[...gitlabRefs.branches]
+              .sort((left, right) => Number(right.default) - Number(left.default))
+              .map((branch) => ({ name: branch.name, kind: branch.default ? "Branche par défaut" : "Branche" })),
+            ...gitlabRefs.tags.map((tag) => ({ name: tag, kind: "Tag" })),
+          ]
+        : [],
+    [gitlabRefs],
+  );
+
+  // Nouvelle liste : la première ligne est active ; pour les branches, celle déjà choisie.
+  useEffect(() => setGitlabActiveIndex(0), [gitlabProjects]);
+  useEffect(() => {
+    const selected = gitlabRefOptions.findIndex((ref) => ref.name === repositoryBranch);
+    setGitlabRefActiveIndex(selected >= 0 ? selected : 0);
+  }, [gitlabRefOptions, repositoryBranch]);
+  // La ligne active reste visible quand on la déplace au clavier dans une liste qui défile.
+  useEffect(() => {
+    document.getElementById(`gitlab-project-${gitlabActiveIndex}`)?.scrollIntoView({ block: "nearest" });
+  }, [gitlabActiveIndex]);
+  useEffect(() => {
+    document.getElementById(`gitlab-ref-${gitlabRefActiveIndex}`)?.scrollIntoView({ block: "nearest" });
+  }, [gitlabRefActiveIndex]);
+
+  function chooseGitlabProject(project: GitLabProject) {
+    setGitlabProject(project);
+    setGitlabRefSearch("");
+    setRepositoryUrl(project.sshUrl);
+    setRepositoryBranch("");
+  }
   const [gitlabError, setGitlabError] = useState("");
   const repositoryUrlError = moduleRepositoryUrlError(repositoryUrl);
   const [zipDialogOpen, setZipDialogOpen] = useState(false);
@@ -3059,6 +3130,24 @@ export default function Home() {
     writeRememberedDatabases(rememberedDatabases.current);
   }
 
+  // Base en cours de suppression : une fois l'action réussie, elle est oubliée. Une liste vide
+  // conserve sinon la sélection (sonde Postgres lente) et pointerait vers une base disparue.
+  const droppedDatabase = useRef<{ jobId: number; project: string; db: string } | null>(null);
+  useEffect(() => {
+    const dropped = droppedDatabase.current;
+    if (!dropped) return;
+    const job = jobs.find((item) => item.id === dropped.jobId);
+    if (!job || isJobActive(job)) return;
+    droppedDatabase.current = null;
+    if (job.status !== "done") return;
+    if (rememberedDatabases.current[dropped.project] === dropped.db) {
+      const { [dropped.project]: _forgotten, ...others } = rememberedDatabases.current;
+      rememberedDatabases.current = others;
+      writeRememberedDatabases(others);
+    }
+    if (selectedProject?.name === dropped.project) setSelectedDb((current) => (current === dropped.db ? "" : current));
+  }, [jobs, selectedProject?.name]);
+
   function runDatabaseAction(db: string, action: DatabaseMenuAction) {
     if (db !== selectedDb) {
       // Les actions lisent la base sélectionnée : on attend que la sélection soit appliquée.
@@ -3265,6 +3354,22 @@ export default function Home() {
   );
   const selectedProjectReady = Boolean(selectedProject);
   const selectedProjectOnline = selectedProject?.odoo_status === "running";
+  // Projet démarré sans aucune base : seuls les onglets Bases et Réglages ont un sens, et la
+  // création de base devient l'étape recommandée. `selectedDb` reste renseigné pendant une sonde
+  // Postgres momentanément vide : il évite de masquer les onglets d'un projet qui a des bases.
+  const awaitingFirstDatabase = selectedProjectOnline && odooDatabases.length === 0 && !selectedDb;
+  const projectTabVisible: Record<string, boolean> = {
+    bases: selectedProjectOnline,
+    modules: selectedProjectOnline && !awaitingFirstDatabase,
+    // Projet arrêté : l'activité reste visible, elle explique souvent pourquoi il ne démarre pas.
+    logs: !awaitingFirstDatabase,
+    actions: true,
+  };
+
+  // Un onglet masqué ne reste jamais actif.
+  useEffect(() => {
+    if (awaitingFirstDatabase && (activeTab === "modules" || activeTab === "logs")) setActiveTab("bases");
+  }, [activeTab, awaitingFirstDatabase]);
   // Sans projet ouvert, les onglets n'offrent que des panneaux vides : l'accueil prend la place.
   const showWelcome = !projectViewOpen;
 
@@ -4516,19 +4621,19 @@ export default function Home() {
                   style={stickyHeader ? { top: projectHeaderHeight } : undefined}
                 >
                 <TabsList
-                  className={cn(
-                    "grid w-full overflow-hidden transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none lg:w-fit",
-                    selectedProjectOnline
-                      ? "grid-cols-4"
-                      : "[grid-template-columns:minmax(0,0fr)_minmax(0,0fr)_minmax(0,1fr)_minmax(0,1fr)]",
-                  )}
+                  className="grid w-full overflow-hidden transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none lg:w-fit"
+                  style={{
+                    gridTemplateColumns: ["bases", "modules", "logs", "actions"]
+                      .map((tab) => (projectTabVisible[tab] ? "minmax(0,1fr)" : "minmax(0,0fr)"))
+                      .join(" "),
+                  }}
                 >
                   <TabsTrigger
                     value="bases"
-                    disabled={!selectedProjectOnline}
+                    disabled={!projectTabVisible.bases}
                     className={cn(
                       "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-                      !selectedProjectOnline && "pointer-events-none -translate-x-1 opacity-0",
+                      !projectTabVisible.bases && "pointer-events-none -translate-x-1 opacity-0",
                     )}
                   >
                     <Database className="mr-1.5 h-4 w-4" />
@@ -4536,16 +4641,23 @@ export default function Home() {
                   </TabsTrigger>
                   <TabsTrigger
                     value="modules"
-                    disabled={!selectedProjectOnline}
+                    disabled={!projectTabVisible.modules}
                     className={cn(
                       "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-                      !selectedProjectOnline && "pointer-events-none -translate-x-1 opacity-0",
+                      !projectTabVisible.modules && "pointer-events-none -translate-x-1 opacity-0",
                     )}
                   >
                     <Boxes className="mr-1.5 h-4 w-4" />
                     Modules
                   </TabsTrigger>
-                  <TabsTrigger value="logs">
+                  <TabsTrigger
+                    value="logs"
+                    disabled={!projectTabVisible.logs}
+                    className={cn(
+                      "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+                      !projectTabVisible.logs && "pointer-events-none -translate-x-1 opacity-0",
+                    )}
+                  >
                     <Logs className="mr-1.5 h-4 w-4" />
                     {refinedInterface ? "Activité" : "Logs"}
                   </TabsTrigger>
@@ -4672,11 +4784,11 @@ export default function Home() {
                             ))}
                           </div>
                         ) : (
-                          <div className="rounded-md border border-dashed p-6 text-center">
-                            <Database className="mx-auto h-6 w-6 text-muted-foreground" />
-                            <p className="mt-3 font-medium">Aucune base Odoo</p>
-                            <p className="mt-1 text-sm text-muted-foreground">Crée une base pour commencer à utiliser ce projet.</p>
-                          </div>
+                          <FirstDatabaseCallout
+                            disabled={!selectedProjectReady}
+                            onCreate={() => setCreateDbOpen(true)}
+                            onRestore={() => setRestoreDbOpen(true)}
+                          />
                         )}
 
                         <RefinedPanel>
@@ -4754,11 +4866,11 @@ export default function Home() {
                                 ))}
                               </div>
                             ) : (
-                              <div className="rounded-md border border-dashed p-6 text-center">
-                                <Database className="mx-auto h-6 w-6 text-muted-foreground" />
-                                <p className="mt-3 font-medium">Aucune base Odoo</p>
-                                <p className="mt-1 text-sm text-muted-foreground">Crée une base pour commencer à utiliser ce projet.</p>
-                              </div>
+                              <FirstDatabaseCallout
+                                disabled={!selectedProjectReady}
+                                onCreate={() => setCreateDbOpen(true)}
+                                onRestore={() => setRestoreDbOpen(true)}
+                              />
                             )}
                           </CardContent>
                         </Card>
@@ -6771,8 +6883,18 @@ export default function Home() {
                             className="pl-9"
                             value={gitlabSearch}
                             onChange={(event) => setGitlabSearch(event.target.value)}
+                            onKeyDown={(event) =>
+                              handleListKeys(event, gitlabProjects?.length ?? 0, gitlabActiveIndex, setGitlabActiveIndex, (index) => {
+                                const project = gitlabProjects?.[index];
+                                if (project) chooseGitlabProject(project);
+                              })
+                            }
                             placeholder="Nom du dépôt, par exemple protex"
                             aria-label="Rechercher un dépôt GitLab"
+                            role="combobox"
+                            aria-expanded={Boolean(gitlabProjects?.length)}
+                            aria-controls="gitlab-projects"
+                            aria-activedescendant={gitlabProjects?.length ? `gitlab-project-${gitlabActiveIndex}` : undefined}
                             autoFocus
                           />
                         </div>
@@ -6780,18 +6902,21 @@ export default function Home() {
                           {gitlabProjects === null ? (
                             <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Recherche dans GitLab…</p>
                           ) : gitlabProjects.length ? (
-                            <div className="divide-y">
-                              {gitlabProjects.map((project) => (
+                            <div className="divide-y" role="listbox" id="gitlab-projects" aria-label="Dépôts GitLab">
+                              {gitlabProjects.map((project, index) => (
                                 <button
                                   key={project.id}
+                                  id={`gitlab-project-${index}`}
                                   type="button"
-                                  className="flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-hover"
-                                  onClick={() => {
-                                    setGitlabProject(project);
-                                    setGitlabRefSearch("");
-                                    setRepositoryUrl(project.sshUrl);
-                                    setRepositoryBranch("");
-                                  }}
+                                  role="option"
+                                  tabIndex={-1}
+                                  aria-selected={index === gitlabActiveIndex}
+                                  className={cn(
+                                    "flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-hover",
+                                    index === gitlabActiveIndex && "bg-hover ring-1 ring-inset ring-primary/40",
+                                  )}
+                                  onMouseMove={() => setGitlabActiveIndex(index)}
+                                  onClick={() => chooseGitlabProject(project)}
                                 >
                                   <span className="min-w-0">
                                     <span className="block truncate font-medium">{project.name}</span>
@@ -6834,28 +6959,40 @@ export default function Home() {
                             className="pl-9"
                             value={gitlabRefSearch}
                             onChange={(event) => setGitlabRefSearch(event.target.value)}
+                            onKeyDown={(event) =>
+                              handleListKeys(event, gitlabRefOptions.length, gitlabRefActiveIndex, setGitlabRefActiveIndex, (index) => {
+                                const ref = gitlabRefOptions[index];
+                                if (ref) setRepositoryBranch(ref.name);
+                              })
+                            }
                             placeholder="Filtrer les branches et tags"
                             aria-label="Filtrer les branches et tags"
+                            role="combobox"
+                            aria-expanded={gitlabRefOptions.length > 0}
+                            aria-controls="gitlab-refs"
+                            aria-activedescendant={gitlabRefOptions.length ? `gitlab-ref-${gitlabRefActiveIndex}` : undefined}
+                            autoFocus
                           />
                         </div>
-                        <div className="max-h-56 overflow-y-auto rounded-md border" role="listbox" aria-label="Branches et tags">
+                        <div className="max-h-56 overflow-y-auto rounded-md border" role="listbox" id="gitlab-refs" aria-label="Branches et tags">
                           {gitlabRefs === null ? (
                             <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Lecture des branches…</p>
                           ) : gitlabRefs.branches.length || gitlabRefs.tags.length ? (
                             <div className="divide-y">
-                              {[
-                                ...[...gitlabRefs.branches].sort((left, right) => Number(right.default) - Number(left.default)).map((branch) => ({ name: branch.name, kind: branch.default ? "Branche par défaut" : "Branche" })),
-                                ...gitlabRefs.tags.map((tag) => ({ name: tag, kind: "Tag" })),
-                              ].map((ref) => (
+                              {gitlabRefOptions.map((ref, index) => (
                                 <button
                                   key={`${ref.kind}:${ref.name}`}
+                                  id={`gitlab-ref-${index}`}
                                   type="button"
                                   role="option"
+                                  tabIndex={-1}
                                   aria-selected={repositoryBranch === ref.name}
                                   className={cn(
                                     "flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-hover",
+                                    index === gitlabRefActiveIndex && "bg-hover ring-1 ring-inset ring-primary/40",
                                     repositoryBranch === ref.name && "bg-selected font-medium",
                                   )}
+                                  onMouseMove={() => setGitlabRefActiveIndex(index)}
                                   onClick={() => setRepositoryBranch(ref.name)}
                                 >
                                   <span className="flex min-w-0 items-center gap-2">
@@ -7207,6 +7344,7 @@ export default function Home() {
             db: selectedDb,
             master_pwd: masterPwd,
           });
+          if (job && selectedProject) droppedDatabase.current = { jobId: job.id, project: selectedProject.name, db: selectedDb };
           if (job) setDropDbOpen(false);
         }}
       />
