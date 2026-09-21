@@ -73,6 +73,9 @@ class ManagerSettings:
     # Bandeau de migration masqué pour de bon. Les projets restent migrables depuis les
     # réglages : seule leur disparition du poste retire la proposition d'elle-même.
     migration_banner_dismissed: bool = False
+    # Proposition de passer à l'interface affinée, faite une fois aux utilisateurs de
+    # l'interface classique : fermée ou acceptée, elle ne revient plus.
+    beta_interface_banner_dismissed: bool = False
 
     @classmethod
     def from_dict(cls, payload, default_workspace):
@@ -118,6 +121,7 @@ class ManagerSettings:
             onboarding_completed=bool(payload.get("onboarding_completed", False)),
             legacy_workspace=str(payload.get("legacy_workspace", "") or "").strip(),
             migration_banner_dismissed=bool(payload.get("migration_banner_dismissed", False)),
+            beta_interface_banner_dismissed=bool(payload.get("beta_interface_banner_dismissed", False)),
         )
 
     def to_dict(self):

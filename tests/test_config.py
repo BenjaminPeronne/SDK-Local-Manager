@@ -48,6 +48,7 @@ class SettingsTests(unittest.TestCase):
                     "interface_layout": "refined",
                     "onboarding_completed": True,
                     "migration_banner_dismissed": True,
+                    "beta_interface_banner_dismissed": True,
                 },
                 create_workspace=True,
             )
@@ -63,6 +64,8 @@ class SettingsTests(unittest.TestCase):
             self.assertTrue(loaded.onboarding_completed)
             # Le bandeau masqué doit survivre au redémarrage : c'est tout son intérêt.
             self.assertTrue(loaded.migration_banner_dismissed)
+            # La proposition de l'interface affinée, fermée ou acceptée, ne revient pas.
+            self.assertTrue(loaded.beta_interface_banner_dismissed)
 
     def test_obsolete_open_odoo_start_preference_is_ignored(self):
         settings = ManagerSettings.from_dict({"start_project_before_open": True}, "/tmp/workspace")
@@ -70,6 +73,7 @@ class SettingsTests(unittest.TestCase):
         self.assertFalse(settings.show_technical_details)
         self.assertFalse(settings.sticky_header)
         self.assertFalse(settings.migration_banner_dismissed)
+        self.assertFalse(settings.beta_interface_banner_dismissed)
 
     def test_removed_page_layout_settings_are_ignored(self):
         settings = ManagerSettings.from_dict({"bases_layout": "compact", "modules_layout": "compact"}, "/tmp/workspace")

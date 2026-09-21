@@ -14,7 +14,10 @@ export const DialogContent = React.forwardRef<
   <RadixDialog.Content
     ref={ref}
     size="3"
-    className={cn("relative max-h-[calc(100dvh-2rem-max(2rem,6dvh))] w-[calc(100vw-2rem)] max-w-lg overflow-y-auto", className)}
+    // Rythme vertical par défaut : sans lui, chaque fenêtre recollait son en-tête, son contenu et
+    // ses boutons, et chaque nouvelle fenêtre naissait avec des blocs collés. Une fenêtre à mise
+    // en page propre le remplace par sa classe `gap-*`.
+    className={cn("relative flex max-h-[calc(100dvh-2rem-max(2rem,6dvh))] w-[calc(100vw-2rem)] max-w-lg flex-col gap-5 overflow-y-auto", className)}
     {...props}
   >
     {children}
@@ -53,3 +56,8 @@ export const DialogDescription = React.forwardRef<
   <RadixDialog.Description ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />
 ));
 DialogDescription.displayName = "DialogDescription";
+
+/** Boutons de fin de fenêtre : empilés sur mobile, action principale à droite sur écran large. */
+export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)} {...props} />;
+}

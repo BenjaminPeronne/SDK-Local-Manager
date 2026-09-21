@@ -36,6 +36,7 @@ import {
   Rocket,
   Search,
   Settings,
+  Sparkles,
   ShieldCheck,
   SlidersHorizontal,
   Square,
@@ -43,6 +44,7 @@ import {
   Trash2,
   Upload,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { DropdownMenu } from "@radix-ui/themes";
 import { type HTMLAttributes, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -174,6 +176,7 @@ type ManagerSettings = {
   interface_layout: "classic" | "refined";
   onboarding_completed: boolean;
   migration_banner_dismissed: boolean;
+  beta_interface_banner_dismissed: boolean;
   config_file?: string;
   platform?: string;
   workspace_exists?: boolean;
@@ -818,6 +821,7 @@ function fallbackManagerSettings(
     interface_layout: current?.interface_layout === "refined" ? "refined" : "classic",
     onboarding_completed: current?.onboarding_completed ?? false,
     migration_banner_dismissed: current?.migration_banner_dismissed ?? false,
+    beta_interface_banner_dismissed: current?.beta_interface_banner_dismissed ?? false,
     config_file: current?.config_file,
     platform: current?.platform || systemStatus?.docker.platform || "",
     workspace_exists: current?.workspace_exists ?? systemStatus?.workspace_exists,
@@ -891,6 +895,112 @@ function RefinedRow({
       </div>
       {children && <div className="flex flex-wrap gap-2">{children}</div>}
     </div>
+  );
+}
+
+/**
+ * Bandeau d'information de la zone principale.
+ *
+ * Chaque bandeau reprenait son propre assemblage : couleurs, marges et boutons dérivaient de
+ * l'un à l'autre. Tous passent par ce composant : même structure, même rythme, même bouton
+ * de fermeture quand le bandeau peut être masqué.
+ */
+type NoticeTone = "danger" | "warning" | "info" | "success" | "neutral" | "accent";
+
+const NOTICE_TONES: Record<NoticeTone, { container: string; bar: string; icon: string; body: string; dismiss: string }> = {
+  danger: {
+    container: "border-red-200 bg-red-50/80 text-red-950 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-50",
+    bar: "bg-red-500",
+    icon: "bg-red-100 text-red-600 dark:bg-red-900/60 dark:text-red-300",
+    body: "text-red-800 dark:text-red-200",
+    dismiss: "text-red-800 hover:bg-red-100 dark:text-red-200 dark:hover:bg-red-900/60",
+  },
+  warning: {
+    container: "border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-50",
+    bar: "bg-amber-500",
+    icon: "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300",
+    body: "text-amber-800 dark:text-amber-200",
+    dismiss: "text-amber-800 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900/60",
+  },
+  info: {
+    container: "border-sky-200 bg-sky-50/80 text-sky-950 dark:border-sky-900/70 dark:bg-sky-950/40 dark:text-sky-50",
+    bar: "bg-sky-500",
+    icon: "bg-sky-100 text-sky-700 dark:bg-sky-900/60 dark:text-sky-300",
+    body: "text-sky-800 dark:text-sky-200",
+    dismiss: "text-sky-800 hover:bg-sky-100 dark:text-sky-200 dark:hover:bg-sky-900/60",
+  },
+  success: {
+    container: "border-emerald-200 bg-emerald-50/80 text-emerald-950 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-50",
+    bar: "bg-emerald-500",
+    icon: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300",
+    body: "text-emerald-800 dark:text-emerald-200",
+    dismiss: "text-emerald-800 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-900/60",
+  },
+  neutral: {
+    container: "border-slate-200 bg-slate-50/80 text-slate-900 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-100",
+    bar: "bg-slate-400",
+    icon: "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+    body: "text-slate-700 dark:text-slate-300",
+    dismiss: "text-slate-700 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-800",
+  },
+  accent: {
+    container: "border-primary/30 bg-primary/[0.06] text-foreground dark:bg-primary/[0.12]",
+    bar: "bg-primary",
+    icon: "bg-primary/15 text-primary",
+    body: "text-muted-foreground",
+    dismiss: "text-muted-foreground hover:bg-primary/10 hover:text-foreground",
+  },
+};
+
+function Notice({
+  tone,
+  icon: Icon,
+  title,
+  children,
+  actions,
+  onDismiss,
+  dismissLabel = "Fermer",
+}: {
+  tone: NoticeTone;
+  icon: LucideIcon;
+  title: ReactNode;
+  children?: ReactNode;
+  actions?: ReactNode;
+  onDismiss?: () => void;
+  dismissLabel?: string;
+}) {
+  const style = NOTICE_TONES[tone];
+  return (
+    <section
+      role={tone === "danger" ? "alert" : "status"}
+      className={cn("relative mb-3 overflow-hidden rounded-lg border shadow-sm", style.container)}
+    >
+      <span aria-hidden="true" className={cn("absolute inset-y-0 left-0 w-1", style.bar)} />
+      <div className={cn("flex flex-col gap-3 py-3.5 pl-5 pr-4 sm:flex-row sm:items-center", onDismiss && "pr-11")}>
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full", style.icon)}>
+            <Icon className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1 pt-1 text-sm">
+            <div className="font-semibold leading-5">{title}</div>
+            {children && <div className={cn("mt-1 break-words leading-relaxed", style.body)}>{children}</div>}
+          </div>
+        </div>
+        {actions && <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:pl-3">{actions}</div>}
+      </div>
+      {onDismiss && (
+        <Button
+          size="icon"
+          variant="ghost"
+          className={cn("absolute right-2 top-2 h-7 w-7", style.dismiss)}
+          title={dismissLabel}
+          onClick={onDismiss}
+        >
+          <X className="h-4 w-4" />
+          <span className="sr-only">{dismissLabel}</span>
+        </Button>
+      )}
+    </section>
   );
 }
 
@@ -1160,6 +1270,7 @@ const SETTINGS_SAVED_KEYS = [
   "interface_icon",
   "interface_layout",
   "migration_banner_dismissed",
+  "beta_interface_banner_dismissed",
 ] as const;
 
 // Proposition de copie d'un projet resté sur le disque d'origine. Partagée par le bandeau
@@ -2341,6 +2452,39 @@ export default function Home() {
     if (job) {
       schedule(refreshMigration, 3000);
       schedule(refreshOverview, 4000);
+    }
+  }
+
+  /**
+   * Bascule d'un clic vers l'interface affinée et l'en-tête fixe.
+   *
+   * La proposition est retirée dans la même requête : revenir ensuite à l'interface classique
+   * depuis les paramètres est un choix, qu'elle ne doit pas venir contester.
+   */
+  async function switchToRefinedInterface() {
+    try {
+      const payload = await api<{ settings: ManagerSettings }>("/api/settings", {
+        method: "POST",
+        body: JSON.stringify({ interface_layout: "refined", sticky_header: true, beta_interface_banner_dismissed: true }),
+      });
+      setSettings(payload.settings);
+      setSettingsDraft(payload.settings);
+      pushToast("success", "Nouvelle interface activée. Retour à l’interface classique possible dans Paramètres, section Apparence.");
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : "Impossible de changer d’interface.");
+    }
+  }
+
+  async function dismissRefinedInterfaceProposal() {
+    try {
+      const payload = await api<{ settings: ManagerSettings }>("/api/settings", {
+        method: "POST",
+        body: JSON.stringify({ beta_interface_banner_dismissed: true }),
+      });
+      setSettings(payload.settings);
+      setSettingsDraft(payload.settings);
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : "Impossible de masquer la proposition.");
     }
   }
 
@@ -4040,184 +4184,163 @@ export default function Home() {
 
           <div className={cn("mx-auto max-w-[1500px] px-4 py-4", showFloatingModuleActions && "pb-32 xl:pb-24")}>
             {apiUnavailable && (
-              <div className="mb-4 flex flex-col gap-3 border-y border-red-300 bg-red-50 px-4 py-3 text-sm text-red-950 dark:border-red-800 dark:bg-red-950/45 dark:text-red-100 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex min-w-0 items-start gap-3">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
-                  <div className="min-w-0">
-                    <div className="font-semibold">Service local indisponible</div>
-                    <div className="mt-0.5 break-words text-red-800 dark:text-red-200">
-                      L'application n'arrive pas à joindre son API locale. Attends quelques secondes puis actualise. Si Docker n'est pas encore installé,
-                      installe Docker Desktop avant de lancer les projets Odoo.
-                    </div>
-                    <div className="mt-3 rounded-md border border-red-200 bg-white/70 p-3 dark:border-red-800 dark:bg-red-950/55">
-                      <div className="font-medium">{fallbackDockerGuide.title}</div>
-                      <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-5 text-red-900 dark:text-red-100">
-                        {fallbackDockerGuide.steps.map((step) => (
-                          <li key={step}>{step}</li>
-                        ))}
-                      </ol>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-                  <Button className="w-full sm:w-auto" size="sm" onClick={() => Promise.all([refreshOverview(), refreshSystemStatus(), loadSettings()])}>
-                    <RefreshCcw className="h-4 w-4" />
-                    Réessayer
-                  </Button>
-                  <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl(fallbackDockerGuide.download_url)}>
-                    <CloudDownload className="h-4 w-4" />
-                    Télécharger Docker
-                  </Button>
-                  <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl(fallbackDockerGuide.install_url)}>
-                    <ExternalLink className="h-4 w-4" />
-                    Guide Docker
-                  </Button>
-                  <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={!desktopRuntime} onClick={requestDockerStart}>
-                    <Play className="h-4 w-4" />
-                    Ouvrir Docker
-                  </Button>
-                </div>
-              </div>
-            )}
-            {degradedBackendReason && (
-              <div className="mb-4 flex flex-col gap-3 border-y border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex min-w-0 items-start gap-3">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-                  <div className="min-w-0">
-                    <div className="font-semibold">Mode Windows, plus lent</div>
-                    <div className="mt-0.5 break-words text-amber-800 dark:text-amber-200">
-                      {degradedBackendReason} Les projets restent utilisables depuis Windows, mais Odoo y démarre en une minute environ, contre quelques secondes dans l’environnement Linux.
-                    </div>
-                  </div>
-                </div>
-                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-                  <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl("https://aka.ms/enablevirtualization")}>
-                    <ExternalLink className="h-4 w-4" />
-                    Guide Microsoft
-                  </Button>
-                  <Button className="w-full sm:w-auto" size="sm" disabled={!desktopBridge()?.relaunch} onClick={() => desktopBridge()?.relaunch?.()}>
-                    <RefreshCcw className="h-4 w-4" />
-                    Relancer
-                  </Button>
-                </div>
-              </div>
-            )}
-            {systemStatus && !systemStatus.docker.running && (
-              <div className="mb-4 flex flex-col gap-3 border-y border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex min-w-0 items-start gap-3">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-                  <div className="min-w-0">
-                    <div className="font-semibold">Docker n’est pas disponible</div>
-                    <div className="mt-0.5 break-words text-amber-800 dark:text-amber-200">{systemStatus.docker.message}</div>
-                    {systemStatus.docker.state === "missing" && systemStatus.docker.install_guide && (
-                      <div className="mt-3 rounded-md border border-amber-200 bg-white/70 p-3 dark:border-amber-800 dark:bg-amber-950/55">
-                        <div className="font-medium">{systemStatus.docker.install_guide.title}</div>
-                        <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-5 text-amber-900 dark:text-amber-100">
-                          {systemStatus.docker.install_guide.steps.map((step) => (
-                            <li key={step}>{step}</li>
-                          ))}
-                        </ol>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-                  {systemStatus.docker.state === "missing" && systemStatus.docker.install_guide?.download_url && (
-                    <Button className="w-full sm:w-auto" size="sm" onClick={() => openUrl(systemStatus.docker.install_guide?.download_url)}>
+              <Notice
+                tone="danger"
+                icon={AlertTriangle}
+                title="Service local indisponible"
+                actions={
+                  <>
+                    <Button className="w-full sm:w-auto" size="sm" onClick={() => Promise.all([refreshOverview(), refreshSystemStatus(), loadSettings()])}>
+                      <RefreshCcw className="h-4 w-4" />
+                      Réessayer
+                    </Button>
+                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl(fallbackDockerGuide.download_url)}>
                       <CloudDownload className="h-4 w-4" />
                       Télécharger Docker
                     </Button>
-                  )}
-                  {systemStatus.docker.can_start && (
-                    <Button className="w-full sm:w-auto" size="sm" disabled={loading} onClick={requestDockerStart}>
-                      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                      Ouvrir Docker
-                    </Button>
-                  )}
-                  {systemStatus.docker.install_guide?.install_url && (
-                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl(systemStatus.docker.install_guide?.install_url)}>
+                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl(fallbackDockerGuide.install_url)}>
                       <ExternalLink className="h-4 w-4" />
                       Guide Docker
                     </Button>
-                  )}
-                  <Button
-                    className="w-full sm:w-auto"
-                    size="sm"
-                    variant="outline"
-                    onClick={openSettingsDialog}
-                  >
-                    <Settings className="h-4 w-4" />
-                    Paramètres
-                  </Button>
+                    <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={!desktopRuntime} onClick={requestDockerStart}>
+                      <Play className="h-4 w-4" />
+                      Ouvrir Docker
+                    </Button>
+                  </>
+                }
+              >
+                L'application n'arrive pas à joindre son API locale. Attends quelques secondes puis actualise. Si Docker n'est pas encore installé,
+                installe Docker Desktop avant de lancer les projets Odoo.
+                <div className="mt-3 rounded-md border border-red-200 bg-white/70 p-3 text-red-950 dark:border-red-800 dark:bg-red-950/55 dark:text-red-50">
+                  <div className="font-medium">{fallbackDockerGuide.title}</div>
+                  <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-5">
+                    {fallbackDockerGuide.steps.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ol>
                 </div>
-              </div>
+              </Notice>
+            )}
+            {degradedBackendReason && (
+              <Notice
+                tone="warning"
+                icon={AlertTriangle}
+                title="Mode Windows, plus lent"
+                actions={
+                  <>
+                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl("https://aka.ms/enablevirtualization")}>
+                      <ExternalLink className="h-4 w-4" />
+                      Guide Microsoft
+                    </Button>
+                    <Button className="w-full sm:w-auto" size="sm" disabled={!desktopBridge()?.relaunch} onClick={() => desktopBridge()?.relaunch?.()}>
+                      <RefreshCcw className="h-4 w-4" />
+                      Relancer
+                    </Button>
+                  </>
+                }
+              >
+                {degradedBackendReason} Les projets restent utilisables depuis Windows, mais Odoo y démarre en une minute environ, contre quelques secondes dans l’environnement Linux.
+              </Notice>
+            )}
+            {systemStatus && !systemStatus.docker.running && (
+              <Notice
+                tone="warning"
+                icon={AlertTriangle}
+                title="Docker n’est pas disponible"
+                actions={
+                  <>
+                    {systemStatus.docker.state === "missing" && systemStatus.docker.install_guide?.download_url && (
+                      <Button className="w-full sm:w-auto" size="sm" onClick={() => openUrl(systemStatus.docker.install_guide?.download_url)}>
+                        <CloudDownload className="h-4 w-4" />
+                        Télécharger Docker
+                      </Button>
+                    )}
+                    {systemStatus.docker.can_start && (
+                      <Button className="w-full sm:w-auto" size="sm" disabled={loading} onClick={requestDockerStart}>
+                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                        Ouvrir Docker
+                      </Button>
+                    )}
+                    {systemStatus.docker.install_guide?.install_url && (
+                      <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl(systemStatus.docker.install_guide?.install_url)}>
+                        <ExternalLink className="h-4 w-4" />
+                        Guide Docker
+                      </Button>
+                    )}
+                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={openSettingsDialog}>
+                      <Settings className="h-4 w-4" />
+                      Paramètres
+                    </Button>
+                  </>
+                }
+              >
+                {systemStatus.docker.message}
+                {systemStatus.docker.state === "missing" && systemStatus.docker.install_guide && (
+                  <div className="mt-3 rounded-md border border-amber-200 bg-white/70 p-3 text-amber-950 dark:border-amber-800 dark:bg-amber-950/55 dark:text-amber-50">
+                    <div className="font-medium">{systemStatus.docker.install_guide.title}</div>
+                    <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-5">
+                      {systemStatus.docker.install_guide.steps.map((step) => (
+                        <li key={step}>{step}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+              </Notice>
             )}
             {systemStatus?.traefik && !systemStatus.traefik.running && (
-              <div className="mb-4 flex flex-col gap-3 border-y border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 dark:border-sky-800 dark:bg-sky-950/45 dark:text-sky-100 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex min-w-0 items-start gap-3">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-sky-700" />
-                  <div className="min-w-0">
-                    <div className="font-semibold">Traefik n'est pas prêt</div>
-                    <div className="mt-0.5 break-words text-sky-800 dark:text-sky-200">
-                      {systemStatus.traefik.message}
-                      {systemStatus.traefik.requires_docker ? " Docker doit être installé et démarré avant cette étape." : ""}
-                    </div>
-                    <div className="mt-1 break-all text-xs text-sky-700 dark:text-sky-300">Dossier attendu : {systemStatus.traefik.path}</div>
-                  </div>
-                </div>
-                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-                  {systemStatus.traefik.state === "port_busy" && desktopBridge()?.stopLegacyTraefik ? (
-                    <Button
-                      className="w-full sm:w-auto"
-                      size="sm"
-                      disabled={loading}
-                      title="Les projets restés sous Docker Desktop ne seront plus accessibles par leur adresse tant qu’il est arrêté."
-                      onClick={requestLegacyTraefikStop}
-                    >
-                      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
-                      Arrêter l’ancien Traefik
+              <Notice
+                tone="info"
+                icon={AlertTriangle}
+                title="Traefik n’est pas prêt"
+                actions={
+                  <>
+                    {systemStatus.traefik.state === "port_busy" && desktopBridge()?.stopLegacyTraefik ? (
+                      <Button
+                        className="w-full sm:w-auto"
+                        size="sm"
+                        disabled={loading}
+                        title="Les projets restés sous Docker Desktop ne seront plus accessibles par leur adresse tant qu’il est arrêté."
+                        onClick={requestLegacyTraefikStop}
+                      >
+                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
+                        Arrêter l’ancien Traefik
+                      </Button>
+                    ) : (
+                      <Button
+                        className="w-full sm:w-auto"
+                        size="sm"
+                        disabled={!systemStatus.docker.running || loading}
+                        onClick={requestTraefikInstall}
+                      >
+                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                        {systemStatus.traefik.installed ? "Démarrer Traefik" : "Installer Traefik"}
+                      </Button>
+                    )}
+                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={openSettingsDialog}>
+                      <Settings className="h-4 w-4" />
+                      Paramètres
                     </Button>
-                  ) : (
-                    <Button
-                      className="w-full sm:w-auto"
-                      size="sm"
-                      disabled={!systemStatus.docker.running || loading}
-                      onClick={requestTraefikInstall}
-                    >
-                      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                      {systemStatus.traefik.installed ? "Démarrer Traefik" : "Installer Traefik"}
-                    </Button>
-                  )}
-                  <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={openSettingsDialog}>
-                    <Settings className="h-4 w-4" />
-                    Paramètres
-                  </Button>
-                </div>
-              </div>
+                  </>
+                }
+              >
+                {systemStatus.traefik.message}
+                {systemStatus.traefik.requires_docker ? " Docker doit être installé et démarré avant cette étape." : ""}
+                <div className="mt-1 break-all text-xs opacity-80">Dossier attendu : {systemStatus.traefik.path}</div>
+              </Notice>
             )}
             {migrationBannerVisible && (
-              <div className="mb-4 flex flex-col gap-3 border-y border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/45 dark:text-emerald-100">
-                <div className="flex min-w-0 items-start gap-3">
-                  <Rocket className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
-                  <div className="min-w-0 flex-1">
-                    <div className="font-semibold">Ces projets peuvent démarrer bien plus vite</div>
-                    <div className="mt-0.5 break-words text-emerald-800 dark:text-emerald-200" title={migration?.source}>
-                      Ils sont encore rangés sur ton disque Windows, où Odoo met près d’une minute à démarrer ; ici, quelques secondes.
-                      Le gestionnaire en fait une copie et ne touche pas au dossier d’origine.
-                    </div>
-                  </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="-mr-1 -mt-1 h-7 w-7 shrink-0 text-emerald-800 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
-                    title="Masquer jusqu’au prochain démarrage"
-                    onClick={() => setMigrationBannerClosed(true)}
-                  >
-                    <X className="h-4 w-4" />
-                    <span className="sr-only">Masquer jusqu’au prochain démarrage</span>
-                  </Button>
-                </div>
-                <div className="flex flex-col gap-3 text-emerald-800 dark:text-emerald-200 sm:pl-8">
+              <Notice
+                tone="success"
+                icon={Rocket}
+                title="Ces projets peuvent démarrer bien plus vite"
+                onDismiss={() => setMigrationBannerClosed(true)}
+                dismissLabel="Masquer jusqu’au prochain démarrage"
+              >
+                <span title={migration?.source}>
+                  Ils sont encore rangés sur ton disque Windows, où Odoo met près d’une minute à démarrer ; ici, quelques secondes.
+                  Le gestionnaire en fait une copie et ne touche pas au dossier d’origine.
+                </span>
+                <div className="mt-3 flex flex-col gap-3">
                   <MigrationProposal candidates={migrationCandidates} loading={loading} onMigrate={requestProjectMigration} />
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                     <button
@@ -4230,69 +4353,79 @@ export default function Home() {
                     <span>Les projets resteront copiables depuis Paramètres, section Général.</span>
                   </div>
                 </div>
-              </div>
+              </Notice>
             )}
             {(systemStatus?.abandoned_staging?.count ?? 0) > 0 && (
-              <div className="mb-4 flex flex-col gap-3 border-y border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900/45 dark:text-slate-100 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex min-w-0 items-start gap-3">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-slate-600" />
-                  <div className="min-w-0">
-                    <div className="font-semibold">Créations de projet interrompues</div>
-                    <div className="mt-0.5 break-words text-slate-700 dark:text-slate-300">
-                      {systemStatus!.abandoned_staging!.count} dossier(s) de préparation occupent de l’espace disque sans servir à aucun projet. Les supprimer ne touche à aucun projet ni à aucune base.
-                    </div>
-                  </div>
-                </div>
-                <Button className="w-full shrink-0 sm:w-auto" size="sm" variant="outline" disabled={loading} onClick={requestStagingCleanup}>
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                  Nettoyer
-                </Button>
-              </div>
+              <Notice
+                tone="neutral"
+                icon={Trash2}
+                title="Créations de projet interrompues"
+                actions={
+                  <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={loading} onClick={requestStagingCleanup}>
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    Nettoyer
+                  </Button>
+                }
+              >
+                {systemStatus!.abandoned_staging!.count} dossier(s) de préparation occupent de l’espace disque sans servir à aucun projet. Les supprimer ne touche à aucun projet ni à aucune base.
+              </Notice>
             )}
             {selectedProject && addonLinks?.supported && (addonLinks.wsl_links > 0 || addonLinks.interrupted) && (
-              <div className="mb-4 flex flex-col gap-3 border-y border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex min-w-0 items-start gap-3">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-                  <div className="min-w-0">
-                    <div className="font-semibold">
-                      {addonLinks.interrupted ? "Conversion des liens d’addons interrompue" : "Liens d’addons créés par une ancienne version"}
-                    </div>
-                    <div className="mt-0.5 break-words text-amber-800 dark:text-amber-200">
-                      {addonLinks.interrupted
-                        ? "Relance la conversion pour la terminer : certains modules peuvent être absents tant qu’elle n’est pas achevée."
-                        : `${addonLinks.wsl_links} lien(s) de ce projet ont été créés par WSL. Windows ne peut pas les lire, ce qui ralentit fortement la liste des modules. La conversion les remplace par des liens Windows identiques, lus par Windows et par Docker.`}
-                    </div>
-                    {!addonLinks.native_symlinks && (
-                      <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                        Active d’abord le mode développeur Windows : Paramètres &gt; Système &gt; Espace développeurs.
-                      </div>
-                    )}
-                    {addonLinks.native_symlinks && selectedProjectOnline && (
-                      <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">Arrête le projet avant la conversion.</div>
-                    )}
+              <Notice
+                tone="warning"
+                icon={AlertTriangle}
+                title={addonLinks.interrupted ? "Conversion des liens d’addons interrompue" : "Liens d’addons créés par une ancienne version"}
+                actions={
+                  <>
+                    <Button
+                      className="w-full sm:w-auto"
+                      size="sm"
+                      disabled={loading || !addonLinks.native_symlinks || selectedProjectOnline}
+                      onClick={convertWslAddonLinks}
+                    >
+                      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                      {addonLinks.interrupted ? "Reprendre la conversion" : "Convertir les liens"}
+                    </Button>
+                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => void refreshAddonLinks()}>
+                      Vérifier à nouveau
+                    </Button>
+                  </>
+                }
+              >
+                {addonLinks.interrupted
+                  ? "Relance la conversion pour la terminer : certains modules peuvent être absents tant qu’elle n’est pas achevée."
+                  : `${addonLinks.wsl_links} lien(s) de ce projet ont été créés par WSL. Windows ne peut pas les lire, ce qui ralentit fortement la liste des modules. La conversion les remplace par des liens Windows identiques, lus par Windows et par Docker.`}
+                {!addonLinks.native_symlinks && (
+                  <div className="mt-1 text-xs opacity-80">
+                    Active d’abord le mode développeur Windows : Paramètres &gt; Système &gt; Espace développeurs.
                   </div>
-                </div>
-                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-                  <Button
-                    className="w-full sm:w-auto"
-                    size="sm"
-                    disabled={loading || !addonLinks.native_symlinks || selectedProjectOnline}
-                    onClick={convertWslAddonLinks}
-                  >
-                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-                    {addonLinks.interrupted ? "Reprendre la conversion" : "Convertir les liens"}
-                  </Button>
-                  <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => void refreshAddonLinks()}>
-                    Vérifier à nouveau
-                  </Button>
-                </div>
-              </div>
+                )}
+                {addonLinks.native_symlinks && selectedProjectOnline && (
+                  <div className="mt-1 text-xs opacity-80">Arrête le projet avant la conversion.</div>
+                )}
+              </Notice>
             )}
             {error && (
-              <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/45 dark:text-red-200">
-                <AlertTriangle className="mr-2 inline h-4 w-4" />
+              <Notice tone="danger" icon={AlertTriangle} title="L’action a échoué">
                 {error}
-              </div>
+              </Notice>
+            )}
+            {settings?.interface_layout === "classic" && !settings.beta_interface_banner_dismissed && (
+              <Notice
+                tone="accent"
+                icon={Sparkles}
+                title="Essaie la nouvelle interface (bêta)"
+                onDismiss={() => void dismissRefinedInterfaceProposal()}
+                dismissLabel="Ne plus proposer"
+                actions={
+                  <Button className="w-full sm:w-auto" size="sm" onClick={() => void switchToRefinedInterface()}>
+                    <Sparkles className="h-4 w-4" />
+                    Passer à la nouvelle interface
+                  </Button>
+                }
+              >
+                Présentation affinée et en-tête fixe : le nom du projet et ses actions restent visibles pendant le défilement. Retour à l’interface classique possible à tout moment dans Paramètres, section Apparence.
+              </Notice>
             )}
             {runningJobs.length > 0 && (
               <div className="mb-4 rounded-md border border-primary/35 bg-primary/[0.08] p-3 text-sm shadow-sm dark:bg-primary/[0.14]">
@@ -5539,7 +5672,7 @@ export default function Home() {
       />
 
       <Dialog open={onboardingOpen} onOpenChange={setOnboardingOpen}>
-        <DialogContent className="max-h-[90vh] max-w-2xl space-y-5 overflow-y-auto">
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Préparer le gestionnaire Odoo</DialogTitle>
             <DialogDescription>
@@ -5815,7 +5948,7 @@ export default function Home() {
       />
 
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent className="flex h-[min(820px,calc(100dvh-4rem))] max-h-[calc(100dvh-4rem)] max-w-5xl flex-col overflow-hidden !p-0">
+        <DialogContent className="flex h-[min(820px,calc(100dvh-4rem))] max-h-[calc(100dvh-4rem)] max-w-5xl flex-col gap-0 overflow-hidden !p-0">
           <DialogHeader className="border-b px-5 py-4 sm:px-6">
             <DialogTitle>Paramètres du gestionnaire</DialogTitle>
             <DialogDescription>Réglages communs à tous les projets du workspace.</DialogDescription>
@@ -7008,7 +7141,7 @@ export default function Home() {
       />
 
       <Dialog open={neutralizeDbOpen} onOpenChange={setNeutralizeDbOpen}>
-        <DialogContent className="space-y-5">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>Neutraliser {selectedDb || "la base"}</DialogTitle>
             <DialogDescription>
@@ -7091,7 +7224,7 @@ export default function Home() {
           }
         }}
       >
-        <DialogContent className="max-h-[90vh] max-w-2xl space-y-5 overflow-y-auto">
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>MAJ complète Odoo</DialogTitle>
             <DialogDescription>
@@ -7317,7 +7450,7 @@ export default function Home() {
       </Dialog>
 
       <Dialog open={allTranslationsOpen} onOpenChange={setAllTranslationsOpen}>
-        <DialogContent className="space-y-5">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>Réinitialiser les traductions · {selectedDb || "base"}</DialogTitle>
             <DialogDescription>
@@ -7373,7 +7506,7 @@ export default function Home() {
       </Dialog>
 
       <Dialog open={adminPasswordOpen} onOpenChange={setAdminPasswordOpen}>
-        <DialogContent className="space-y-5">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>Mot de passe administrateur · {selectedDb || "base"}</DialogTitle>
             <DialogDescription>
@@ -7876,7 +8009,7 @@ function CreateDatabaseDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl space-y-5">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Créer une base Odoo</DialogTitle>
           <DialogDescription>{project ? `Projet cible : ${project.name}` : "Sélectionne un projet."}</DialogDescription>
@@ -7958,7 +8091,7 @@ function DropDatabaseDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="space-y-5">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>Supprimer {database || "la base"}</DialogTitle>
           <DialogDescription>

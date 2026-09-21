@@ -6114,7 +6114,16 @@ class Handler(BaseHTTPRequestHandler):
                 # Closing onboarding changes no path used by a running job; the
                 # first project creation sends it right after starting its job. Masquer le
                 # bandeau de migration se fait souvent pendant la copie qu'il a lancée.
-                interface_only = set(payload) <= {"onboarding_completed", "create_workspace", "migration_banner_dismissed"}
+                # L'apparence de l'interface ne touche à aucun chemin : la bascule vers l'interface
+                # affinée depuis son bandeau doit fonctionner même pendant une action.
+                interface_only = set(payload) <= {
+                    "onboarding_completed",
+                    "create_workspace",
+                    "migration_banner_dismissed",
+                    "beta_interface_banner_dismissed",
+                    "interface_layout",
+                    "sticky_header",
+                }
                 if running and not interface_only:
                     raise ValueError(
                         "Traitement en cours : "

@@ -88,7 +88,7 @@ export function WslSetupDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl space-y-5">
+      <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>{state.title}</DialogTitle>
           <DialogDescription>{state.detail}</DialogDescription>
