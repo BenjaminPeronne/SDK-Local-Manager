@@ -1262,10 +1262,9 @@ export default function Home() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [selectingWorkspace, setSelectingWorkspace] = useState(false);
   const [projectsFilter, setProjectsFilter] = useState("");
+  // Vide tant que l'utilisateur n'a pas choisi de projet : l'application s'ouvre sur l'accueil,
+  // et Échap sur un projet éteint y revient en le refermant.
   const [selectedProjectName, setSelectedProjectName] = useState("");
-  // Accueil demandé par Échap depuis un projet éteint : le projet reste sélectionné dans la
-  // barre, seule la zone centrale revient à l'accueil.
-  const [welcomeRequested, setWelcomeRequested] = useState(false);
   // Environnement Linux installé mais impossible à démarrer : le backend Windows a pris le relais.
   const [degradedBackendReason, setDegradedBackendReason] = useState("");
 
@@ -1412,11 +1411,7 @@ export default function Home() {
   }, []);
 
   const selectedProject = useMemo(
-    () => {
-      const matchedProject = overview?.projects.find((project) => project.name === selectedProjectName);
-      if (matchedProject) return matchedProject;
-      return selectedProjectName ? undefined : overview?.projects[0];
-    },
+    () => overview?.projects.find((project) => project.name === selectedProjectName),
     [overview, selectedProjectName],
   );
   const selectedAppIcon = settings?.interface_icon === "local" ? localIcon : appIcon;
@@ -1703,7 +1698,8 @@ export default function Home() {
     applyJobs(payload.jobs, false);
     setSelectedProjectName((currentName) => {
       if (currentName && pendingProjectNames.current.has(currentName)) return currentName;
-      const project = payload.overview.projects.find((item) => item.name === currentName) || payload.overview.projects[0];
+      // Un projet disparu (supprimé, renommé) ramène à l'accueil plutôt qu'au premier de la liste.
+      const project = payload.overview.projects.find((item) => item.name === currentName);
       setSelectedDb((currentDb) => currentDb !== "postgres" && project?.databases?.includes(currentDb) ? currentDb : firstOdooDatabase(project));
       return project?.name || "";
     });
@@ -1796,7 +1792,7 @@ export default function Home() {
     setError("");
     setSelectedProjectName((currentName) => {
       if (currentName && pendingProjectNames.current.has(currentName)) return currentName;
-      const current = payload.projects.find((project) => project.name === currentName) || payload.projects[0];
+      const current = payload.projects.find((project) => project.name === currentName);
       if (current && current.name !== currentName) setSelectedDb(firstOdooDatabase(current));
       return current?.name || "";
     });
@@ -2050,7 +2046,7 @@ export default function Home() {
     const job = jobs.find((item) => item.project === pendingCreatedProjectName && item.title.startsWith("Créer le projet "));
     if (job?.status !== "error") return;
     pendingProjectNames.current.delete(pendingCreatedProjectName);
-    setSelectedProjectName((currentName) => currentName === pendingCreatedProjectName ? overview.projects[0]?.name || "" : currentName);
+    setSelectedProjectName((currentName) => currentName === pendingCreatedProjectName ? "" : currentName);
     setPendingCreatedProjectName("");
   }, [jobs, overview, pendingCreatedProjectName]);
 
@@ -2067,7 +2063,6 @@ export default function Home() {
 
     setSelectedProjectName(project.name);
     setSelectedDb(pendingCreatedDatabase.database);
-    setWelcomeRequested(false);
     setActiveTab("modules");
     setPendingCreatedDatabase(null);
     pushToast("success", `Base ${pendingCreatedDatabase.database} prête. La liste des modules est disponible.`);
@@ -3106,7 +3101,7 @@ export default function Home() {
   const selectedProjectReady = Boolean(selectedProject);
   const selectedProjectOnline = selectedProject?.odoo_status === "running";
   // Sans projet ouvert, les onglets n'offrent que des panneaux vides : l'accueil prend la place.
-  const showWelcome = welcomeRequested || (!selectedProject && !pendingSelectedProjectArrival);
+  const showWelcome = !selectedProject && !pendingSelectedProjectArrival;
 
   useEffect(() => {
     if (showWelcome || !selectedProject || selectedProjectOnline) return;
@@ -3118,7 +3113,10 @@ export default function Home() {
       if (target?.closest("input, textarea, select, [contenteditable=true]")) return;
       // Échap sert d'abord à vider la sélection de modules.
       if (selectedModules.size > 0) return;
-      setWelcomeRequested(true);
+      setSelectedProjectName("");
+      setSelectedDb("");
+      // Le bouton du projet garderait sinon son anneau de focus, sans être sélectionné.
+      (document.activeElement as HTMLElement | null)?.blur();
     }
     window.addEventListener("keydown", backToWelcomeOnEscape);
     return () => window.removeEventListener("keydown", backToWelcomeOnEscape);
@@ -3878,12 +3876,11 @@ export default function Home() {
                     <div className="flex min-h-16 items-center gap-2 px-2">
                       <button
                         type="button"
-                        className="min-w-0 flex-1 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                        className="-mx-1 min-w-0 flex-1 rounded-md px-1 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                         onClick={() => {
                           setSelectedProjectName(project.name);
                           setSelectedDb(firstOdooDatabase(project));
                           setExternalLogView(null);
-                          setWelcomeRequested(false);
                           setActiveTab(project.odoo_status === "running" ? "bases" : "logs");
                         }}
                       >
