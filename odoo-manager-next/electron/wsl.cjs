@@ -52,6 +52,30 @@ function wslStartFailureReason(error) {
   return '';
 }
 
+/**
+ * Dossier de projets de l'ancien backend Windows, tel qu'il le résolvait lui-même.
+ *
+ * `config.json` n'est écrit qu'au premier enregistrement des réglages : un poste resté sur le
+ * dossier par défaut n'a ni le fichier ni la clé `workspace`, et la migration n'y trouvait
+ * aucun projet, sans rien dire. Même ordre de recherche que `workspace_candidates` côté Python.
+ */
+function legacyWindowsWorkspace({ configText = '', home = '', exists = fs.existsSync } = {}) {
+  let configured = '';
+  try {
+    configured = String(JSON.parse(configText || '{}').workspace || '').trim();
+  } catch {
+    configured = '';
+  }
+  if (configured) return configured;
+  if (!home) return '';
+  const candidates = [
+    path.win32.join(home, 'Documents', 'Developer', 'Odoo-projects'),
+    path.win32.join(home, 'Documents', 'Odoo-projects'),
+    path.win32.join(home, 'Odoo-projects'),
+  ];
+  return candidates.find(candidate => exists(candidate)) || '';
+}
+
 // Clés recherchées dans %USERPROFILE%\.ssh, dans l'ordre de préférence de ssh-keygen.
 const SSH_KEY_NAMES = ['id_ed25519', 'id_ecdsa', 'id_rsa'];
 // wsl.exe écrit ses listes en UTF-16LE, y compris dans un tube.
@@ -406,6 +430,7 @@ module.exports = {
   backendCommand,
   PREPARE_STEP_LABELS,
   wslStartFailureReason,
+  legacyWindowsWorkspace,
   decodeWslOutput,
   expectedChecksum,
   imageFiles,

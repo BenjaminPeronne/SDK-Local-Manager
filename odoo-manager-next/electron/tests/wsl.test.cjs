@@ -8,6 +8,7 @@ const {
   BACKEND_PATH,
   WslEnvironment,
   wslStartFailureReason,
+  legacyWindowsWorkspace,
   backendCommand,
   decodeWslOutput,
   expectedChecksum,
@@ -242,6 +243,48 @@ test('an unchanged provisioning script is not replayed at every start', async ()
   } finally {
     fs.rmSync(build.directory, { recursive: true, force: true });
   }
+});
+
+test('the legacy Windows projects folder is found even when settings were never saved', () => {
+  // Cause des migrations absentes sur certains postes : sans config.json, aucun dossier n'était
+  // transmis, et le gestionnaire ne proposait rien, sans le dire.
+  const home = 'C:\\Users\\benja';
+  const only = folder => candidate => candidate === folder;
+
+  assert.equal(
+    legacyWindowsWorkspace({ configText: '', home, exists: only('C:\\Users\\benja\\Odoo-projects') }),
+    'C:\\Users\\benja\\Odoo-projects',
+  );
+  // Même ordre que l'ancien backend : Documents\Developer d'abord.
+  assert.equal(
+    legacyWindowsWorkspace({ configText: '{}', home, exists: () => true }),
+    'C:\\Users\\benja\\Documents\\Developer\\Odoo-projects',
+  );
+  assert.equal(
+    legacyWindowsWorkspace({ configText: '{"api_port": 18765}', home, exists: only('C:\\Users\\benja\\Documents\\Odoo-projects') }),
+    'C:\\Users\\benja\\Documents\\Odoo-projects',
+  );
+});
+
+test('an explicitly configured legacy folder always wins', () => {
+  assert.equal(
+    legacyWindowsWorkspace({ configText: '{"workspace": "D:\\\\Odoo"}', home: 'C:\\Users\\benja', exists: () => true }),
+    'D:\\Odoo',
+  );
+});
+
+test('no legacy folder is invented when nothing exists or the settings are unreadable', () => {
+  assert.equal(legacyWindowsWorkspace({ configText: '', home: 'C:\\Users\\benja', exists: () => false }), '');
+  assert.equal(
+    legacyWindowsWorkspace({ configText: '{pas du json', home: 'C:\\Users\\benja', exists: candidate => candidate.endsWith('\\Odoo-projects') }),
+    'C:\\Users\\benja\\Documents\\Developer\\Odoo-projects',
+  );
+  assert.equal(legacyWindowsWorkspace({ configText: '', home: '' }), '');
+});
+
+test('a legacy folder is seen from the distribution under /mnt', () => {
+  assert.equal(WslEnvironment.mountedWindowsPath(legacyWindowsWorkspace({ configText: '', home: 'C:\\Users\\benja', exists: () => true })),
+    '/mnt/c/Users/benja/Documents/Developer/Odoo-projects');
 });
 
 test('preparation announces its steps, in order, so the wait is never blind', async () => {

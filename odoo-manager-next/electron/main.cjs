@@ -6,7 +6,7 @@ const { execFile, spawn } = require('node:child_process');
 const { APP_ORIGIN, Backend, configPath, externalUrl, staticPath, contentPolicy } = require('./runtime.cjs');
 const { CredentialStore } = require('./credentials.cjs');
 const { GitLabClient } = require('./gitlab.cjs');
-const { LINUX_WORKSPACE, WslEnvironment, imageFiles, wslStartFailureReason } = require('./wsl.cjs');
+const { LINUX_WORKSPACE, WslEnvironment, imageFiles, legacyWindowsWorkspace, wslStartFailureReason } = require('./wsl.cjs');
 
 app.setName('SDK Local Manager');
 app.setAppUserModelId('com.sudokeys.odoo-manager');
@@ -40,11 +40,26 @@ async function prepareWslEnvironment() {
   return state;
 }
 
+/** Dossier de projets de l'ancien backend Windows : chemin Windows et vue depuis la distribution. */
+function legacyWorkspace() {
+  let configText = '';
+  try {
+    configText = fs.readFileSync(configPath(), 'utf8');
+  } catch { /* Réglages jamais enregistrés : le dossier par défaut s'applique. */ }
+  const windows = legacyWindowsWorkspace({ configText, home: app.getPath('home') });
+  return { windows, mounted: WslEnvironment.mountedWindowsPath(windows) };
+}
+
 /** Dossier de projets du backend Windows, vu depuis la distribution : source de la migration. */
 function windowsWorkspaceSeenFromWsl() {
-  try {
-    return WslEnvironment.mountedWindowsPath(JSON.parse(fs.readFileSync(configPath(), 'utf8')).workspace);
-  } catch { return ''; }
+  return legacyWorkspace().mounted;
+}
+
+/** Une migration absente ne doit plus être silencieuse : le journal dit ce qui a été trouvé. */
+function describeLegacyWorkspace({ windows, mounted }) {
+  if (!windows) return 'Migration : aucun ancien dossier de projets Windows trouvé.';
+  if (!mounted) return `Migration : ancien dossier ${windows} hors d'un disque Windows (C:, D:…), migration impossible.`;
+  return `Migration : anciens projets recherchés dans ${windows} (${mounted}).`;
 }
 
 /**
@@ -180,8 +195,9 @@ async function start() {
     // version l'aurait démarrée avant même l'affichage de la fenêtre.
     const distributions = await wsl.distributions().catch(() => []);
     if (distributions.some(name => name.toLowerCase() === wsl.distribution.toLowerCase())) {
-      const legacyWorkspace = windowsWorkspaceSeenFromWsl();
-      options.command = (port, instance) => wsl.backendCommand(port, instance, legacyWorkspace);
+      const legacy = legacyWorkspace();
+      fs.appendFileSync(path.join(logDir, 'backend.log'), describeLegacyWorkspace(legacy) + '\n');
+      options.command = (port, instance) => wsl.backendCommand(port, instance, legacy.mounted);
       options.preferredPort = 18765;
       // Le backend de ce build doit être en place avant de démarrer : une mise à jour de
       // l'application change le backend sans forcément changer le numéro de version.
