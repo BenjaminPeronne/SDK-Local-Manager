@@ -256,7 +256,7 @@ Ports utilisés :
 
 | Port | Usage |
 | --- | --- |
-| `18765` | API locale du gestionnaire (`127.0.0.1` uniquement). Un port libre est choisi s'il est occupé. |
+| `18765` | API locale du gestionnaire (`127.0.0.1` uniquement). Un port libre est choisi s'il est occupé. Voir [docs/api-locale.md](docs/api-locale.md). |
 | `80` / `443` | Accès aux projets via Traefik. |
 | `8069` / `5432` | Odoo et PostgreSQL, internes aux conteneurs. |
 | `10022` | SSH sortant vers GitLab Sudokeys. |
@@ -351,6 +351,7 @@ Le journal des erreurs de l'application regroupe les erreurs de l'interface, de 
 
 - [README_next_odoo_manager.md](README_next_odoo_manager.md) : détail des fonctionnalités de l'interface, de la restauration et de la publication.
 - [README_odoo_manager.md](README_odoo_manager.md) : ancien menu en ligne de commande (`odoo_manager.sh`).
+- [docs/api-locale.md](docs/api-locale.md) : API locale pour les intégrateurs — version, contrat publié, lancement et suivi des actions.
 - [docs/electron-migration.md](docs/electron-migration.md) : migration de Tauri vers Electron.
 - [docs/REFACTORING_CROSS_PLATFORM.md](docs/REFACTORING_CROSS_PLATFORM.md) : refonte multiplateforme.
 - [docs/performance-audit-2026-09-08.md](docs/performance-audit-2026-09-08.md) : audit des performances.
