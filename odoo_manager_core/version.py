@@ -4,4 +4,4 @@ Le backend est empaqueté séparément de l'interface et ne peut pas lire `packa
 `scripts/set_app_version.py` tient ce fichier à jour en même temps que les manifestes.
 """
 
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.7.0"
