@@ -31,6 +31,10 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // États d'interaction : un survol et une sélection qui se voient sur une carte comme sur
+        // le fond de page, dans les deux thèmes. Les teintes `muted/40` n'y suffisaient pas.
+        hover: "hsl(var(--hover) / <alpha-value>)",
+        selected: "hsl(var(--selected) / <alpha-value>)",
       },
       borderRadius: {
         lg: "var(--radius)",

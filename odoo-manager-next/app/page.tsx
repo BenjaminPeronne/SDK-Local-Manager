@@ -62,6 +62,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { WslSetupDialog } from "@/components/wsl-setup";
 import { desktopBridge, desktopErrorMessage, type WslStatus } from "@/lib/desktop";
 import { isWslSetupPending } from "@/lib/wsl-setup";
+import { databaseToKeep, readRememberedDatabases, writeRememberedDatabases } from "@/lib/database-selection";
 import { cn } from "@/lib/utils";
 import { mergeIncrementalJobOutput, type JobOutputCache } from "@/lib/job-output";
 import appIcon from "./icon.png";
@@ -1380,6 +1381,12 @@ export default function Home() {
   const [degradedBackendReason, setDegradedBackendReason] = useState("");
 
   const [selectedDb, setSelectedDb] = useState("");
+  // Base choisie pour chaque projet pendant la session : un rafraîchissement, une sonde Postgres
+  // lente ou un aller-retour entre projets ne ramène plus à la première base de la liste.
+  const rememberedDatabases = useRef<Record<string, string>>(readRememberedDatabases());
+  // Projet auquel appartient `selectedDb` : à l'ouverture d'un autre projet, la base affichée
+  // est encore celle du précédent et ne doit pas servir de référence.
+  const databaseOwner = useRef("");
   const [modules, setModules] = useState<ModuleInfo[]>([]);
   const [loadingModules, setLoadingModules] = useState(false);
   const [moduleSearch, setModuleSearch] = useState("");
@@ -1559,6 +1566,8 @@ export default function Home() {
     [pendingProjectArrivals, selectedProjectName],
   );
   const pendingSelectedArrivalIsMigration = Boolean(pendingSelectedProjectArrival?.title.startsWith(MIGRATION_JOB_PREFIX));
+  // Vue projet affichée (en-tête, onglets) ; sinon, l'accueil occupe la zone principale.
+  const projectViewOpen = Boolean(selectedProject || pendingSelectedProjectArrival);
   const migrationCandidates = useMemo(
     () => (migration?.projects || []).filter((candidate) => !candidate.already_migrated),
     [migration],
@@ -1669,10 +1678,13 @@ export default function Home() {
     return () => observer.disconnect();
   }, [moduleSelectionBanner, stickyHeader, projectHeaderHeight, projectTabsHeight]);
 
+  // L'en-tête et les onglets n'existent qu'avec un projet ouvert : l'application démarre sur
+  // l'accueil. Mesurés une seule fois au lancement, ils restaient à 0 px, et onglets comme
+  // en-tête du tableau des modules se collaient en haut de l'écran, sous l'en-tête fixe.
   useEffect(() => {
     const header = projectHeaderRef.current;
     const tabs = projectTabsRef.current;
-    if (!stickyHeader || !header) return;
+    if (!stickyHeader || !projectViewOpen || !header) return;
     const measure = () => {
       setProjectHeaderHeight(header.offsetHeight);
       setProjectTabsHeight(tabs?.offsetHeight ?? 0);
@@ -1682,7 +1694,7 @@ export default function Home() {
     if (tabs) observer.observe(tabs);
     measure();
     return () => observer.disconnect();
-  }, [stickyHeader]);
+  }, [stickyHeader, projectViewOpen]);
   const modulesPerPage = 50;
   const modulePageCount = Math.max(1, Math.ceil(filteredModules.length / modulesPerPage));
   const visibleModules = useMemo(() => {
@@ -1811,7 +1823,6 @@ export default function Home() {
       if (currentName && pendingProjectNames.current.has(currentName)) return currentName;
       // Un projet disparu (supprimé, renommé) ramène à l'accueil plutôt qu'au premier de la liste.
       const project = payload.overview.projects.find((item) => item.name === currentName);
-      setSelectedDb((currentDb) => currentDb !== "postgres" && project?.databases?.includes(currentDb) ? currentDb : firstOdooDatabase(project));
       return project?.name || "";
     });
     setSelectedJobId((currentId) => payload.jobs.some((job) => job.id === currentId) ? currentId : payload.jobs[0]?.id ?? null);
@@ -1904,7 +1915,6 @@ export default function Home() {
     setSelectedProjectName((currentName) => {
       if (currentName && pendingProjectNames.current.has(currentName)) return currentName;
       const current = payload.projects.find((project) => project.name === currentName);
-      if (current && current.name !== currentName) setSelectedDb(firstOdooDatabase(current));
       return current?.name || "";
     });
   }, [markApiSuccess]);
@@ -2173,7 +2183,7 @@ export default function Home() {
     if (!project?.databases.includes(pendingCreatedDatabase.database)) return;
 
     setSelectedProjectName(project.name);
-    setSelectedDb(pendingCreatedDatabase.database);
+    chooseDatabase(pendingCreatedDatabase.database, project.name);
     setActiveTab("modules");
     setPendingCreatedDatabase(null);
     pushToast("success", `Base ${pendingCreatedDatabase.database} prête. La liste des modules est disponible.`);
@@ -2239,9 +2249,11 @@ export default function Home() {
   }, [applyOverview, commitSystemStatus, initializing, refreshJobs, refreshOverview]);
 
   useEffect(() => {
-    if (selectedProject) {
-      setSelectedDb((current) => current !== "postgres" && selectedProject.databases?.includes(current) ? current : firstOdooDatabase(selectedProject));
-    }
+    if (!selectedProject) return;
+    const remembered = rememberedDatabases.current[selectedProject.name];
+    const sameProject = databaseOwner.current === selectedProject.name;
+    databaseOwner.current = selectedProject.name;
+    setSelectedDb((current) => databaseToKeep(selectedProject.databases, sameProject ? current : remembered || "", remembered));
   }, [selectedProject]);
 
   useEffect(() => stopLiveLogStream, [stopLiveLogStream]);
@@ -3038,10 +3050,19 @@ export default function Home() {
     if (job) setAllTranslationsOpen(false);
   }
 
+  /** Choix explicite d'une base : affiché tout de suite et retenu pour ce projet pendant la session. */
+  function chooseDatabase(db: string, projectName = selectedProject?.name) {
+    setSelectedDb(db);
+    if (!projectName || !db || db === "postgres") return;
+    if (projectName === selectedProject?.name) databaseOwner.current = projectName;
+    rememberedDatabases.current = { ...rememberedDatabases.current, [projectName]: db };
+    writeRememberedDatabases(rememberedDatabases.current);
+  }
+
   function runDatabaseAction(db: string, action: DatabaseMenuAction) {
     if (db !== selectedDb) {
       // Les actions lisent la base sélectionnée : on attend que la sélection soit appliquée.
-      setSelectedDb(db);
+      chooseDatabase(db);
       setPendingDatabaseAction({ db, action });
       return;
     }
@@ -3245,7 +3266,7 @@ export default function Home() {
   const selectedProjectReady = Boolean(selectedProject);
   const selectedProjectOnline = selectedProject?.odoo_status === "running";
   // Sans projet ouvert, les onglets n'offrent que des panneaux vides : l'accueil prend la place.
-  const showWelcome = !selectedProject && !pendingSelectedProjectArrival;
+  const showWelcome = !projectViewOpen;
 
   useEffect(() => {
     if (showWelcome || !selectedProject || selectedProjectOnline) return;
@@ -3317,8 +3338,8 @@ export default function Home() {
         key={`${module.path}:${module.name}`}
         className={cn(
           "grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 px-3 py-2.5 text-sm sm:grid-cols-[auto_minmax(0,1fr)_9rem_6.5rem] sm:items-center",
-          blocked ? "cursor-default" : "cursor-pointer hover:bg-muted/45",
-          selected && "bg-primary/[0.06] dark:bg-primary/[0.12]",
+          blocked ? "cursor-default" : "cursor-pointer hover:bg-hover",
+          selected && "bg-selected",
         )}
       >
         <Checkbox
@@ -3737,7 +3758,7 @@ export default function Home() {
           <SelectItem value="other">Autre</SelectItem>
         </SelectContent>
       </Select>
-      <Select value={selectedDb} onValueChange={setSelectedDb}>
+      <Select value={selectedDb} onValueChange={(db) => chooseDatabase(db)}>
         <SelectTrigger placeholder="Base Odoo">
           <SelectValue />
         </SelectTrigger>
@@ -4012,8 +4033,8 @@ export default function Home() {
                   <div
                     key={project.name}
                     className={cn(
-                      "border-b border-border/70 transition-[background-color,border-color] duration-150 hover:border-primary/35 hover:bg-muted/70 dark:hover:bg-muted/60 last:border-b-0",
-                      selectedProject?.name === project.name && "bg-primary/[0.07] hover:bg-primary/[0.10] dark:bg-primary/[0.12] dark:hover:bg-primary/[0.16]",
+                      "border-b border-border/70 transition-[background-color,border-color] duration-150 hover:border-primary/35 hover:bg-hover last:border-b-0",
+                      selectedProject?.name === project.name && "bg-selected",
                       absent && "bg-muted/35 text-muted-foreground",
                     )}
                   >
@@ -4023,7 +4044,6 @@ export default function Home() {
                         className="-mx-1 min-w-0 flex-1 rounded-md px-1 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                         onClick={() => {
                           setSelectedProjectName(project.name);
-                          setSelectedDb(firstOdooDatabase(project));
                           setExternalLogView(null);
                           setActiveTab(project.odoo_status === "running" ? "bases" : "logs");
                         }}
@@ -4577,10 +4597,10 @@ export default function Home() {
                                   className={cn(
                                     "w-full min-w-0 p-4 pr-14",
                                     selectedDb === db
-                                      ? "border-primary bg-primary/[0.10] ring-2 ring-primary/35 hover:bg-primary/[0.10] dark:bg-primary/[0.16] dark:hover:bg-primary/[0.16]"
-                                      : "hover:border-primary/35 hover:bg-muted/60 dark:hover:bg-muted/40",
+                                      ? "border-primary bg-selected ring-2 ring-primary/35"
+                                      : "hover:border-primary/35 hover:bg-hover",
                                   )}
-                                  onClick={() => setSelectedDb(db)}
+                                  onClick={() => chooseDatabase(db)}
                                 >
                                   <div className="flex min-w-0 items-start gap-2">
                                     <span className={cn("min-w-0 break-all", REFINED_IDENTIFIER)}>{db}</span>
@@ -4663,7 +4683,7 @@ export default function Home() {
                           <button
                             type="button"
                             className={cn(
-                              "flex w-full items-center justify-between gap-3 rounded-md p-4 text-left transition-colors hover:bg-muted/60 dark:hover:bg-muted/40",
+                              "flex w-full items-center justify-between gap-3 rounded-md p-4 text-left transition-colors hover:bg-hover",
                               REFINED_FOCUS_RING,
                             )}
                             aria-expanded={postgresDetailsOpen}
@@ -4719,9 +4739,9 @@ export default function Home() {
                                     key={db}
                                     className={cn(
                                       "min-w-0 p-4",
-                                      selectedDb === db && "border-primary bg-primary/[0.08] ring-1 ring-primary/25 dark:bg-primary/[0.14]",
+                                      selectedDb === db && "border-primary bg-selected ring-1 ring-primary/25",
                                     )}
-                                    onClick={() => setSelectedDb(db)}
+                                    onClick={() => chooseDatabase(db)}
                                   >
                                     <div className="flex min-w-0 items-start justify-between gap-2">
                                       <span className="min-w-0 break-words font-medium">{db}</span>
@@ -4954,8 +4974,8 @@ export default function Home() {
                                       "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 xl:items-center",
                                       REFINED_MODULE_COLUMNS,
                                       moduleSelected
-                                        ? "bg-primary/[0.08] dark:bg-primary/[0.14]"
-                                        : "hover:bg-muted/60 dark:hover:bg-muted/40",
+                                        ? "bg-selected"
+                                        : "hover:bg-hover",
                                     )}
                                     onClick={(event) => toggleModuleFromRow(event, module.name)}
                                   >
@@ -5146,9 +5166,9 @@ export default function Home() {
                                   <div
                                     key={module.name}
                                     className={cn(
-                                      "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 hover:bg-muted/35 xl:items-center",
+                                      "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 hover:bg-hover xl:items-center",
                                       moduleTableGridColumns,
-                                      selectedModules.has(module.name) && "bg-primary/[0.06] dark:bg-primary/[0.12]",
+                                      selectedModules.has(module.name) && "bg-selected",
                                     )}
                                     onClick={(event) => toggleModuleFromRow(event, module.name)}
                                   >
@@ -5299,8 +5319,8 @@ export default function Home() {
                                   className={cn(
                                     "min-w-0 rounded-md border bg-card transition-colors",
                                     jobSelected
-                                      ? "border-primary bg-primary/[0.10] ring-2 ring-primary/35 dark:bg-primary/[0.16]"
-                                      : "hover:border-primary/35 hover:bg-muted/60 dark:hover:bg-muted/40",
+                                      ? "border-primary bg-selected ring-2 ring-primary/35"
+                                      : "hover:border-primary/35 hover:bg-hover",
                                   )}
                                 >
                                   <div className="flex min-w-0 items-start gap-1">
@@ -5464,12 +5484,12 @@ export default function Home() {
                               key={job.id}
                               className={cn(
                                 "group grid h-[172px] min-w-0 grid-rows-[minmax(0,1fr)_36px] gap-2 rounded-md border bg-card p-3 shadow-sm transition-[background-color,border-color,box-shadow] hover:border-primary/40 hover:shadow-md",
-                                !scopedExternalLogView && selectedJob?.id === job.id && "border-primary bg-primary/[0.08] ring-1 ring-primary/25 dark:bg-primary/[0.14]",
+                                !scopedExternalLogView && selectedJob?.id === job.id && "border-primary bg-selected ring-1 ring-primary/25",
                               )}
                             >
                               <button
                                 type="button"
-                                className="grid min-h-0 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md p-2 text-left transition-colors hover:bg-primary/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-primary/[0.12]"
+                                className="grid min-h-0 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md p-2 text-left transition-colors hover:bg-hover/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-primary/[0.12]"
                                 aria-pressed={!scopedExternalLogView && selectedJob?.id === job.id}
                                 title={job.title}
                                 onClick={() => selectJob(job.id)}
@@ -5970,7 +5990,7 @@ export default function Home() {
                         aria-current={active ? "page" : undefined}
                         className={cn(
                           "flex shrink-0 items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          active ? "bg-primary/[0.10] font-medium text-primary dark:bg-primary/[0.16]" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                          active ? "bg-selected font-medium text-primary" : "text-muted-foreground hover:bg-hover hover:text-foreground",
                         )}
                         onClick={() => setSettingsSection(section.id)}
                       >
@@ -6101,7 +6121,7 @@ export default function Home() {
                                 key={value}
                                 role="radio"
                                 aria-checked={(settingsDraft.interface_layout ?? "classic") === value}
-                                className={cn("p-3 text-left", (settingsDraft.interface_layout ?? "classic") === value && "border-primary bg-primary/10")}
+                                className={cn("p-3 text-left", (settingsDraft.interface_layout ?? "classic") === value && "border-primary bg-selected")}
                                 onClick={() => setSettingsDraft({ ...settingsDraft, interface_layout: value })}
                               >
                                 <span className="block text-sm font-medium">{title}</span>
@@ -6124,7 +6144,7 @@ export default function Home() {
                             <InteractiveCard
                               className={cn(
                                 "flex min-h-24 items-center gap-3 p-3",
-                                settingsDraft.interface_icon === "manager" && "border-primary bg-primary/[0.08] ring-1 ring-primary/25 dark:bg-primary/[0.14]",
+                                settingsDraft.interface_icon === "manager" && "border-primary bg-selected ring-1 ring-primary/25",
                               )}
                               role="radio"
                               aria-checked={settingsDraft.interface_icon === "manager"}
@@ -6140,7 +6160,7 @@ export default function Home() {
                             <InteractiveCard
                               className={cn(
                                 "flex min-h-24 items-center gap-3 p-3",
-                                settingsDraft.interface_icon === "local" && "border-primary bg-primary/[0.08] ring-1 ring-primary/25 dark:bg-primary/[0.14]",
+                                settingsDraft.interface_icon === "local" && "border-primary bg-selected ring-1 ring-primary/25",
                               )}
                               role="radio"
                               aria-checked={settingsDraft.interface_icon === "local"}
@@ -6158,7 +6178,7 @@ export default function Home() {
 
                       </SettingsGroup>
                       <div className="divide-y overflow-hidden rounded-md border bg-card">
-                      <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-muted/40">
+                      <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-hover">
                         <Checkbox
                           className="mt-0.5"
                           checked={settingsDraft.show_technical_details}
@@ -6176,7 +6196,7 @@ export default function Home() {
                         </span>
                       </label>
 
-                      <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-muted/40">
+                      <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-hover">
                         <Checkbox
                           className="mt-0.5"
                           checked={settingsDraft.sticky_header}
@@ -6606,8 +6626,8 @@ export default function Home() {
                           key={app.id}
                           className={cn(
                             "flex min-w-0 items-start gap-3 rounded-md border p-2.5 text-sm transition-colors",
-                            unavailable || alreadyInstalled ? "cursor-not-allowed bg-muted/35 opacity-60" : "cursor-pointer hover:bg-muted/45",
-                            selectedSoclePresets.has(app.id) && !alreadyInstalled && "border-primary/50 bg-primary/[0.06]",
+                            unavailable || alreadyInstalled ? "cursor-not-allowed bg-muted/35 opacity-60" : "cursor-pointer hover:bg-hover",
+                            selectedSoclePresets.has(app.id) && !alreadyInstalled && "border-primary bg-selected",
                           )}
                         >
                           <Checkbox
@@ -6719,7 +6739,7 @@ export default function Home() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 id="repository-source-title" className="text-sm font-semibold">Dépôt et branche</h3>
                 {gitlabStatus?.connected && (
-                  <div className="grid grid-cols-2 gap-1 rounded-md border bg-muted/35 p-1" role="radiogroup" aria-label="Source du dépôt">
+                  <div className="grid grid-cols-2 gap-1 rounded-md border bg-muted p-1" role="radiogroup" aria-label="Source du dépôt">
                     {([["ssh", "Lien SSH"], ["gitlab", "Rechercher dans GitLab"]] as const).map(([value, label]) => (
                       <button
                         key={value}
@@ -6727,8 +6747,10 @@ export default function Home() {
                         role="radio"
                         aria-checked={repositorySource === value}
                         className={cn(
-                          "rounded px-3 py-1 text-sm font-medium transition-colors",
-                          repositorySource === value ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground",
+                          "rounded px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          repositorySource === value
+                            ? "bg-card text-foreground shadow-sm ring-1 ring-primary/40"
+                            : "text-muted-foreground hover:bg-hover hover:text-foreground",
                         )}
                         onClick={() => setRepositorySource(value)}
                       >
@@ -6763,7 +6785,7 @@ export default function Home() {
                                 <button
                                   key={project.id}
                                   type="button"
-                                  className="flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-muted/45"
+                                  className="flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-hover"
                                   onClick={() => {
                                     setGitlabProject(project);
                                     setGitlabRefSearch("");
@@ -6831,8 +6853,8 @@ export default function Home() {
                                   role="option"
                                   aria-selected={repositoryBranch === ref.name}
                                   className={cn(
-                                    "flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-muted/45",
-                                    repositoryBranch === ref.name && "bg-primary/[0.08] font-medium",
+                                    "flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-hover",
+                                    repositoryBranch === ref.name && "bg-selected font-medium",
                                   )}
                                   onClick={() => setRepositoryBranch(ref.name)}
                                 >
@@ -6975,7 +6997,7 @@ export default function Home() {
                       {repositoryVisibleBlocked.length > 0 && (
                         // Replié par défaut : ces modules ne demandent aucune décision.
                         <details className="group rounded-md border" open={!repositoryVisibleSelectable.length}>
-                          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm hover:bg-muted/45">
+                          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm hover:bg-hover">
                             <span className="font-medium">Non importables ({repositoryVisibleBlocked.length})</span>
                             <span className="flex items-center gap-2 text-xs text-muted-foreground">
                               Déjà fournis par le projet ou incompatibles
@@ -7081,7 +7103,7 @@ export default function Home() {
                   {zipModuleCandidates.map((moduleName) => (
                     <label
                       key={moduleName}
-                      className="flex min-w-0 cursor-pointer items-start gap-3 rounded-md p-2 text-sm hover:bg-muted"
+                      className="flex min-w-0 cursor-pointer items-start gap-3 rounded-md p-2 text-sm hover:bg-hover"
                     >
                       <Checkbox
                         className="mt-0.5"
@@ -7237,7 +7259,7 @@ export default function Home() {
                 type="button"
                 className={cn(
                   "rounded-md border p-3 text-left text-sm transition-colors",
-                  updateScope === "imported" ? "border-primary bg-primary/[0.08] ring-1 ring-primary/25" : "bg-background hover:bg-muted/55",
+                  updateScope === "imported" ? "border-primary bg-selected ring-1 ring-primary/25" : "bg-background hover:bg-hover",
                 )}
                 onClick={() => setUpdateScope("imported")}
               >
@@ -7250,7 +7272,7 @@ export default function Home() {
                 type="button"
                 className={cn(
                   "rounded-md border p-3 text-left text-sm transition-colors",
-                  updateScope === "all" ? "border-primary bg-primary/[0.08] ring-1 ring-primary/25" : "bg-background hover:bg-muted/55",
+                  updateScope === "all" ? "border-primary bg-selected ring-1 ring-primary/25" : "bg-background hover:bg-hover",
                 )}
                 onClick={() => setUpdateScope("all")}
               >
@@ -7469,7 +7491,7 @@ export default function Home() {
             ) : translationLanguages.length ? (
               <div className="grid gap-2 sm:grid-cols-2">
                 {translationLanguages.map((language) => (
-                  <label key={language.code} className="flex cursor-pointer items-center gap-2 rounded-md border p-2.5 text-sm hover:bg-muted/45">
+                  <label key={language.code} className="flex cursor-pointer items-center gap-2 rounded-md border p-2.5 text-sm hover:bg-hover">
                     <Checkbox
                       checked={selectedTranslationLanguages.has(language.code)}
                       onCheckedChange={(checked) =>
@@ -7825,7 +7847,7 @@ function CreateProjectDialog({
               <InteractiveCard
                 className={cn(
                   "min-h-20 p-3",
-                  sourceType === "standard" && "border-primary bg-primary/5",
+                  sourceType === "standard" && "border-primary bg-selected",
                 )}
                 onClick={() => setSourceType("standard")}
               >
@@ -7835,7 +7857,7 @@ function CreateProjectDialog({
               <InteractiveCard
                 className={cn(
                   "min-h-20 p-3",
-                  sourceType === "gitlab" && "border-primary bg-primary/5",
+                  sourceType === "gitlab" && "border-primary bg-selected",
                 )}
                 onClick={() => setSourceType("gitlab")}
               >
@@ -7845,7 +7867,7 @@ function CreateProjectDialog({
               <InteractiveCard
                 className={cn(
                   "min-h-20 p-3",
-                  sourceType === "rika" && "border-primary bg-primary/5",
+                  sourceType === "rika" && "border-primary bg-selected",
                 )}
                 onClick={() => setSourceType("rika")}
               >

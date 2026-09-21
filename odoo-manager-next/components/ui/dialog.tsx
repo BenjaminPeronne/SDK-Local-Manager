@@ -22,10 +22,12 @@ export const DialogContent = React.forwardRef<
   >
     {children}
     <RadixDialog.Close>
+      {/* Variante « soft » : la croix a un fond visible au repos, là où la variante fantôme
+          la laissait se confondre avec le fond de la fenêtre. */}
       <IconButton
         className="absolute right-3 top-3"
         size="2"
-        variant="ghost"
+        variant="soft"
         color="gray"
         aria-label="Fermer"
         title="Fermer"
