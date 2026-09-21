@@ -125,7 +125,11 @@ body, .radix-themes {
   box-shadow: inset 0 -2px #F4791F !important;
 }
 
-* {
+/* `*` ne vise pas les pseudo-éléments : sans eux, une bordure dessinée par `::before` (fond de la
+   bande d'onglets fixe) prenait le gris clair par défaut de Tailwind, une ligne blanche en thème sombre. */
+*,
+::before,
+::after {
   border-color: hsl(var(--border));
 }
 
