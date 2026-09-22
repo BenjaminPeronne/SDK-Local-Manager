@@ -83,6 +83,9 @@ export type BootstrapSnapshot = {
   jobs: Job[];
 };
 
+/** Action de menu d'une base, en attente de confirmation. */
+export type PendingDatabaseAction = { db: string; action: DatabaseMenuAction };
+
 export type DatabaseMenuAction = "regenerate_assets" | "reset_translations" | "neutralize" | "admin_password" | "psql" | "drop";
 
 export type ManagerSettings = {
