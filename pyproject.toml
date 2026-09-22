@@ -1,0 +1,15 @@
+# Outils de développement du backend Python ; l'exécution n'a besoin que de la bibliothèque standard.
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["archive", "odoo-manager-next", ".build-venv", ".electron-sidecar-build", "dist"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, tri des imports, modernisation de la syntaxe, bugs probables.
+select = ["E", "W", "F", "I", "UP", "B"]
+# Les lignes de code sont coupées par `ruff format` ; restent les chaînes et commentaires, lisibles tels quels.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Les flux et journaux du backend empaqueté sont initialisés avant les autres imports, pour capturer leurs messages.
+"odoo_manager_web.py" = ["E402"]

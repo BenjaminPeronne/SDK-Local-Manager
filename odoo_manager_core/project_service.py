@@ -13,6 +13,18 @@ import uuid
 from pathlib import Path
 
 from . import jobs
+from .platform import (
+    command_uses_wsl,
+    executable_search_path,
+    find_wsl_executable_distribution,
+    hidden_process_kwargs,
+    host_executable_available,
+    resolve_host_executable,
+    workspace_execution_path,
+    workspace_wsl_context,
+    wsl_command_prefix,
+    wsl_command_with_cwd,
+)
 from .system import docker_command
 from .traefik import (
     TRAEFIK_CONFIG_FILENAMES,
@@ -27,19 +39,6 @@ from .traefik import (
     select_traefik_instance,
     url_with_port,
 )
-from .platform import (
-    command_uses_wsl,
-    executable_search_path,
-    hidden_process_kwargs,
-    host_executable_available,
-    resolve_host_executable,
-    workspace_execution_path,
-    workspace_wsl_context,
-    wsl_command_prefix,
-    wsl_command_with_cwd,
-    find_wsl_executable_distribution,
-)
-
 
 COMPOSE_FILENAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
 # Première page Odoo servie dans le conteneur : 2xx/3xx/4xx = serveur prêt, 5xx ou exception = pas encore.
@@ -1365,7 +1364,7 @@ class ProjectService:
             return 0, "refused"
         except (ConnectionResetError, http.client.RemoteDisconnected):
             return 0, "reset"
-        except (TimeoutError, socket.timeout):
+        except TimeoutError:
             return 0, "timeout"
         except (OSError, http.client.HTTPException):
             return 0, "error"

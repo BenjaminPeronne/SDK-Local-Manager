@@ -1,16 +1,17 @@
 import http.client
-import os
 import json
+import os
 import re
+import tempfile
 import threading
 import time
-import tempfile
 import unittest
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import Mock, patch
 
 import odoo_manager_web as web
+from odoo_manager_core.config import ManagerSettings
 from odoo_manager_core.traefik import reset_traefik_entrypoint_cache
 
 _ERROR_LOG_SANDBOX = None
@@ -107,7 +108,7 @@ class LocalApiRequestGuardTests(unittest.TestCase):
         attacks = {
             "csrf-text-plain": {"Origin": "https://evil.example", "Content-Type": "text/plain"},
             "csrf-null-origin": {"Origin": "null", "Content-Type": "application/json"},
-            "rebinding": {"Host": "attacker.example:%d" % self.port, "Content-Type": "application/json"},
+            "rebinding": {"Host": f"attacker.example:{self.port}", "Content-Type": "application/json"},
         }
         for message, headers in attacks.items():
             with self.subTest(message=message):
@@ -803,17 +804,17 @@ class MigrationSourceTests(unittest.TestCase):
     """L'application transmet l'ancien dossier Windows au backend lancé dans la distribution."""
 
     def test_source_comes_from_the_application_when_not_configured(self):
-        settings = web.ManagerSettings.from_dict({}, "/tmp/workspace")
+        settings = ManagerSettings.from_dict({}, "/tmp/workspace")
         with patch.object(web, "SETTINGS", settings),                 patch.dict(web.os.environ, {"ODOO_MANAGER_LEGACY_WORKSPACE": "/mnt/c/Users/a/Odoo-projects"}):
             self.assertEqual(Path("/mnt/c/Users/a/Odoo-projects"), web.legacy_workspace_path())
 
     def test_an_explicit_setting_wins(self):
-        settings = web.ManagerSettings.from_dict({"legacy_workspace": "/mnt/d/Projets"}, "/tmp/workspace")
+        settings = ManagerSettings.from_dict({"legacy_workspace": "/mnt/d/Projets"}, "/tmp/workspace")
         with patch.object(web, "SETTINGS", settings),                 patch.dict(web.os.environ, {"ODOO_MANAGER_LEGACY_WORKSPACE": "/mnt/c/Users/a/Odoo-projects"}):
             self.assertEqual(Path("/mnt/d/Projets"), web.legacy_workspace_path())
 
     def test_no_source_means_no_migration_offer(self):
-        settings = web.ManagerSettings.from_dict({}, "/tmp/workspace")
+        settings = ManagerSettings.from_dict({}, "/tmp/workspace")
         with patch.object(web, "SETTINGS", settings), patch.dict(web.os.environ, {}, clear=True):
             self.assertIsNone(web.legacy_workspace_path())
             self.assertFalse(web.migration_snapshot()["available"])
@@ -951,7 +952,7 @@ class WslManagerCommandTests(unittest.TestCase):
         previous_settings = web.SETTINGS
         previous_workspace = web.WORKSPACE
         try:
-            web.SETTINGS = web.ManagerSettings.from_dict(
+            web.SETTINGS = ManagerSettings.from_dict(
                 {
                     "execution_mode": "wsl",
                     "wsl_distribution": "Ubuntu",
@@ -1089,7 +1090,7 @@ class TraefikPathTests(unittest.TestCase):
             home.return_value = root
             previous_settings = web.SETTINGS
             try:
-                web.SETTINGS = web.ManagerSettings.from_dict(
+                web.SETTINGS = ManagerSettings.from_dict(
                     {"execution_mode": "wsl", "wsl_distribution": "Ubuntu"},
                     root / "Odoo-projects",
                 )
@@ -1462,7 +1463,7 @@ class ProjectCreationPrerequisitesTests(unittest.TestCase):
         previous_settings = web.SETTINGS
         try:
             workspace = r"\\wsl.localhost\Ubuntu-24.04\home\demo\Odoo-projects"
-            web.SETTINGS = web.ManagerSettings.from_dict({"execution_mode": "native"}, workspace)
+            web.SETTINGS = ManagerSettings.from_dict({"execution_mode": "native"}, workspace)
             web.WORKSPACE = Path(workspace)
 
             payload = web.project_creation_prerequisites()
@@ -1636,7 +1637,7 @@ class GitInstallationTests(unittest.TestCase):
         previous_settings = web.SETTINGS
         try:
             workspace = r"\\wsl.localhost\Debian\home\demo\Odoo-projects"
-            web.SETTINGS = web.ManagerSettings.from_dict({}, workspace)
+            web.SETTINGS = ManagerSettings.from_dict({}, workspace)
             web.WORKSPACE = Path(workspace)
             job = self.LogJob()
 

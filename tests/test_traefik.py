@@ -16,7 +16,6 @@ from odoo_manager_core.traefik import (
     url_with_port,
 )
 
-
 MIDDLEWARE_LABELS = (
     "traefik.http.middlewares.odoo-forward.headers.customrequestheaders.X-Forwarded-Proto=http,"
     "traefik.http.middlewares.odoo-compress.compress=true,"

@@ -6,7 +6,6 @@ from pathlib import Path
 
 from .platform import wsl_path_context
 
-
 CONFIG_VERSION = 1
 INTERFACE_ICONS = {"manager", "local"}
 INTERFACE_LAYOUTS = {"classic", "refined"}

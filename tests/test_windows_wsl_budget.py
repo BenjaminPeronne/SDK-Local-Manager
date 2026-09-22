@@ -12,13 +12,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from odoo_manager_core import platform as manager_platform
-from odoo_manager_core.project_service import GIT_SSH_COMMAND, ProjectService, merge_wslenv
-from odoo_manager_core.system import reset_docker_backend_cache
-from odoo_manager_core.config import ManagerSettings
 import test_module_layout
 from test_module_layout import DummyJob
+
 import odoo_manager_web as web
+from odoo_manager_core import platform as manager_platform
+from odoo_manager_core.config import ManagerSettings
+from odoo_manager_core.project_service import GIT_SSH_COMMAND, ProjectService, merge_wslenv
+from odoo_manager_core.system import reset_docker_backend_cache
 
 
 def executable_name(command):

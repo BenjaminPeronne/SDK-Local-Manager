@@ -5,7 +5,6 @@ from unittest.mock import Mock, patch
 
 from scripts import smoke_test_windows_installer as smoke_test
 
-
 ROOT = Path(__file__).resolve().parents[1]
 class WindowsPackagingTests(unittest.TestCase):
     def test_resolves_electron_executable_and_adjacent_backend_runtime(self):

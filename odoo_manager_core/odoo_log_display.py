@@ -2,7 +2,6 @@
 
 import re
 
-
 LOG_RECORD = re.compile(r"^(?:[^|\n]+\|\s*)?\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[,.]\d+")
 GC_MISSING_HEADER = re.compile(
     r"\bINFO\b.*\bodoo\.addons\.base\.models\.ir_attachment: "

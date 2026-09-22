@@ -4,7 +4,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "set_app_version.py"
 SPEC = importlib.util.spec_from_file_location("set_app_version", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)

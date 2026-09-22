@@ -14,7 +14,6 @@ import threading
 from dataclasses import dataclass, field, replace
 from pathlib import PurePosixPath, PureWindowsPath
 
-
 TRAEFIK_DEFAULT_HTTP_PORT = 80
 TRAEFIK_NETWORK = "traefik-local"
 TRAEFIK_PROJECT_ENTRYPOINT = "web"

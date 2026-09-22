@@ -6,6 +6,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import test_module_layout
+from test_module_layout import DummyJob
+
+import odoo_manager_web as web
 from odoo_manager_core import windows_links
 from odoo_manager_core.windows_links import (
     IO_REPARSE_TAG_LX_SYMLINK,
@@ -15,9 +19,6 @@ from odoo_manager_core.windows_links import (
     parse_lx_symlink_reparse_data,
     read_migration_journal,
 )
-import test_module_layout
-from test_module_layout import DummyJob
-import odoo_manager_web as web
 
 
 def lx_reparse_buffer(target, version=2, tag=IO_REPARSE_TAG_LX_SYMLINK):

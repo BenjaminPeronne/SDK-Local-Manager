@@ -15,6 +15,7 @@
 !/tests/
 !/wsl/
 !/README.md
+!/pyproject.toml
 !/odoo_manager_runtime.py
 !/odoo_manager_web.py
 !/odoo_next_gui.sh

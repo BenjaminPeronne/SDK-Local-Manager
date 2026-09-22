@@ -14,13 +14,13 @@ import shutil
 import stat
 import subprocess
 import sys
-import threading
 import tempfile
+import threading
 import time
 import traceback
+import urllib.error
 import urllib.parse
 import urllib.request
-import urllib.error
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -29,40 +29,11 @@ from pathlib import Path, PureWindowsPath
 
 from odoo_manager_runtime import initialize_runtime_streams
 
-
 RUNTIME_LOG_PATH, _RUNTIME_STREAMS = initialize_runtime_streams()
 
-from odoo_manager_core import ManagerSettings, ProjectCreator, SettingsStore, ProjectService, docker_status, start_docker
-from odoo_manager_core.platform import (
-    command_uses_wsl,
-    executable_available,
-    executable_search_path,
-    host_executable_available,
-    hidden_process_kwargs,
-    open_terminal_command,
-    platform_id,
-    resolve_executable,
-    resolve_host_executable,
-    workspace_command_prefix,
-    workspace_execution_path,
-    workspace_wsl_context,
-    wsl_command_prefix,
-    wsl_executable_available,
-    wsl_command_with_cwd,
-    find_wsl_executable_distribution,
-    reset_wsl_executable_cache,
-    wsl_execution_path,
-    wsl_windows_path,
-    wsl_unc_path,
-)
-from odoo_manager_core.project_creator import (
-    SUPPORTED_ODOO_VERSIONS,
-    abandoned_staging_entries,
-    validate_git_ref,
-    validate_gitlab_repository,
-    validate_new_project_name,
-    validate_odoo_version,
-)
+from odoo_manager_core import ProjectCreator, ProjectService, SettingsStore, docker_status, start_docker
+from odoo_manager_core import jobs as job_control
+from odoo_manager_core.docker_api import EngineUnavailable
 from odoo_manager_core.migration import (
     CONTAINER_ABSENT,
     compare_projects,
@@ -77,17 +48,45 @@ from odoo_manager_core.migration import (
     privileged_prefix,
     project_status,
 )
-from odoo_manager_core import jobs as job_control
-from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
-from odoo_manager_core.traefik import url_with_port
-from odoo_manager_core.version import APP_VERSION
 from odoo_manager_core.odoo_log_display import OdooLogDisplay, compact_odoo_log_text
-from odoo_manager_core.docker_api import EngineUnavailable
+from odoo_manager_core.platform import (
+    command_uses_wsl,
+    executable_available,
+    executable_search_path,
+    find_wsl_executable_distribution,
+    hidden_process_kwargs,
+    host_executable_available,
+    open_terminal_command,
+    platform_id,
+    reset_wsl_executable_cache,
+    resolve_executable,
+    resolve_host_executable,
+    workspace_command_prefix,
+    workspace_execution_path,
+    workspace_wsl_context,
+    wsl_command_prefix,
+    wsl_command_with_cwd,
+    wsl_executable_available,
+    wsl_execution_path,
+    wsl_unc_path,
+    wsl_windows_path,
+)
+from odoo_manager_core.project_creator import (
+    SUPPORTED_ODOO_VERSIONS,
+    abandoned_staging_entries,
+    validate_git_ref,
+    validate_gitlab_repository,
+    validate_new_project_name,
+    validate_odoo_version,
+)
+from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
 from odoo_manager_core.system import (
     active_engine_client,
     docker_command,
     reset_docker_backend_cache,
 )
+from odoo_manager_core.traefik import url_with_port
+from odoo_manager_core.version import APP_VERSION
 from odoo_manager_core.windows_links import (
     MIGRATION_JOURNAL_NAME,
     contains_wsl_symlink,
@@ -96,7 +95,6 @@ from odoo_manager_core.windows_links import (
     native_symlinks_supported,
     wsl_symlinks,
 )
-
 
 # Contrat public de l'API locale, publié par /api/version et /api/capabilities.
 #
@@ -1499,7 +1497,9 @@ def linux_path_is_relative_to(path, parent):
 def wsl_module_roots(project, distribution):
     # Traduits une fois par liste : les retraduire pour chacun des ~1 300 modules
     # multipliait les résolutions de chemins Windows.
-    translate = lambda path: wsl_execution_path(path, distribution)
+    def translate(path):
+        return wsl_execution_path(path, distribution)
+
     return (
         translate(project_addons_link_parent(project)),
         translate(project_addons_storage_parent(project)),
@@ -2461,7 +2461,9 @@ def overview_databases_by_project(projects, max_age=None):
     elif pending:
         workers = min(DOCKER_PROBE_WORKERS, len(pending))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="overview-databases") as executor:
-            results.update(zip(pending, executor.map(lambda project: probe_overview_databases(project, max_age), pending)))
+            results.update(
+                zip(pending, executor.map(lambda project: probe_overview_databases(project, max_age), pending), strict=True)
+            )
     return results
 
 
@@ -3470,7 +3472,7 @@ def multipart_field(boundary, name, value):
         f"--{boundary}\r\n"
         f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
         f"{value}\r\n"
-    ).encode("utf-8")
+    ).encode()
 
 
 def post_odoo_database_restore(job, url, backup_path, filename, db_name, master_pwd, copy, neutralize):
@@ -3493,8 +3495,8 @@ def post_odoo_database_restore(job, url, backup_path, filename, db_name, master_
         f"--{boundary}\r\n"
         f'Content-Disposition: form-data; name="backup_file"; filename="{safe_filename}"\r\n'
         "Content-Type: application/zip\r\n\r\n"
-    ).encode("utf-8")
-    suffix = f"\r\n--{boundary}--\r\n".encode("utf-8")
+    ).encode()
+    suffix = f"\r\n--{boundary}--\r\n".encode()
     backup_size = Path(backup_path).stat().st_size
     content_length = len(prefix) + backup_size + len(suffix)
     sent = 0
@@ -3718,7 +3720,7 @@ def drop_database_job(job, project, db_name, master_pwd):
         if odoo_error:
             raise RuntimeError(f"Odoo a refusé la suppression de la base : {odoo_error}")
 
-        for waited in range(0, 32, 2):
+        for _ in range(0, 32, 2):
             if db_name not in set(list_databases_for(project)):
                 invalidate_overview_databases(project)
                 clear_project_module_cache(project)
@@ -3735,7 +3737,7 @@ def drop_partial_database(job, project, db_name):
         return
     literal = db_name.replace("'", "''")
     identifier = db_name.replace('"', '""')
-    for attempt in range(3):
+    for _ in range(3):
         # Deux -c : DROP DATABASE refuse de s'exécuter dans le bloc de transaction d'un -c unique.
         code, output = run_capture(
             docker_command(
@@ -4952,6 +4954,8 @@ def repository_module_plans(project, modules, states, odoo_version):
     link_states = dict(zip(
         (module["name"] for module in valid),
         addon_link_statuses((link_parent / module["name"], storage_parent / module["name"]) for module in valid),
+        # Une sortie WSL tronquée laisse ces modules sans état connu, au lieu d'interrompre l'import.
+        strict=False,
     ))
     plans = []
     for module in modules:
@@ -5196,7 +5200,7 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
         )
         backups, created = [], []
         try:
-            for candidate, plan in zip(selected, plans):
+            for candidate, plan in zip(selected, plans, strict=True):
                 target, link = storage / candidate.name, links / candidate.name
                 if plan["action"] == "update":
                     backups.append((target, backup_existing_module(job, project, target)))

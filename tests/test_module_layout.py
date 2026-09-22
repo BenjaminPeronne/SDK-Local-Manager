@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 import odoo_manager_web as web
+from odoo_manager_core.config import ManagerSettings
 
 
 class DummyJob:
@@ -102,7 +103,7 @@ class ModuleLayoutTests(unittest.TestCase):
         )
         previous_settings = web.SETTINGS
         try:
-            web.SETTINGS = web.ManagerSettings.from_dict({}, workspace)
+            web.SETTINGS = ManagerSettings.from_dict({}, workspace)
             web.WORKSPACE = Path(workspace)
             web.WSL_MODULE_METADATA.clear()
 
@@ -124,7 +125,7 @@ class ModuleLayoutTests(unittest.TestCase):
         workspace = r"\\wsl.localhost\Ubuntu\home\demo\Odoo-projects"
         previous_settings = web.SETTINGS
         try:
-            web.SETTINGS = web.ManagerSettings.from_dict({}, workspace)
+            web.SETTINGS = ManagerSettings.from_dict({}, workspace)
             web.WORKSPACE = Path(workspace)
             web.clear_project_module_cache(self.project)
 

@@ -6,7 +6,9 @@ from pathlib import Path
 from unittest import mock
 
 from test_module_layout import DummyJob, ModuleLayoutTests
+
 import odoo_manager_web as web
+
 
 class SocleModulesTests(ModuleLayoutTests):
     @unittest.skipIf(os.name == "nt", "requires POSIX symlink semantics provided by WSL")

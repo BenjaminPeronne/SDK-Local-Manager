@@ -2,7 +2,8 @@ import subprocess
 from pathlib import Path
 from unittest import mock
 
-from test_module_layout import ModuleLayoutTests, DummyJob
+from test_module_layout import DummyJob, ModuleLayoutTests
+
 import odoo_manager_web as web
 
 URL = 'ssh://git@gitlab.sudokeys.com:10022/team/addons.git'
@@ -232,6 +233,7 @@ class RepositoryModulesTests(ModuleLayoutTests):
             for manifest, content in zip(
                 (line.lstrip('/') for line in (checkout / '.git/info/sparse-checkout').read_text().splitlines()),
                 ("{'version': '18.0.1.0.1'}", "{'name': 'Beta'}", "{}", "{'version': '16.0.1.0.0'}"),
+                strict=True,
             ):
                 (checkout / manifest).parent.mkdir(parents=True, exist_ok=True)
                 (checkout / manifest).write_text(content)

@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 import platform
 import sys
-from datetime import datetime, timezone
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, Mapping
+from typing import IO
 
 
 def runtime_log_directory(
@@ -48,11 +49,11 @@ def initialize_runtime_streams() -> tuple[Path, tuple[IO[str], ...]]:
             sys.stdout = log_stream
         if sys.stderr is None:
             sys.stderr = log_stream
-        timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        timestamp = datetime.now(UTC).isoformat(timespec="seconds")
         print(f"\n[{timestamp}] Démarrage du backend Odoo Manager", flush=True)
 
     if sys.stdin is None:
-        input_stream = open(os.devnull, "r", encoding="utf-8")
+        input_stream = open(os.devnull, encoding="utf-8")
         opened.append(input_stream)
         sys.stdin = input_stream
 

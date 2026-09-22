@@ -22,7 +22,6 @@ import uuid
 
 from .platform import executable_search_path, hidden_process_kwargs
 
-
 JOB_ENV_VARIABLE = "ODOO_MANAGER_JOB"
 # Options de `docker exec` suivies d'une valeur : le conteneur est le premier argument libre après elles.
 DOCKER_EXEC_VALUE_OPTIONS = frozenset({"-e", "--env", "--env-file", "-u", "--user", "-w", "--workdir", "--detach-keys"})
@@ -316,10 +315,10 @@ def run_process(command, timeout, **kwargs):
     try:
         try:
             stdout, stderr = process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             process.kill()
             stdout, stderr = process.communicate()
-            raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr)
+            raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr) from exc
         except BaseException:
             process.kill()
             process.wait()

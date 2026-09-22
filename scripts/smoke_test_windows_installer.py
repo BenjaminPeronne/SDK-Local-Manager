@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import json
 import os
 import shutil
@@ -13,8 +12,8 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
-
 
 ELECTRON_ORIGIN = "app://sdk"
 PACKAGED_PROCESS_NAMES = (

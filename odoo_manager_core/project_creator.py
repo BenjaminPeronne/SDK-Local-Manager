@@ -11,19 +11,18 @@ import zipfile
 from http.cookiejar import CookieJar
 from pathlib import Path
 
-from .project_service import add_postgres_healthcheck_start_period
 from .platform import (
     execution_path,
+    find_wsl_executable_distribution,
     host_executable_available,
     platform_id,
     resolve_executable,
     workspace_wsl_context,
     wsl_command_prefix,
-    find_wsl_executable_distribution,
     wsl_execution_path,
 )
+from .project_service import add_postgres_healthcheck_start_period
 from .windows_links import contains_wsl_symlink, native_symlinks_supported
-
 
 STAGING_DIRECTORY_NAME = ".odoo_manager_staging"
 # Une création interrompue (application tuée, panne) laisse son dossier de préparation :

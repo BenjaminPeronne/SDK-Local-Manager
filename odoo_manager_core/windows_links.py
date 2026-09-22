@@ -15,7 +15,6 @@ from pathlib import Path
 
 from .platform import platform_id
 
-
 IO_REPARSE_TAG_SYMLINK = 0xA000000C
 IO_REPARSE_TAG_LX_SYMLINK = 0xA000001D
 FSCTL_GET_REPARSE_POINT = 0x000900A8

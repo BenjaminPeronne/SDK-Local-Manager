@@ -19,7 +19,6 @@ from typing import NamedTuple
 
 from .platform import platform_id
 
-
 DEFAULT_TIMEOUT_SECONDS = 4
 # Contextes dont le point de terminaison est celui des chemins par défaut ci-dessous.
 LOCAL_CONTEXTS = {"", "default", "desktop-linux"}

@@ -4,7 +4,6 @@ import os
 import shutil
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 DESKTOP_ROOT = ROOT / "odoo-manager-next" / "electron"
 BINARIES = DESKTOP_ROOT / "binaries"

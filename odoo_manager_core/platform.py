@@ -1,6 +1,6 @@
+import json
 import os
 import platform
-import json
 import posixpath
 import re
 import shlex
@@ -9,7 +9,6 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-
 
 COMMON_EXECUTABLE_PATHS = {
     "Darwin": [

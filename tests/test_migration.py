@@ -1,6 +1,6 @@
 import os
-import tempfile
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -8,15 +8,15 @@ from unittest import mock
 from odoo_manager_core.migration import (
     MIGRATION_MARKER,
     compare_projects,
+    container_state_of,
     copy_project,
     copy_project_privileged,
-    list_tree,
     is_project_directory,
+    legacy_engine_states,
+    list_tree,
     measure_project,
     migration_candidates,
-    container_state_of,
     project_status,
-    legacy_engine_states,
 )
 
 

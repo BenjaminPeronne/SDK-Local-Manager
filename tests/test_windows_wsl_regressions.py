@@ -7,7 +7,6 @@ aveuglement sur un système POSIX et exécutent les scripts WSL avec `sh`.
 """
 import ast
 import os
-import subprocess
 import sys
 import time
 import unittest
@@ -15,11 +14,12 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
-from odoo_manager_core.config import ManagerSettings
-from odoo_manager_core.project_service import ProjectService
 import test_module_layout
 from test_module_layout import DummyJob
+
 import odoo_manager_web as web
+from odoo_manager_core.config import ManagerSettings
+from odoo_manager_core.project_service import ProjectService
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCT_SOURCES = (

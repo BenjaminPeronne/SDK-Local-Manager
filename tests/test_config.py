@@ -3,7 +3,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from odoo_manager_core.config import DEFAULT_API_PORT, ManagerSettings, SettingsStore, default_config_dir, expand_home_reference
+from odoo_manager_core.config import (
+    DEFAULT_API_PORT,
+    ManagerSettings,
+    SettingsStore,
+    default_config_dir,
+    expand_home_reference,
+)
 
 
 class SettingsTests(unittest.TestCase):

@@ -1,13 +1,13 @@
 import unittest
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from odoo_manager_core.config import ManagerSettings
 from odoo_manager_core.platform import (
-    execution_path,
-    executable_search_path,
     decode_wsl_distribution_output,
+    executable_search_path,
+    execution_path,
     find_wsl_executable_distribution,
     hidden_process_kwargs,
     open_terminal_command,

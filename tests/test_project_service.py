@@ -13,7 +13,6 @@ from odoo_manager_core.project_service import (
 )
 from odoo_manager_core.traefik import reset_traefik_entrypoint_cache
 
-
 TRAEFIK_MIDDLEWARE_LABELS = (
     "traefik.http.middlewares.odoo-forward.headers.customrequestheaders.X-Forwarded-Proto=http,"
     "traefik.http.middlewares.odoo-compress.compress=true,"
@@ -741,7 +740,7 @@ class ProjectServiceTests(unittest.TestCase):
                 probes = []
                 service = ProjectService(
                     self.settings, self.root, runner=self.runner,
-                    http_probe=lambda url, result=probe_result: probes.append(url) or result,
+                    http_probe=lambda url, result=probe_result, probes=probes: probes.append(url) or result,
                 )
 
                 with self.assertRaises(RuntimeError) as raised:
