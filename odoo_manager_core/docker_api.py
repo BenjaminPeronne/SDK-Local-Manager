@@ -41,9 +41,9 @@ def parse_docker_host(value):
     if not value:
         return None
     if value.startswith("npipe://"):
-        return EngineEndpoint("npipe", "\\\\" + value[len("npipe://"):].lstrip("/").replace("/", "\\"))
+        return EngineEndpoint("npipe", "\\\\" + value[len("npipe://") :].lstrip("/").replace("/", "\\"))
     if value.startswith("unix://"):
-        return EngineEndpoint("unix", value[len("unix://"):] or "/var/run/docker.sock")
+        return EngineEndpoint("unix", value[len("unix://") :] or "/var/run/docker.sock")
     return None
 
 
@@ -114,7 +114,7 @@ def decode_chunked(body):
         if size == 0:
             return decoded
         decoded += remainder[:size]
-        body = remainder[size + 2:]
+        body = remainder[size + 2 :]
 
 
 def read_endpoint(endpoint, request):
@@ -152,7 +152,9 @@ class DockerEngineClient:
         self.timeout = timeout
 
     def get(self, path):
-        request = f"GET {path} HTTP/1.1\r\nHost: docker\r\nAccept: application/json\r\nConnection: close\r\n\r\n".encode()
+        request = (
+            f"GET {path} HTTP/1.1\r\nHost: docker\r\nAccept: application/json\r\nConnection: close\r\n\r\n".encode()
+        )
         # Le named pipe n'expose pas de délai : la lecture est surveillée depuis ce thread.
         result = {}
 
@@ -200,4 +202,3 @@ class DockerEngineClient:
             for name in item.get("Names") or []:
                 states[str(name).lstrip("/")] = state
         return states
-

@@ -68,7 +68,7 @@ def parse_lx_symlink_reparse_data(raw):
     if tag != IO_REPARSE_TAG_LX_SYMLINK:
         raise ValueError(f"Point d'analyse inattendu : {tag:#x}.")
     length = int.from_bytes(raw[4:6], "little")
-    data = raw[8:8 + length]
+    data = raw[8 : 8 + length]
     if length < 4 or len(data) != length:
         raise ValueError("Données de lien WSL tronquées.")
     version = int.from_bytes(data[0:4], "little")
@@ -85,12 +85,23 @@ def read_wsl_symlink(path):
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.CreateFileW.restype = wintypes.HANDLE
     kernel32.CreateFileW.argtypes = [
-        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
-        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
     ]
     kernel32.DeviceIoControl.argtypes = [
-        wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
-        wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID,
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        wintypes.LPVOID,
     ]
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     share_all = 0x1 | 0x2 | 0x4
@@ -98,7 +109,13 @@ def read_wsl_symlink(path):
     open_reparse_point = 0x00200000
     backup_semantics = 0x02000000
     handle = kernel32.CreateFileW(
-        str(path), 0, share_all, None, open_existing, open_reparse_point | backup_semantics, None,
+        str(path),
+        0,
+        share_all,
+        None,
+        open_existing,
+        open_reparse_point | backup_semantics,
+        None,
     )
     if handle == wintypes.HANDLE(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
@@ -106,10 +123,17 @@ def read_wsl_symlink(path):
         buffer = ctypes.create_string_buffer(16 * 1024)
         returned = wintypes.DWORD()
         if not kernel32.DeviceIoControl(
-            handle, FSCTL_GET_REPARSE_POINT, None, 0, buffer, len(buffer), ctypes.byref(returned), None,
+            handle,
+            FSCTL_GET_REPARSE_POINT,
+            None,
+            0,
+            buffer,
+            len(buffer),
+            ctypes.byref(returned),
+            None,
         ):
             raise ctypes.WinError(ctypes.get_last_error())
-        return parse_lx_symlink_reparse_data(buffer.raw[:returned.value])
+        return parse_lx_symlink_reparse_data(buffer.raw[: returned.value])
     finally:
         kernel32.CloseHandle(handle)
 

@@ -356,8 +356,7 @@ def wsl_execution_path(path, distribution=""):
     if context:
         if distribution and context.distribution.casefold() != distribution.casefold():
             raise RuntimeError(
-                "Le chemin appartient à une autre distribution WSL "
-                f"({context.distribution} au lieu de {distribution})."
+                f"Le chemin appartient à une autre distribution WSL ({context.distribution} au lieu de {distribution})."
             )
         return context.linux_path
     path = str(Path(path).expanduser().resolve())
@@ -404,7 +403,7 @@ def wsl_windows_path(linux_path, distribution=""):
             continue
         mount = mount.rstrip("/")
         if linux_path == mount or linux_path.startswith(mount + "/"):
-            return f"{drive.upper()}:\\" + linux_path[len(mount):].lstrip("/").replace("/", "\\")
+            return f"{drive.upper()}:\\" + linux_path[len(mount) :].lstrip("/").replace("/", "\\")
     match = re.match(r"^/mnt/([A-Za-z])(?:/(.*))?$", linux_path)
     if match:
         return f"{match.group(1).upper()}:\\" + (match.group(2) or "").replace("/", "\\")
@@ -493,10 +492,7 @@ def open_terminal_command(settings, command, cwd=None, label="la commande"):
                 )
             else:
                 source = (
-                    'tell application "Terminal"\n'
-                    "  activate\n"
-                    f"  do script {json.dumps(terminal_command)}\n"
-                    "end tell\n"
+                    f'tell application "Terminal"\n  activate\n  do script {json.dumps(terminal_command)}\nend tell\n'
                 )
             process = subprocess.run(
                 ["osascript", "-e", source],
@@ -565,10 +561,7 @@ def open_terminal_script(settings, script_path, cwd=None):
                 )
             else:
                 source = (
-                    'tell application "Terminal"\n'
-                    "  activate\n"
-                    f"  do script {json.dumps(terminal_command)}\n"
-                    "end tell\n"
+                    f'tell application "Terminal"\n  activate\n  do script {json.dumps(terminal_command)}\nend tell\n'
                 )
             process = subprocess.run(
                 ["osascript", "-e", source],

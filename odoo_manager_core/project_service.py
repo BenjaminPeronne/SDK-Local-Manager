@@ -83,9 +83,15 @@ def add_postgres_healthcheck_start_period(content):
             block.append(candidate)
             index += 1
         keys = [item for item in block if item.strip() and not item.lstrip().startswith("#")]
-        if keys and any("pg_isready" in item for item in keys) and not any(item.lstrip().startswith("start_period:") for item in keys):
+        if (
+            keys
+            and any("pg_isready" in item for item in keys)
+            and not any(item.lstrip().startswith("start_period:") for item in keys)
+        ):
             child_indent = min(len(item) - len(item.lstrip()) for item in keys)
-            last = max(position for position, item in enumerate(block) if item.strip() and not item.lstrip().startswith("#"))
+            last = max(
+                position for position, item in enumerate(block) if item.strip() and not item.lstrip().startswith("#")
+            )
             newline = "\r\n" if block[last].endswith("\r\n") else "\n"
             if not block[last].endswith(("\n", "\r")):
                 block[last] += newline
@@ -116,7 +122,7 @@ ODOO_SERVER_STATE_SCRIPT = (
     "else processes=$(for f in /proc/[0-9]*/cmdline; do tr '\\000' ' ' <\"$f\" 2>/dev/null; echo; done); fi; "
     f"if printf '%s\\n' \"$processes\" | grep -E '{ODOO_SERVER_PROCESS_PATTERN}' "
     f"| grep -Evq -- '{ODOO_NON_SERVER_PROCESS_PATTERN}'; then echo '{ODOO_STATE_MARKER}running'; "
-    f"elif [ -f {ODOO_STARTUP_STATUS} ]; then echo \"{ODOO_STATE_MARKER}exited:$(head -n 1 {ODOO_STARTUP_STATUS})\"; "
+    f'elif [ -f {ODOO_STARTUP_STATUS} ]; then echo "{ODOO_STATE_MARKER}exited:$(head -n 1 {ODOO_STARTUP_STATUS})"; '
     f"else echo '{ODOO_STATE_MARKER}absent'; fi"
 )
 # Sans processus ni code de sortie, le lanceur vient de démarrer ou a été tué : délai avant de conclure.
@@ -142,7 +148,9 @@ def traefik_loopback_override(service, ports):
     for port in ports:
         # Les publications toutes interfaces (IPv4 ou IPv6) deviennent une seule publication locale.
         host_ip = "127.0.0.1" if port.host_ip in {"", "0.0.0.0", "::", "[::]"} else port.host_ip
-        entry = f"{host_ip}:{port.host_port}:{port.container_port}" + ("" if port.protocol == "tcp" else f"/{port.protocol}")
+        entry = f"{host_ip}:{port.host_port}:{port.container_port}" + (
+            "" if port.protocol == "tcp" else f"/{port.protocol}"
+        )
         if entry not in seen:
             seen.add(entry)
             lines.append(f'      - "{entry}"')
@@ -410,8 +418,7 @@ class ProjectService:
             if state != last_state or waited % 10 == 0:
                 self.log(
                     log,
-                    f"Attente PostgreSQL... {waited}s/{max_wait}s "
-                    f"(conteneur: {status}, santé: {health})",
+                    f"Attente PostgreSQL... {waited}s/{max_wait}s (conteneur: {status}, santé: {health})",
                 )
                 last_state = state
             if status == "running" and health in {"healthy", "none"}:
@@ -499,7 +506,9 @@ class ProjectService:
             + "' CREATEDB; END IF; END $$;"
         )
         role_code, role_output = self.capture(
-            self.docker("exec", container, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", "-c", role_sql),
+            self.docker(
+                "exec", container, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", "-c", role_sql
+            ),
             timeout=20,
         )
         if role_code != 0:
@@ -542,9 +551,7 @@ class ProjectService:
 
         backup = compose_file.with_name(f"{compose_file.name}.localtime.bak.{time.strftime('%Y%m%d_%H%M%S')}")
         shutil.copy2(compose_file, backup)
-        filtered = "\n".join(
-            line for line in content.splitlines() if "/etc/localtime:/etc/localtime:ro" not in line
-        )
+        filtered = "\n".join(line for line in content.splitlines() if "/etc/localtime:/etc/localtime:ro" not in line)
         compose_file.write_text(filtered + "\n", encoding="utf-8")
         self.log(log, f"Mount /etc/localtime supprimé du compose macOS: {compose_file}")
         self.log(log, f"Sauvegarde: {backup}")
@@ -574,7 +581,9 @@ class ProjectService:
         if not self.traefik_dir:
             return None
         try:
-            return next((self.traefik_dir / name for name in COMPOSE_FILENAMES if (self.traefik_dir / name).is_file()), None)
+            return next(
+                (self.traefik_dir / name for name in COMPOSE_FILENAMES if (self.traefik_dir / name).is_file()), None
+            )
         except OSError:
             return None
 
@@ -678,7 +687,7 @@ class ProjectService:
                 raise RuntimeError(
                     f"Le port {port.host_port} de cette machine est déjà utilisé par {owner} : "
                     f"Traefik ne peut pas le publier. Libère ce port, ou change le port publié dans "
-                    f"{self.traefik_compose_path()} (par exemple \"8080:{port.container_port}\") : "
+                    f'{self.traefik_compose_path()} (par exemple "8080:{port.container_port}") : '
                     "le gestionnaire utilisera automatiquement le nouveau port."
                 )
 
@@ -758,8 +767,10 @@ class ProjectService:
                 continue
             holder = next(
                 (
-                    instance for instance in instances
-                    if instance.running and any(
+                    instance
+                    for instance in instances
+                    if instance.running
+                    and any(
                         published.host_port == port.host_port and published.protocol == "tcp"
                         for published in instance.published
                     )
@@ -781,7 +792,9 @@ class ProjectService:
 
     def port_owner(self, port):
         """Description de ce qui écoute sur un port de la machine ; chaîne vide si inconnu."""
-        code, output = self.capture(self.docker("ps", "--filter", f"publish={port}", "--format", "{{.Names}}"), timeout=8)
+        code, output = self.capture(
+            self.docker("ps", "--filter", f"publish={port}", "--format", "{{.Names}}"), timeout=8
+        )
         names = [line.strip() for line in (output or "").splitlines() if line.strip()] if code == 0 else []
         if names:
             return f"le conteneur Docker {names[0]}"
@@ -792,8 +805,11 @@ class ProjectService:
                 parts = line.split()
                 # L'état est traduit selon la langue de Windows : un socket en écoute a un distant en :0.
                 if (
-                    len(parts) >= 4 and parts[0].upper() == "TCP" and parts[-1].isdigit()
-                    and parts[1].rsplit(":", 1)[-1] == str(port) and parts[2].rsplit(":", 1)[-1] == "0"
+                    len(parts) >= 4
+                    and parts[0].upper() == "TCP"
+                    and parts[-1].isdigit()
+                    and parts[1].rsplit(":", 1)[-1] == str(port)
+                    and parts[2].rsplit(":", 1)[-1] == "0"
                 ):
                     pid = parts[-1]
                     break
@@ -807,7 +823,9 @@ class ProjectService:
             )
             name = output.split(",", 1)[0].strip('"') if code == 0 and (output or "").startswith('"') else ""
             return f"le processus {name} (PID {pid})" if name else f"le processus PID {pid}"
-        code, output = self.capture([resolve_host_executable("lsof"), "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fpc"], timeout=8)
+        code, output = self.capture(
+            [resolve_host_executable("lsof"), "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fpc"], timeout=8
+        )
         if code != 0 or not output:
             return ""
         values = {}
@@ -912,8 +930,10 @@ class ProjectService:
             return []
         docker_prefix = self.docker()
         return [
-            "-f", self.command_path(docker_prefix, base),
-            "-f", self.command_path(docker_prefix, override),
+            "-f",
+            self.command_path(docker_prefix, base),
+            "-f",
+            self.command_path(docker_prefix, override),
         ]
 
     def install_traefik(self, repository, log=None):
@@ -971,10 +991,7 @@ class ProjectService:
         if platform.system() != "Darwin":
             return []
 
-        mount_format = (
-            '{{range .Mounts}}{{if eq .Destination "/etc/localtime"}}'
-            "{{.Source}}{{end}}{{end}}"
-        )
+        mount_format = '{{range .Mounts}}{{if eq .Destination "/etc/localtime"}}{{.Source}}{{end}}{{end}}'
         stale = []
         for container_id in self.compose_container_ids(path):
             code, source = self.capture(
@@ -987,8 +1004,7 @@ class ProjectService:
 
     def stale_container_networks(self, path):
         network_format = (
-            "{{range $name, $network := .NetworkSettings.Networks}}"
-            "{{$name}}|{{$network.NetworkID}};{{end}}"
+            "{{range $name, $network := .NetworkSettings.Networks}}{{$name}}|{{$network.NetworkID}};{{end}}"
         )
         stale = []
         checked = set()
@@ -1012,9 +1028,7 @@ class ProjectService:
                 )
                 error = inspect_output.lower()
                 missing_network = (
-                    "not found" in error
-                    or "no such network" in error
-                    or inspect_output.strip() in {"[]", "null"}
+                    "not found" in error or "no such network" in error or inspect_output.strip() in {"[]", "null"}
                 )
                 if inspect_code != 0 and missing_network:
                     stale.append((container_id, network_name, network_id))
@@ -1112,9 +1126,7 @@ class ProjectService:
             status = self.container_status(container)
             if status != "running":
                 self.odoo_startup_diagnostics(container, log=log)
-                raise RuntimeError(
-                    f"Le conteneur {container} s'est arrêté pendant sa préparation ({status})."
-                )
+                raise RuntimeError(f"Le conteneur {container} s'est arrêté pendant sa préparation ({status}).")
 
             code, command = self.capture(
                 self.docker("exec", container, "sh", "-lc", init_command),
@@ -1140,8 +1152,7 @@ class ProjectService:
 
         self.odoo_startup_diagnostics(container, log=log)
         raise RuntimeError(
-            f"La préparation du conteneur Odoo dépasse {max_wait}s. "
-            "Consulte les logs affichés ci-dessus."
+            f"La préparation du conteneur Odoo dépasse {max_wait}s. Consulte les logs affichés ci-dessus."
         )
 
     def odoo_server_state(self, container):
@@ -1154,7 +1165,7 @@ class ProjectService:
         if code == 0:
             for line in (output or "").splitlines():
                 if line.startswith(ODOO_STATE_MARKER):
-                    return line[len(ODOO_STATE_MARKER):].strip()
+                    return line[len(ODOO_STATE_MARKER) :].strip()
         if code == 124:
             return "unknown"
         status = self.container_status(container)
@@ -1173,7 +1184,7 @@ class ProjectService:
         startup = (outputs.get(ODOO_STARTUP_LOG) or "").splitlines()
         odoo_log = (outputs.get(ODOO_LOG_FILE) or "").splitlines()
         banners = [index for index, line in enumerate(odoo_log) if "odoo: Odoo version" in line]
-        current_run = odoo_log[banners[-1]:] if banners else []
+        current_run = odoo_log[banners[-1] :] if banners else []
         for lines in (current_run, startup):
             reason = self.odoo_command_failure_reason(lines)
             if reason.startswith("Dernière erreur Odoo"):
@@ -1259,11 +1270,7 @@ class ProjectService:
         waited = 0
         missing_since = None
         state = ""
-        command = (
-            "import socket; "
-            "s=socket.create_connection(('127.0.0.1', 8069), 2); "
-            "s.close()"
-        )
+        command = "import socket; s=socket.create_connection(('127.0.0.1', 8069), 2); s.close()"
         while waited <= max_wait:
             if waited == 0 or waited % 10 == 0:
                 self.log(log, f"Attente serveur Odoo... {waited}s/{max_wait}s")
@@ -1392,7 +1399,8 @@ class ProjectService:
             networks = self.container_network_names(container)
             network_hint = (
                 f" Le conteneur n'est pas relié au réseau traefik-local (réseaux : {', '.join(networks) or 'aucun'})."
-                if "traefik-local" not in networks else " Vérifie les labels traefik du docker-compose.yml."
+                if "traefik-local" not in networks
+                else " Vérifie les labels traefik du docker-compose.yml."
             )
             return f"Traefik répond mais ne connaît pas la route {host} pour {container}.{network_hint}"
         if status in {502, 503, 504}:
@@ -1418,13 +1426,17 @@ class ProjectService:
             return [f"aucun conteneur Traefik n'est démarré, un autre serveur web occupe le port {port}"]
         if instance.http_port and instance.http_port != port:
             return [
-                f"Traefik ({instance.describe()}) n'écoute pas sur le port {port}, "
-                "un autre serveur web occupe ce port"
+                f"Traefik ({instance.describe()}) n'écoute pas sur le port {port}, un autre serveur web occupe ce port"
             ]
         problems = [f"Traefik ({instance.describe()}) : {problem}" for problem in instance.compatibility_problems()]
         container = f"odoo-{project}"
         networks = self.container_network_names(container)
-        if networks and instance.on_project_network and not instance.host_network and not set(networks) & set(instance.networks):
+        if (
+            networks
+            and instance.on_project_network
+            and not instance.host_network
+            and not set(networks) & set(instance.networks)
+        ):
             problems.append(
                 f"{container} (réseaux : {', '.join(networks)}) ne partage aucun réseau avec {instance.name} "
                 f"(réseaux : {', '.join(instance.networks)})"
@@ -1439,7 +1451,12 @@ class ProjectService:
 
     def container_network_names(self, container):
         code, output = self.capture(
-            self.docker("inspect", "-f", "{{range $name, $network := .NetworkSettings.Networks}}{{$name}}|{{$network.NetworkID}};{{end}}", container),
+            self.docker(
+                "inspect",
+                "-f",
+                "{{range $name, $network := .NetworkSettings.Networks}}{{$name}}|{{$network.NetworkID}};{{end}}",
+                container,
+            ),
             timeout=5,
         )
         if code != 0:
@@ -1463,7 +1480,9 @@ class ProjectService:
             result = self.http_probe(url) if self.http_probe else self.http_probe_result(url)
             status, reason = result if isinstance(result, tuple) else (result, "")
             port = urllib.parse.urlsplit(url).port or TRAEFIK_DEFAULT_HTTP_PORT
-            display = f"HTTP {status}" if status else HTTP_FAILURE_LABELS.get(reason, "HTTP indisponible").format(port=port)
+            display = (
+                f"HTTP {status}" if status else HTTP_FAILURE_LABELS.get(reason, "HTTP indisponible").format(port=port)
+            )
             if display != last_display or waited % 10 == 0:
                 self.log(log, f"Vérification de l'accès Odoo via Traefik... {waited}s/{max_wait}s ({display})")
                 last_display = display
@@ -1526,7 +1545,7 @@ class ProjectService:
                 f">> {ODOO_STARTUP_LOG} 2>&1; "
                 "code=$?; "
                 f"printf '%s\\n' \"$code\" > {ODOO_STARTUP_STATUS}; "
-                "exit \"$code\""
+                'exit "$code"'
             )
             code = self.stream(
                 self.docker(
@@ -1648,14 +1667,23 @@ class ProjectService:
         self.log(log, f"Projet: {project}")
         self.log(log, f"Base: {db_name}")
         self.log(log, f"Module(s): {modules}")
-        self.log(log, f"Équivalent: odoo -d {db_name} {option} {modules} {' '.join([*extra_args, '--stop-after-init'])}")
+        self.log(
+            log, f"Équivalent: odoo -d {db_name} {option} {modules} {' '.join([*extra_args, '--stop-after-init'])}"
+        )
         was_neutralized = self.database_is_neutralized(project, db_name)
         self.register_module_operations_revert(project, db_name, log=log)
 
         self.stop_odoo_server(project, log=log)
         odoo_arguments = [
-            "odoo", "-c", "/home/odoo/srv/conf/odoo.conf", "-d", db_name,
-            option, modules, *extra_args, "--stop-after-init",
+            "odoo",
+            "-c",
+            "/home/odoo/srv/conf/odoo.conf",
+            "-d",
+            db_name,
+            option,
+            modules,
+            *extra_args,
+            "--stop-after-init",
         ]
         module_log = f"/home/odoo/srv/data/odoo-manager-module-{uuid.uuid4().hex}.log"
         shell_command = (
@@ -1669,7 +1697,9 @@ class ProjectService:
             "-e",
             "LOG_ATTACHMENTS=False",
             container,
-            "bash", "-lc", shell_command,
+            "bash",
+            "-lc",
+            shell_command,
         )
         command_error = None
         command_severity_error = None
@@ -1697,11 +1727,15 @@ class ProjectService:
             code = self.stream(command, log=log_module_output)
             if code != 0:
                 log_code, module_output = self.capture(
-                    self.docker("exec", container, "sh", "-lc", f"tail -n 400 {shlex.quote(module_log)} 2>/dev/null || true"),
+                    self.docker(
+                        "exec", container, "sh", "-lc", f"tail -n 400 {shlex.quote(module_log)} 2>/dev/null || true"
+                    ),
                     timeout=12,
                 )
                 if command_error:
-                    reason = f"Dernière erreur Odoo : {command_error[:350]}{self.odoo_error_detail(command_error_detail)}"
+                    reason = (
+                        f"Dernière erreur Odoo : {command_error[:350]}{self.odoo_error_detail(command_error_detail)}"
+                    )
                 elif command_severity_error:
                     reason = f"Dernière erreur Odoo : {command_severity_error[:350]}"
                 else:
@@ -1764,7 +1798,7 @@ class ProjectService:
                 last_exception = line
                 exception_index = index
         if last_exception:
-            detail = cls.odoo_error_detail(list(lines[exception_index + 1:]))
+            detail = cls.odoo_error_detail(list(lines[exception_index + 1 :]))
             return f"Dernière erreur Odoo : {last_exception[:350]}{detail}"
         if last_severity:
             return f"Dernière erreur Odoo : {last_severity[:350]}"
@@ -1821,7 +1855,11 @@ env.cr.commit()
 print(f"{count} bundle(s) d'assets supprimé(s), régénérés au prochain chargement d'une page.")
 """
         self.run_odoo_shell_script(
-            project, db_name, script, "La régénération des assets a échoué", log=log,
+            project,
+            db_name,
+            script,
+            "La régénération des assets a échoué",
+            log=log,
         )
         self.log(log, "Assets purgés. Recharge la page Odoo (Ctrl+Maj+R) pour les reconstruire.")
         self.log(log, f"URL Odoo: {self.project_url(project)}")
@@ -1897,7 +1935,15 @@ print("Mot de passe réinitialisé pour l'identifiant : " + user.login)
         """Modules en attente d'installation, de mise à jour ou de suppression ; None si illisible."""
         code, output = self.capture(
             self.docker(
-                "exec", f"postgresql-{project}", "psql", "-X", "-U", "postgres", "-d", db_name, "-Atc",
+                "exec",
+                f"postgresql-{project}",
+                "psql",
+                "-X",
+                "-U",
+                "postgres",
+                "-d",
+                db_name,
+                "-Atc",
                 f"select name from ir_module_module where state in {PENDING_MODULE_STATES_SQL} order by name;",
             ),
             timeout=20,
@@ -1933,8 +1979,18 @@ print("Mot de passe réinitialisé pour l'identifiant : " + user.login)
         )
         code, output = self.capture(
             self.docker(
-                "exec", f"postgresql-{project}", "psql", "-X", "-v", "ON_ERROR_STOP=1",
-                "-U", "postgres", "-d", db_name, "-Atc", query,
+                "exec",
+                f"postgresql-{project}",
+                "psql",
+                "-X",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "postgres",
+                "-d",
+                db_name,
+                "-Atc",
+                query,
             ),
             timeout=60,
         )
@@ -2089,7 +2145,7 @@ SELECT COALESCE((SELECT value FROM ir_config_parameter WHERE key = 'database.is_
 
     @staticmethod
     def _neutralization_shell_command():
-        neutralize_script = '''try:
+        neutralize_script = """try:
     from odoo.modules.neutralize import neutralize_database
 except ImportError:
     # Odoo 15 ne fournit pas encore le moteur modulaire de neutralisation.
@@ -2134,7 +2190,7 @@ if len(dummies) > 1:
 
 env.cr.commit()
 print("ODOO_MANAGER_NEUTRALIZATION_DONE")
-'''
+"""
         return (
             "odoo shell -c /home/odoo/srv/conf/odoo.conf "
             "-d \"$ODOO_DB_NAME\" --no-http <<'ODOO_MANAGER_PY'\n"
@@ -2166,9 +2222,7 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
         container = f"odoo-{project}"
         postgres = f"postgresql-{project}"
         if not self.is_running(container) or not self.is_running(postgres):
-            raise RuntimeError(
-                "Les conteneurs Odoo et PostgreSQL doivent être démarrés pour neutraliser la base."
-            )
+            raise RuntimeError("Les conteneurs Odoo et PostgreSQL doivent être démarrés pour neutraliser la base.")
         self.wait_for_odoo_container_initialization(container, log=log)
 
         self.log(log, "")

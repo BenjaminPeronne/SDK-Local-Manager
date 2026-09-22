@@ -193,7 +193,6 @@ class ProjectCreatorTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "chemin non sécurisé"):
             ProjectCreator.extract_rika_archive(archive, self.workspace / "extract")
 
-
     @mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows")
     @mock.patch("odoo_manager_core.project_creator.host_executable_available", return_value=False)
     @mock.patch("odoo_manager_core.project_creator.wsl_execution_path")
@@ -320,8 +319,7 @@ class ProjectCreatorTests(unittest.TestCase):
         git_dir = existing / ".git"
         git_dir.mkdir(parents=True)
         (git_dir / "config").write_text(
-            '[remote "origin"]\n'
-            '    url = ssh://git@gitlab.sudokeys.com:10022/sudokeys/odoo.git\n',
+            '[remote "origin"]\n    url = ssh://git@gitlab.sudokeys.com:10022/sudokeys/odoo.git\n',
             encoding="utf-8",
         )
         runner = FakeRunner()

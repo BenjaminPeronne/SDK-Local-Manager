@@ -13,7 +13,6 @@ BINARIES = DESKTOP_ROOT / "binaries"
 RUNTIME_NAME = "odoo-manager-backend-runtime"
 
 
-
 def main():
     parser = argparse.ArgumentParser(description="Construit le sidecar Python pour Electron.")
     parser.add_argument("--clean", action="store_true", help="Supprime les sorties PyInstaller avant construction.")
@@ -25,10 +24,7 @@ def main():
     try:
         import PyInstaller.__main__
     except ImportError as exc:
-        raise SystemExit(
-            "PyInstaller est requis. Lance plutot: "
-            "sh scripts/build_local_desktop.sh"
-        ) from exc
+        raise SystemExit("PyInstaller est requis. Lance plutot: sh scripts/build_local_desktop.sh") from exc
 
     if args.clean and build_root.exists():
         shutil.rmtree(build_root)

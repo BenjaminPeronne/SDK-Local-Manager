@@ -130,7 +130,9 @@ class DockerStatusTests(unittest.TestCase):
     @mock.patch("odoo_manager_core.system.host_executable_available", return_value=True)
     @mock.patch("odoo_manager_core.system.platform_id", return_value="windows")
     @mock.patch("odoo_manager_core.system.subprocess.run")
-    def test_windows_docker_status_does_not_wake_wsl_when_native_docker_runs(self, run, _platform, _available, _resolve):
+    def test_windows_docker_status_does_not_wake_wsl_when_native_docker_runs(
+        self, run, _platform, _available, _resolve
+    ):
         # Chaque sonde WSL démarrait la VM, toutes les 10 s avec l'overview.
         run.return_value = mock.Mock(returncode=0, stdout='"28.0.0"\n', stderr="")
         settings = ManagerSettings.from_dict({}, "/tmp/workspace")
@@ -174,8 +176,12 @@ class DockerEngineApiTests(unittest.TestCase):
     @mock.patch("odoo_manager_core.system.platform_id", return_value="windows")
     @mock.patch("odoo_manager_core.system.resolve_host_executable", return_value=r"C:\Docker\docker.exe")
     @mock.patch("odoo_manager_core.system.subprocess.run")
-    @mock.patch("odoo_manager_core.system.engine_endpoint", return_value=EngineEndpoint("npipe", r"\.\pipe\docker_engine"))
-    def test_status_comes_from_the_engine_api_without_running_docker(self, _endpoint, run, _resolve, _platform, _available):
+    @mock.patch(
+        "odoo_manager_core.system.engine_endpoint", return_value=EngineEndpoint("npipe", r"\.\pipe\docker_engine")
+    )
+    def test_status_comes_from_the_engine_api_without_running_docker(
+        self, _endpoint, run, _resolve, _platform, _available
+    ):
         with mock.patch.object(DockerEngineClient, "server_version", return_value="29.7.2"):
             status = docker_status(self.settings)
 
@@ -186,7 +192,9 @@ class DockerEngineApiTests(unittest.TestCase):
     @mock.patch("odoo_manager_core.system.platform_id", return_value="windows")
     @mock.patch("odoo_manager_core.system.resolve_host_executable", return_value=r"C:\Docker\docker.exe")
     @mock.patch("odoo_manager_core.system.subprocess.run")
-    @mock.patch("odoo_manager_core.system.engine_endpoint", return_value=EngineEndpoint("npipe", r"\.\pipe\docker_engine"))
+    @mock.patch(
+        "odoo_manager_core.system.engine_endpoint", return_value=EngineEndpoint("npipe", r"\.\pipe\docker_engine")
+    )
     def test_unreachable_api_falls_back_to_the_cli(self, _endpoint, run, _resolve, _platform, _available):
         run.return_value = mock.Mock(returncode=0, stdout='"29.7.2"\n', stderr="")
 

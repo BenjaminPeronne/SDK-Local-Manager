@@ -260,7 +260,9 @@ def docker_status(settings, timeout=6):
                     continue
                 installed = _wsl_docker_installed(backend, timeout)
             if not installed:
-                environments.append({"backend": backend.kind, "label": backend.label, "installed": False, "running": False})
+                environments.append(
+                    {"backend": backend.kind, "label": backend.label, "installed": False, "running": False}
+                )
                 continue
             if first_installed is None:
                 first_installed = backend
@@ -319,7 +321,15 @@ def docker_status(settings, timeout=6):
                 )
                 continue
             except OSError as exc:
-                environments.append({"backend": backend.kind, "label": backend.label, "installed": True, "running": False, "message": str(exc)})
+                environments.append(
+                    {
+                        "backend": backend.kind,
+                        "label": backend.label,
+                        "installed": True,
+                        "running": False,
+                        "message": str(exc),
+                    }
+                )
                 continue
             detail = (result.stderr or result.stdout or "").strip()
             environments.append(
@@ -344,7 +354,9 @@ def docker_status(settings, timeout=6):
 
     if selected is None:
         if first_installed is None:
-            message = "Docker est introuvable sous Windows et dans WSL. Installe Docker Desktop ou Docker Engine dans WSL."
+            message = (
+                "Docker est introuvable sous Windows et dans WSL. Installe Docker Desktop ou Docker Engine dans WSL."
+            )
             return docker_status_payload(
                 settings,
                 "missing",

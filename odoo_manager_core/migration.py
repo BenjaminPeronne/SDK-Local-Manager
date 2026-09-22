@@ -95,7 +95,14 @@ def lock_is_free(path, prefix=None, run=subprocess.run):
             return False
     script = 'if test -e "$1"; then echo running; else echo stopped; fi'
     try:
-        result = run([*prefix, "sh", "-c", script, "lock", str(lock)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+        result = run(
+            [*prefix, "sh", "-c", script, "lock", str(lock)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
     except (OSError, subprocess.SubprocessError):
         return False
     return result.returncode == 0 and result.stdout.strip() == "stopped"
@@ -111,7 +118,16 @@ def legacy_engine_states(prefix=None, run=subprocess.run, socket_path=LEGACY_ENG
             return {}
     except OSError:
         return {}
-    command = [*(prefix or []), "docker", "-H", f"unix://{socket_path}", "ps", "-a", "--format", "{{.Names}}|{{.State}}"]
+    command = [
+        *(prefix or []),
+        "docker",
+        "-H",
+        f"unix://{socket_path}",
+        "ps",
+        "-a",
+        "--format",
+        "{{.Names}}|{{.State}}",
+    ]
     try:
         result = run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
     except (OSError, subprocess.SubprocessError):
@@ -154,15 +170,17 @@ def migration_candidates(source_root, destination_root, prefix=None, run=subproc
         if entry.name.startswith(".") or not is_project_directory(entry):
             continue
         stopped, confirmed = project_status(entry, prefix, run, container_state)
-        candidates.append({
-            "name": entry.name,
-            "source": str(entry),
-            "already_migrated": (destination_root / entry.name).exists(),
-            "stopped": stopped,
-            # Un « en cours » que personne n'a confirmé vient du seul verrou : l'interface
-            # le dit et laisse migrer, la copie ne touchant de toute façon pas l'original.
-            "engine_confirmed": confirmed,
-        })
+        candidates.append(
+            {
+                "name": entry.name,
+                "source": str(entry),
+                "already_migrated": (destination_root / entry.name).exists(),
+                "stopped": stopped,
+                # Un « en cours » que personne n'a confirmé vient du seul verrou : l'interface
+                # le dit et laisse migrer, la copie ne touchant de toute façon pas l'original.
+                "engine_confirmed": confirmed,
+            }
+        )
     return candidates
 
 
@@ -206,8 +224,17 @@ def measure_project(path, prefix=None, run=subprocess.run, listing=None):
     return {"files": files, "bytes": total_bytes}
 
 
-def copy_project_privileged(source, destination, prefix, log=None, progress=None, total_files=0,
-                            popen=subprocess.Popen, run=subprocess.run, poll_seconds=5):
+def copy_project_privileged(
+    source,
+    destination,
+    prefix,
+    log=None,
+    progress=None,
+    total_files=0,
+    popen=subprocess.Popen,
+    run=subprocess.run,
+    poll_seconds=5,
+):
     """Copie en flux `tar` sous sudo : propriétaires numériques, droits et liens conservés.
 
     `cp -a` relit les attributs étendus de chaque fichier à travers /mnt/c : 20,9 s pour
@@ -222,26 +249,43 @@ def copy_project_privileged(source, destination, prefix, log=None, progress=None
     log = log or (lambda _message: None)
     # bash pour pipefail : sans lui, un tar de lecture en échec passerait inaperçu.
     script = (
-        'set -euo pipefail; mkdir -p "$2"; '
-        'tar -C "$1" --numeric-owner -cf - . | tar -C "$2" --numeric-owner -xpf -'
+        'set -euo pipefail; mkdir -p "$2"; tar -C "$1" --numeric-owner -cf - . | tar -C "$2" --numeric-owner -xpf -'
     )
-    process = popen([*prefix, "bash", "-c", script, "copy", str(source), str(destination)],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    process = popen(
+        [*prefix, "bash", "-c", script, "copy", str(source), str(destination)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     while True:
         try:
             _stdout, stderr = process.communicate(timeout=poll_seconds)
             break
         except subprocess.TimeoutExpired:
-            counted = run([*prefix, "sh", "-c", 'find "$1" -mindepth 1 ! -type d | wc -l', "count", str(destination)],
-                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+            counted = run(
+                [*prefix, "sh", "-c", 'find "$1" -mindepth 1 ! -type d | wc -l', "count", str(destination)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+            )
             copied = int(counted.stdout.strip() or 0) if counted.returncode == 0 else 0
             log(f"Copie : {copied}/{total_files} entrées" if total_files else f"Copie : {copied} entrées")
             if progress:
                 progress(copied, total_files)
     if process.returncode != 0:
         raise RuntimeError(f"La copie a échoué : {(stderr or '').strip()[-400:]}")
-    marker = run([*prefix, "sh", "-c", 'printf "%s\\n" "$1" > "$2"', "marker", str(source), str(destination / MIGRATION_MARKER)],
-                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+    marker = run(
+        [*prefix, "sh", "-c", 'printf "%s\\n" "$1" > "$2"', "marker", str(source), str(destination / MIGRATION_MARKER)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
     if marker.returncode != 0:
         raise RuntimeError("Copie terminée mais marqueur de migration non écrit.")
     log("Copie terminée.")
@@ -313,7 +357,8 @@ def compare_projects(source, destination, prefix=None, run=subprocess.run, sourc
     destination_entries.pop(MIGRATION_MARKER, None)
     missing = sorted(set(source_entries) - set(destination_entries))
     different_links = sorted(
-        name for name, target in source_entries.items()
+        name
+        for name, target in source_entries.items()
         if target is not None and destination_entries.get(name) != target
     )
     return {

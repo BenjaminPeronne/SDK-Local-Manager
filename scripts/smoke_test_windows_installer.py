@@ -162,10 +162,7 @@ def wait_for_health(process: subprocess.Popen[bytes], timeout: float) -> None:
                     or preflight_origin != ELECTRON_ORIGIN
                     or "content-type" not in allowed_headers
                 ):
-                    failure = (
-                        "L'API ne permet pas les appels d’Electron Windows "
-                        "(prévalidation CORS incomplète)."
-                    )
+                    failure = "L'API ne permet pas les appels d’Electron Windows (prévalidation CORS incomplète)."
                     break
                 if {"overview", "system_status", "settings", "jobs"} <= bootstrap.keys():
                     return
@@ -238,13 +235,10 @@ def main() -> None:
             try:
                 process.wait(timeout=15)
             except subprocess.TimeoutExpired as error:
-                raise RuntimeError(
-                    "La mise à niveau n'a pas arrêté l'ancienne application."
-                ) from error
+                raise RuntimeError("La mise à niveau n'a pas arrêté l'ancienne application.") from error
         except (RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
             raise SystemExit(
-                f"Échec du test de mise à niveau Windows: {error}\n"
-                f"--- backend.log ---\n{log_tail(backend_log())}"
+                f"Échec du test de mise à niveau Windows: {error}\n--- backend.log ---\n{log_tail(backend_log())}"
             ) from error
         finally:
             stop_process_tree(process)

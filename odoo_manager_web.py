@@ -524,11 +524,13 @@ def settings_snapshot():
     return payload
 
 
-BROWSER_ORIGINS = frozenset({
-    "http://127.0.0.1:3000",
-    "http://localhost:3000",
-    "app://sdk",
-})
+BROWSER_ORIGINS = frozenset(
+    {
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "app://sdk",
+    }
+)
 LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
@@ -539,7 +541,7 @@ def allowed_browser_origins():
 def request_hostname(host_header):
     host = str(host_header or "").strip().lower()
     if host.startswith("["):
-        return host[1:host.index("]")] if "]" in host else ""
+        return host[1 : host.index("]")] if "]" in host else ""
     return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
 
 
@@ -719,7 +721,10 @@ def traefik_compose_probe():
     directory = local_traefik_directory()
     if not directory or not directory.exists():
         return False, False, False
-    has_compose = any((directory / name).exists() for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"))
+    has_compose = any(
+        (directory / name).exists()
+        for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
+    )
     return has_compose, True, has_compose
 
 
@@ -938,7 +943,9 @@ def project_creation_prerequisites():
             cwd=git_probe_cwd,
             timeout=8,
         )
-        ssh_keys = [Path(line.strip()).name for line in key_output.splitlines() if line.strip()] if key_code == 0 else []
+        ssh_keys = (
+            [Path(line.strip()).name for line in key_output.splitlines() if line.strip()] if key_code == 0 else []
+        )
     else:
         ssh_dir = Path.home() / ".ssh"
         ssh_keys = sorted(path.name for path in ssh_dir.glob("*.pub") if path.is_file()) if ssh_dir.exists() else []
@@ -952,7 +959,11 @@ def project_creation_prerequisites():
         )
         ssh_keygen_available = keygen_code == 0
     else:
-        ssh_keygen_available = host_executable_available("ssh-keygen") if platform_id() == "windows" else executable_available("ssh-keygen", SETTINGS)
+        ssh_keygen_available = (
+            host_executable_available("ssh-keygen")
+            if platform_id() == "windows"
+            else executable_available("ssh-keygen", SETTINGS)
+        )
 
     git_install_supported = platform_id() == "windows" and (
         host_executable_available("wsl.exe") or host_executable_available("winget")
@@ -1087,7 +1098,7 @@ def generate_ssh_key(comment="", replace=False):
                 'if [ -e "$HOME/.ssh/id_ed25519" ] || [ -e "$HOME/.ssh/id_ed25519.pub" ]; then '
                 f'backup="$HOME/.ssh/{SSH_KEY_BACKUP_DIRNAME}/$(date +%Y%m%d_%H%M%S)_$$" && '
                 'mkdir -p "$backup" && chmod 700 "$backup" && '
-                'for name in id_ed25519 id_ed25519.pub; do '
+                "for name in id_ed25519 id_ed25519.pub; do "
                 '[ -e "$HOME/.ssh/$name" ] && mv "$HOME/.ssh/$name" "$backup/$name"; done; '
                 'echo "BACKUP:$backup"; fi; '
             )
@@ -1190,7 +1201,9 @@ def install_git(job):
         return
 
     if not executable_available("winget", SETTINGS):
-        raise RuntimeError("Windows Package Manager (winget) est introuvable. Mets Windows à jour ou installe App Installer.")
+        raise RuntimeError(
+            "Windows Package Manager (winget) est introuvable. Mets Windows à jour ou installe App Installer."
+        )
 
     current_code, current_output = run_capture([resolve_executable("git", SETTINGS), "--version"], timeout=8)
     if current_code == 0:
@@ -1283,7 +1296,10 @@ def project_dirs():
         if not is_directory:
             continue
         try:
-            has_compose = any((item / name).exists() for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"))
+            has_compose = any(
+                (item / name).exists()
+                for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
+            )
         except OSError:
             continue
         if has_compose:
@@ -1477,7 +1493,9 @@ def database_base_versions(project, databases):
             continue
         query = "select latest_version from ir_module_module where name='base' limit 1;"
         code, output = run_capture(
-            docker_command(SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-d", db_name, "-Atc", query),
+            docker_command(
+                SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-d", db_name, "-Atc", query
+            ),
             timeout=8,
         )
         if code == 0 and output.strip():
@@ -1572,7 +1590,9 @@ def wsl_module_metadata(
         elif in_storage:
             kind = "lien vers dépôt addons-store"
             removal_mode = "protected_store"
-            removal_note = "Module fourni par un dépôt sous addons-store; suppression du lien seule le ferait réapparaître."
+            removal_note = (
+                "Module fourni par un dépôt sous addons-store; suppression du lien seule le ferait réapparaître."
+            )
             removable = False
         else:
             kind = "lien vers source externe"
@@ -1644,14 +1664,14 @@ def wsl_module_dirs(project):
         '[ "$found_parent" -eq 1 ] || { echo "Aucun dossier addons lisible depuis WSL." >&2; exit 3; }; '
         'for parent do [ -d "$parent" ] || continue; '
         'find "$parent" -mindepth 1 -maxdepth 1 \\( -type d -o -type l \\) -print 2>/dev/null | '
-        'while IFS= read -r child; do '
+        "while IFS= read -r child; do "
         '[ -f "$child/__manifest__.py" ] || [ -f "$child/__openerp__.py" ] || continue; '
         # Aucun sous-processus pour un dossier ordinaire : readlink seulement pour les liens,
         # les chemins Windows sont calculés côté Python (wsl_windows_path).
         'target="$child"; linked=0; '
         'if [ -L "$child" ]; then linked=1; target=$(readlink -f -- "$child" 2>/dev/null || printf "%s" "$child"); fi; '
         'printf "%s\\t%s\\t%s\\n" "$child" "$target" "$linked"; '
-        'done; done'
+        "done; done"
     )
     code, output = run_capture(
         [*wsl_command_prefix(distribution), "sh", "-c", script, "odoo-manager", *linux_candidates],
@@ -1759,8 +1779,7 @@ def module_dirs(project):
             yield child
     if not readable_parent and access_errors:
         raise RuntimeError(
-            "Impossible de lire les dossiers addons du projet sous Windows : "
-            + " ; ".join(access_errors[:3])
+            "Impossible de lire les dossiers addons du projet sous Windows : " + " ; ".join(access_errors[:3])
         )
 
 
@@ -1803,9 +1822,7 @@ def remember_ignored_missing_modules(project, db_name, modules):
         workspace = workspaces.setdefault(str(WORKSPACE), {})
         project_config = workspace.setdefault(project, {})
         current = {
-            name
-            for name in project_config.get(db_name, [])
-            if isinstance(name, str) and SAFE_MODULE_RE.fullmatch(name)
+            name for name in project_config.get(db_name, []) if isinstance(name, str) and SAFE_MODULE_RE.fullmatch(name)
         }
         current.update(modules)
         project_config[db_name] = sorted(current)
@@ -1863,9 +1880,7 @@ def modules_missing_from_code(states, available_names, accepted_states):
     return sorted(
         name
         for name, state in states.items()
-        if state.get("state") in accepted_states
-        and name not in available_names
-        and name not in DATABASE_ONLY_MODULES
+        if state.get("state") in accepted_states and name not in available_names and name not in DATABASE_ONLY_MODULES
     )
 
 
@@ -1958,10 +1973,7 @@ def module_parent_in_layout(project, path, layout):
 def module_location_info(project, path, layout=None):
     metadata = WSL_MODULE_METADATA.get(str(path).casefold())
     if metadata:
-        return {
-            key: metadata[key]
-            for key in ("path", "link_path", "source_path", "path_kind")
-        }
+        return {key: metadata[key] for key in ("path", "link_path", "source_path", "path_kind")}
     layout = layout or module_layout_context(project)
     link_parent = layout.link_parent
     storage_parent = layout.storage_parent
@@ -2013,10 +2025,7 @@ def module_location_info(project, path, layout=None):
 
 def module_origin(source_path):
     normalized_path = str(source_path).replace("\\", "/").casefold()
-    if (
-        "/addons-store/odoo_entreprise/" in normalized_path
-        or "/addons-store/odoo_enterprise/" in normalized_path
-    ):
+    if "/addons-store/odoo_entreprise/" in normalized_path or "/addons-store/odoo_enterprise/" in normalized_path:
         return "enterprise"
     return "other"
 
@@ -2039,10 +2048,7 @@ def basic_module(project, path, layout=None):
 def module_removal_info(project, path, layout=None):
     metadata = WSL_MODULE_METADATA.get(str(path).casefold())
     if metadata:
-        return {
-            key: metadata[key]
-            for key in ("removable", "removal_mode", "removal_note")
-        }
+        return {key: metadata[key] for key in ("removable", "removal_mode", "removal_note")}
     layout = layout or module_layout_context(project)
     link_parent = layout.link_parent
     storage_parent = layout.storage_parent
@@ -2113,7 +2119,9 @@ def installed_modules(project, db_name, check_container=True):
         return {}
     query = "select name,state,coalesce(latest_version,'') from ir_module_module order by name;"
     code, output = run_capture(
-        docker_command(SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-d", db_name, "-Atc", query),
+        docker_command(
+            SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-d", db_name, "-Atc", query
+        ),
         timeout=18,
     )
     states = {}
@@ -2157,7 +2165,9 @@ def modules_for(project, db_name=None):
 
 def db_query_lines(project, db_name, query, timeout=18):
     code, output = run_capture(
-        docker_command(SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-d", db_name, "-Atc", query),
+        docker_command(
+            SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-d", db_name, "-Atc", query
+        ),
         timeout=timeout,
     )
     if code != 0:
@@ -2299,9 +2309,7 @@ def database_diagnostics(project, db_name, available_paths):
     ignored_installed_missing = sorted(set(installed_missing_all) & configured_ignored)
     installed_missing = sorted(set(installed_missing_all) - configured_ignored)
     db_info["ignored_missing_modules"] = ignored_installed_missing
-    local_excluded = sorted(
-        name for name in configured_ignored if states.get(name, {}).get("state") == "installed"
-    )
+    local_excluded = sorted(name for name in configured_ignored if states.get(name, {}).get("state") == "installed")
     db_info["local_excluded_modules"] = local_excluded
     if installed_missing:
         issue = {
@@ -2390,13 +2398,13 @@ def project_diagnostics(project):
     with ThreadPoolExecutor(max_workers=DOCKER_PROBE_WORKERS, thread_name_prefix="project-diagnostics") as executor:
         # Le parcours des addons (disque) avance pendant la lecture des bases (Docker).
         module_paths = executor.submit(lambda: {path.name: path for path in module_dirs(project)})
-        databases = [
-            db_name for db_name in list_databases_for(project, check_container=False) if db_name != "postgres"
-        ]
+        databases = [db_name for db_name in list_databases_for(project, check_container=False) if db_name != "postgres"]
         available_paths = module_paths.result()
         # Chaque base coûte deux `docker exec psql` et un parcours de son filestore, indépendants d'une
         # base à l'autre : en série, le diagnostic enchaînait 13 `docker exec` pour 3 bases (1,1 s).
-        for db_info, issues in executor.map(lambda db_name: database_diagnostics(project, db_name, available_paths), databases):
+        for db_info, issues in executor.map(
+            lambda db_name: database_diagnostics(project, db_name, available_paths), databases
+        ):
             diagnostics["databases"].append(db_info)
             diagnostics["issues"].extend(issues)
 
@@ -2462,7 +2470,11 @@ def overview_databases_by_project(projects, max_age=None):
         workers = min(DOCKER_PROBE_WORKERS, len(pending))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="overview-databases") as executor:
             results.update(
-                zip(pending, executor.map(lambda project: probe_overview_databases(project, max_age), pending), strict=True)
+                zip(
+                    pending,
+                    executor.map(lambda project: probe_overview_databases(project, max_age), pending),
+                    strict=True,
+                )
             )
     return results
 
@@ -2563,16 +2575,25 @@ MODULE_OPERATION_CANCEL_HINT = (
     "Le processus Odoo est arrêté, les modules que l'action a laissés en attente reprennent leur état précédent, "
     "puis Odoo redémarre. Les modules déjà traités par Odoo restent modifiés."
 )
-ODOO_SCRIPT_CANCEL_HINT = (
-    "Le script Odoo est arrêté avant d'enregistrer ses modifications, puis Odoo redémarre."
+ODOO_SCRIPT_CANCEL_HINT = "Le script Odoo est arrêté avant d'enregistrer ses modifications, puis Odoo redémarre."
+MODULE_FILES_CANCEL_HINT = (
+    "Les modules déjà copiés par cette action sont retirés et les versions remplacées restaurées."
 )
-MODULE_FILES_CANCEL_HINT = "Les modules déjà copiés par cette action sont retirés et les versions remplacées restaurées."
 # (arrêt possible, ce que fait l'arrêt ou pourquoi il est impossible), par fonction d'action.
 JOB_CANCEL_POLICIES = {
-    "start_project_job": (True, "Les conteneurs et le serveur Odoo démarrés par cette action sont arrêtés ; ce qui tournait déjà reste démarré."),
+    "start_project_job": (
+        True,
+        "Les conteneurs et le serveur Odoo démarrés par cette action sont arrêtés ; ce qui tournait déjà reste démarré.",
+    ),
     "stop_project_job": (True, "L'arrêt est interrompu : les conteneurs déjà arrêtés le restent."),
-    "update_project_job": (True, "Le téléchargement en cours est interrompu. Un git pull commencé va d'abord à son terme."),
-    "update_all_projects_job": (True, "La mise à jour s'arrête au projet en cours. Un git pull commencé va d'abord à son terme."),
+    "update_project_job": (
+        True,
+        "Le téléchargement en cours est interrompu. Un git pull commencé va d'abord à son terme.",
+    ),
+    "update_all_projects_job": (
+        True,
+        "La mise à jour s'arrête au projet en cours. Un git pull commencé va d'abord à son terme.",
+    ),
     "module_command_job": (True, MODULE_OPERATION_CANCEL_HINT),
     "update_all_modules_job": (True, MODULE_OPERATION_CANCEL_HINT),
     "update_imported_modules_job": (True, MODULE_OPERATION_CANCEL_HINT),
@@ -2582,23 +2603,53 @@ JOB_CANCEL_POLICIES = {
     "regenerate_assets_job": (True, ODOO_SCRIPT_CANCEL_HINT),
     "reset_all_translations_job": (True, ODOO_SCRIPT_CANCEL_HINT),
     "reset_admin_password_job": (True, ODOO_SCRIPT_CANCEL_HINT),
-    "restore_database_job": (True, "La restauration est interrompue et la base partiellement restaurée est supprimée avec son filestore."),
-    "create_database_job": (True, "La création est interrompue et la base partiellement créée est supprimée avec son filestore."),
-    "drop_database_job": (True, "Possible tant que la suppression n'a pas été envoyée à Odoo ; ensuite elle va à son terme."),
-    "delete_project_job": (True, "Possible pendant l'arrêt des conteneurs : le projet est conservé. Le déplacement du dossier ne peut pas être interrompu."),
-    "delete_module_code_job": (True, "Possible pendant la désinstallation Odoo (modules remis en état). La suppression des fichiers ne peut pas être interrompue."),
+    "restore_database_job": (
+        True,
+        "La restauration est interrompue et la base partiellement restaurée est supprimée avec son filestore.",
+    ),
+    "create_database_job": (
+        True,
+        "La création est interrompue et la base partiellement créée est supprimée avec son filestore.",
+    ),
+    "drop_database_job": (
+        True,
+        "Possible tant que la suppression n'a pas été envoyée à Odoo ; ensuite elle va à son terme.",
+    ),
+    "delete_project_job": (
+        True,
+        "Possible pendant l'arrêt des conteneurs : le projet est conservé. Le déplacement du dossier ne peut pas être interrompu.",
+    ),
+    "delete_module_code_job": (
+        True,
+        "Possible pendant la désinstallation Odoo (modules remis en état). La suppression des fichiers ne peut pas être interrompue.",
+    ),
     "repository_modules_job": (True, MODULE_FILES_CANCEL_HINT),
     "import_zip_modules_job": (True, MODULE_FILES_CANCEL_HINT),
     "link_modules_job": (True, MODULE_FILES_CANCEL_HINT),
-    "create_project_job": (True, "La création est interrompue : le projet partiellement créé et ses conteneurs sont retirés (dossier conservé dans la corbeille du gestionnaire)."),
+    "create_project_job": (
+        True,
+        "La création est interrompue : le projet partiellement créé et ses conteneurs sont retirés (dossier conservé dans la corbeille du gestionnaire).",
+    ),
     "install_traefik_job": (True, "Le téléchargement est interrompu ; aucun dossier partiel n'est conservé."),
-    "convert_wsl_addon_links_job": (True, "La conversion s'arrête entre deux liens ; relance-la plus tard pour la terminer."),
+    "convert_wsl_addon_links_job": (
+        True,
+        "La conversion s'arrête entre deux liens ; relance-la plus tard pour la terminer.",
+    ),
     "install_git_job": (False, "l'installeur Windows ne peut pas être interrompu sans risque."),
     "repair_enterprise_links_job": (False, "opération courte sur les liens de modules."),
-    "cancel_missing_module_operations_job": (False, "modification courte de la base, appliquée en une seule transaction."),
-    "restore_module_update_exclusions_job": (False, "modification courte de la base, appliquée en une seule transaction."),
+    "cancel_missing_module_operations_job": (
+        False,
+        "modification courte de la base, appliquée en une seule transaction.",
+    ),
+    "restore_module_update_exclusions_job": (
+        False,
+        "modification courte de la base, appliquée en une seule transaction.",
+    ),
 }
-DEFAULT_JOB_CANCEL_POLICY = (True, "L'action est interrompue ; ce qu'elle a déjà modifié n'est pas annulé automatiquement.")
+DEFAULT_JOB_CANCEL_POLICY = (
+    True,
+    "L'action est interrompue ; ce qu'elle a déjà modifié n'est pas annulé automatiquement.",
+)
 
 
 def jobs_conflict(first, second):
@@ -2714,7 +2765,7 @@ def parse_output_progress(text):
     line = text.strip()
     # Le serveur Git préfixe ses propres étapes, réécrites elles aussi en place.
     if line.startswith("remote: "):
-        line = line[len("remote: "):]
+        line = line[len("remote: ") :]
     match = GIT_PROGRESS_RE.match(line)
     if match:
         label = GIT_PROGRESS_PHASES.get(match.group("phase"))
@@ -2966,20 +3017,14 @@ def available_update_modules(project, db_name, states=None, available_names=None
     return sorted(
         name
         for name, state in states.items()
-        if name in available_names
-        and name not in excluded_names
-        and state.get("state") in {"installed", "to upgrade"}
+        if name in available_names and name not in excluded_names and state.get("state") in {"installed", "to upgrade"}
     )
 
 
 def active_local_module_exceptions(project, db_name, states=None, available_names=None):
     states = states if states is not None else installed_modules(project, db_name)
     configured = ignored_missing_modules(project, db_name)
-    return sorted(
-        name
-        for name in configured
-        if states.get(name, {}).get("state") == "installed"
-    )
+    return sorted(name for name in configured if states.get(name, {}).get("state") == "installed")
 
 
 def cancel_missing_module_operations_job(job, project, db_name, modules):
@@ -3018,13 +3063,11 @@ def cancel_missing_module_operations_job(job, project, db_name, modules):
         already_excluded=ignored_missing_modules(project, db_name),
     )
     if invalid:
-        raise RuntimeError(
-            "Ces modules ne sont pas des opérations en attente avec code absent: " + ", ".join(invalid)
-        )
-    reset_modules = sorted(set(candidates) | {
-        name for name in automatic_exclusions
-        if states.get(name, {}).get("state") in TRANSIENT_MODULE_STATES
-    })
+        raise RuntimeError("Ces modules ne sont pas des opérations en attente avec code absent: " + ", ".join(invalid))
+    reset_modules = sorted(
+        set(candidates)
+        | {name for name in automatic_exclusions if states.get(name, {}).get("state") in TRANSIENT_MODULE_STATES}
+    )
     quoted = ",".join(f"'{name}'" for name in reset_modules)
     query = (
         "begin; "
@@ -3126,7 +3169,9 @@ def migration_snapshot():
         "source": str(source),
         "dismissed": bool(getattr(SETTINGS, "migration_banner_dismissed", False)),
         "projects": migration_candidates(
-            source, WORKSPACE, migration_privileges(),
+            source,
+            WORKSPACE,
+            migration_privileges(),
             container_state=lambda project: container_state_of(states, project),
         ),
     }
@@ -3196,7 +3241,7 @@ def migrate_project_job(job, project, force=False):
     # Lue une seule fois : elle sert à la mesure puis au contrôle de la copie.
     source_listing = list_tree(source, prefix) if prefix else None
     measured = measure_project(source, prefix, listing=source_listing)
-    job.add(f"{measured['files']} fichiers, {measured['bytes'] / (1024 ** 3):.1f} Go à copier.")
+    job.add(f"{measured['files']} fichiers, {measured['bytes'] / (1024**3):.1f} Go à copier.")
     free = shutil.disk_usage(WORKSPACE).free
     if free < measured["bytes"] * 1.1:
         raise RuntimeError("Espace disque insuffisant dans l'environnement Linux pour cette copie.")
@@ -3206,7 +3251,9 @@ def migrate_project_job(job, project, force=False):
 
     try:
         if prefix:
-            copy_project_privileged(source, destination, prefix, log=job.add, progress=report, total_files=measured["files"])
+            copy_project_privileged(
+                source, destination, prefix, log=job.add, progress=report, total_files=measured["files"]
+            )
         else:
             copy_project(source, destination, log=job.add, progress=report, total_files=measured["files"])
     except Exception:
@@ -3250,7 +3297,7 @@ def cleanup_staging_job(job):
             continue
         removed += 1
     freed = max(0, shutil.disk_usage(WORKSPACE).free - free_before)
-    job.add(f"{removed} dossier(s) supprimé(s), {freed / (1024 ** 3):.1f} Go libérés.")
+    job.add(f"{removed} dossier(s) supprimé(s), {freed / (1024**3):.1f} Go libérés.")
     return {"removed": removed, "freed_bytes": freed}
 
 
@@ -3352,7 +3399,10 @@ def installed_languages(project, db_name):
 def reset_all_translations_job(job, project, db_name, languages):
     project, db_name = existing_odoo_database(project, db_name)
     project_service().run_odoo_reset_all_translations(
-        project, db_name, validate_language_codes(languages), log=job.add,
+        project,
+        db_name,
+        validate_language_codes(languages),
+        log=job.add,
     )
 
 
@@ -3468,11 +3518,7 @@ def save_request_body_to_file(stream, content_length, destination, chunk_size=10
 
 
 def multipart_field(boundary, name, value):
-    return (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
-        f"{value}\r\n"
-    ).encode()
+    return (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n').encode()
 
 
 def post_odoo_database_restore(job, url, backup_path, filename, db_name, master_pwd, copy, neutralize):
@@ -3538,7 +3584,7 @@ def odoo_restore_error(content):
     plain = html.unescape(re.sub(r"<[^>]+>", " ", content))
     plain = re.sub(r"\s+", " ", plain).strip()
     marker = "Database restore error:"
-    return plain[plain.find(marker):plain.find(marker) + 800]
+    return plain[plain.find(marker) : plain.find(marker) + 800]
 
 
 def restore_database_job(job, project, backup_path, filename, db_name, master_pwd, copy=True, neutralize=True):
@@ -3701,9 +3747,7 @@ def create_database_job(job, project, db_name, master_pwd, login, password, lang
             job.add(f"Initialisation de la base... {waited}s/{max_wait}s")
         job_control.sleep(2)
 
-    raise RuntimeError(
-        "La création a été envoyée, mais la base n'apparaît pas dans PostgreSQL après 120 secondes."
-    )
+    raise RuntimeError("La création a été envoyée, mais la base n'apparaît pas dans PostgreSQL après 120 secondes.")
 
 
 def drop_database_job(job, project, db_name, master_pwd):
@@ -3741,10 +3785,21 @@ def drop_partial_database(job, project, db_name):
         # Deux -c : DROP DATABASE refuse de s'exécuter dans le bloc de transaction d'un -c unique.
         code, output = run_capture(
             docker_command(
-                SETTINGS, "exec", f"postgresql-{project}", "psql", "-X", "-v", "ON_ERROR_STOP=1",
-                "-U", "postgres", "-d", "postgres",
-                "-c", f"select pg_terminate_backend(pid) from pg_stat_activity where datname = '{literal}' and pid <> pg_backend_pid();",
-                "-c", f'drop database if exists "{identifier}";',
+                SETTINGS,
+                "exec",
+                f"postgresql-{project}",
+                "psql",
+                "-X",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "postgres",
+                "-d",
+                "postgres",
+                "-c",
+                f"select pg_terminate_backend(pid) from pg_stat_activity where datname = '{literal}' and pid <> pg_backend_pid();",
+                "-c",
+                f'drop database if exists "{identifier}";',
             ),
             timeout=120,
         )
@@ -3756,7 +3811,9 @@ def drop_partial_database(job, project, db_name):
         raise RuntimeError(f"la base {db_name} n'a pas pu être supprimée")
     if container_status(f"odoo-{project}") == "running":
         run_capture(
-            docker_command(SETTINGS, "exec", f"odoo-{project}", "rm", "-rf", "--", f"/home/odoo/srv/data/filestore/{db_name}"),
+            docker_command(
+                SETTINGS, "exec", f"odoo-{project}", "rm", "-rf", "--", f"/home/odoo/srv/data/filestore/{db_name}"
+            ),
             timeout=120,
         )
     invalidate_overview_databases(project)
@@ -3930,7 +3987,7 @@ def addon_link_statuses(pairs):
     )
     statuses = []
     for index in range(0, len(pairs), ADDON_LINK_STATUS_CHUNK):
-        chunk = pairs[index:index + ADDON_LINK_STATUS_CHUNK]
+        chunk = pairs[index : index + ADDON_LINK_STATUS_CHUNK]
         arguments = [
             value
             for link, target in chunk
@@ -3978,7 +4035,9 @@ def remove_module_entry(path):
     distribution = addon_links_wsl_distribution(path.parent)
     if distribution is not None:
         run_wsl_script(
-            distribution, 'rm -rf -- "$1"', [wsl_entry_path(path, distribution)],
+            distribution,
+            'rm -rf -- "$1"',
+            [wsl_entry_path(path, distribution)],
             f"Suppression de {path.name} impossible via WSL",
         )
     elif path.is_symlink() or path.is_file():
@@ -4114,10 +4173,19 @@ def install_module_candidates(job, project, candidates, replace_existing=False):
         for module_path in candidates:
             module_path = module_path.resolve()
             storage_path = copy_module_to_storage(
-                job, project, module_path, replace_existing=replace_existing, journal=journal,
+                job,
+                project,
+                module_path,
+                replace_existing=replace_existing,
+                journal=journal,
             )
             changed = ensure_relative_module_link(
-                job, project, storage_path.name, storage_path, replace_existing=replace_existing, journal=journal,
+                job,
+                project,
+                storage_path.name,
+                storage_path,
+                replace_existing=replace_existing,
+                journal=journal,
             )
             if changed:
                 linked += 1
@@ -4147,7 +4215,7 @@ def wsl_addon_link_targets(project, module_names):
         '[ -L "$child" ] || continue; '
         'target=$(readlink -f -- "$child" 2>/dev/null) || continue; '
         'printf "%s\\t%s\\n" "$name" "$(wslpath -w "$target" 2>/dev/null || printf "%s" "$target")"; '
-        'done'
+        "done"
     )
     code, output = run_capture(
         [*wsl_command_prefix(distribution), "sh", "-c", script, "odoo-manager", link_parent, *module_names],
@@ -4157,8 +4225,7 @@ def wsl_addon_link_targets(project, module_names):
     if code != 0:
         raise RuntimeError(output.strip() or "Lecture des liens d'addons impossible depuis WSL.")
     return {
-        name: Path(target)
-        for name, target in (line.split("\t", 1) for line in output.splitlines() if "\t" in line)
+        name: Path(target) for name, target in (line.split("\t", 1) for line in output.splitlines() if "\t" in line)
     }
 
 
@@ -4193,7 +4260,9 @@ def normalize_module_layout_for_action(job, project, module_names):
                 continue
             if storage_path.exists() or storage_path.is_symlink():
                 if not (storage_path / "__manifest__.py").exists() and not (storage_path / "__openerp__.py").exists():
-                    job.add(f"Layout non normalisé pour {module_name}: dossier addons-store existant sans manifest {storage_path}")
+                    job.add(
+                        f"Layout non normalisé pour {module_name}: dossier addons-store existant sans manifest {storage_path}"
+                    )
                     continue
                 ensure_relative_module_link(job, project, module_name, storage_path, replace_existing=True)
                 job.add(f"Lien migré vers le dossier addons-store existant: {module_name}")
@@ -4270,7 +4339,8 @@ def ensure_enterprise_module_links(job, project):
     if provided:
         job.add(
             f"{len(provided)} module(s) Enterprise déjà fourni(s) par une autre source dans odoo/addons, conservé(s) : "
-            + ", ".join(provided[:20]) + (" …" if len(provided) > 20 else "")
+            + ", ".join(provided[:20])
+            + (" …" if len(provided) > 20 else "")
         )
 
     for root in roots:
@@ -4326,7 +4396,9 @@ def convert_wsl_addon_links_job(job, project):
         job.add("Aucun lien WSL à convertir : les modules sont déjà lus directement par Windows.")
         return
     if container_status(f"odoo-{project}") == "running":
-        raise RuntimeError("Arrête le projet avant de convertir ses liens : Odoo lit ces dossiers pendant son exécution.")
+        raise RuntimeError(
+            "Arrête le projet avant de convertir ses liens : Odoo lit ces dossiers pendant son exécution."
+        )
     if not all(native_symlinks_supported(parent) for parent in parents):
         raise RuntimeError(
             "Windows refuse la création de liens symboliques. Active le mode développeur "
@@ -4345,7 +4417,8 @@ def convert_wsl_addon_links_job(job, project):
     if problems:
         raise RuntimeError(
             f"{len(problems)} lien(s) non converti(s), relance la conversion après vérification : "
-            + " ; ".join(problems[:10]) + (" …" if len(problems) > 10 else "")
+            + " ; ".join(problems[:10])
+            + (" …" if len(problems) > 10 else "")
         )
     job.add("La liste des modules est désormais lue directement par Windows, sans WSL.")
 
@@ -4418,15 +4491,22 @@ def wsl_module_graph(project):
         '[ "$found_parent" -eq 1 ] || { echo "Aucun dossier addons lisible depuis WSL." >&2; exit 3; }; '
         'for parent do [ -d "$parent" ] || continue; '
         'find "$parent" -mindepth 1 -maxdepth 1 \\( -type d -o -type l \\) -print 2>/dev/null | '
-        'while IFS= read -r child; do '
+        "while IFS= read -r child; do "
         'for manifest in "$child/__manifest__.py" "$child/__openerp__.py"; do '
         '[ -f "$manifest" ] || continue; '
         'printf "\\n%s%s\\n" "$marker" "${child##*/}"; cat -- "$manifest" 2>/dev/null; break; '
-        'done; done; done'
+        "done; done; done"
     )
     code, output = run_capture(
-        [*wsl_command_prefix(distribution), "sh", "-c", 'marker=$1; shift; ' + script, "odoo-manager",
-         MANIFEST_RECORD_MARKER, *linux_candidates],
+        [
+            *wsl_command_prefix(distribution),
+            "sh",
+            "-c",
+            "marker=$1; shift; " + script,
+            "odoo-manager",
+            MANIFEST_RECORD_MARKER,
+            *linux_candidates,
+        ],
         cwd=workspace_tool_cwd(),
         timeout=60,
     )
@@ -4499,7 +4579,9 @@ def module_install_plan(graph, states, requested):
     candidates = sorted(
         name
         for name, entry in graph.items()
-        if entry["auto_install"] and entry["installable"] and entry["auto_install_triggers"]
+        if entry["auto_install"]
+        and entry["installable"]
+        and entry["auto_install_triggers"]
         and not entry["country_restricted"]
     )
     changed = True
@@ -4534,11 +4616,7 @@ def module_install_plan(graph, states, requested):
 
 
 def socle_preset_modules(preset_ids):
-    return list(dict.fromkeys(
-        module_name
-        for preset_id in preset_ids
-        for module_name in SOCLE_PRESETS[preset_id][1]
-    ))
+    return list(dict.fromkeys(module_name for preset_id in preset_ids for module_name in SOCLE_PRESETS[preset_id][1]))
 
 
 def socle_catalog(project, db_name):
@@ -4552,15 +4630,17 @@ def socle_catalog(project, db_name):
         if not missing and len(installed) < len(modules):
             plan = module_install_plan(graph, states, modules)
             extra = len(plan["dependencies"]) + len(plan["auto_installed"])
-        apps.append({
-            "id": app_id,
-            "label": label,
-            "section": section,
-            "modules": list(modules),
-            "missing": missing,
-            "installed_modules": installed,
-            "extra_count": extra,
-        })
+        apps.append(
+            {
+                "id": app_id,
+                "label": label,
+                "section": section,
+                "modules": list(modules),
+                "missing": missing,
+                "installed_modules": installed,
+                "extra_count": extra,
+            }
+        )
     return {
         "sections": [{"id": section_id, "label": label} for section_id, label in SOCLE_SECTIONS],
         "apps": apps,
@@ -4576,11 +4656,15 @@ def socle_install_plan(project, db_name, presets):
 
 def log_module_install_plan(job, plan):
     if plan["dependencies"]:
-        job.add(f"Dépendances installées en plus ({len(plan['dependencies'])}) : "
-                + ", ".join(item["name"] for item in plan["dependencies"]))
+        job.add(
+            f"Dépendances installées en plus ({len(plan['dependencies'])}) : "
+            + ", ".join(item["name"] for item in plan["dependencies"])
+        )
     if plan["auto_installed"]:
-        job.add(f"Modules installés automatiquement par Odoo ({len(plan['auto_installed'])}) : "
-                + ", ".join(item["name"] for item in plan["auto_installed"]))
+        job.add(
+            f"Modules installés automatiquement par Odoo ({len(plan['auto_installed'])}) : "
+            + ", ".join(item["name"] for item in plan["auto_installed"])
+        )
 
 
 def install_socle_job(job, project, db_name, presets):
@@ -4671,7 +4755,8 @@ def missing_code_failure_hint(project, db_name, message):
     except (OSError, RuntimeError):
         return ""
     missing = sorted(
-        set(modules_missing_from_code(states, available, ACTIVE_MODULE_STATES)) - ignored_missing_modules(project, db_name)
+        set(modules_missing_from_code(states, available, ACTIVE_MODULE_STATES))
+        - ignored_missing_modules(project, db_name)
     )
     if not missing:
         return ""
@@ -4796,7 +4881,10 @@ def discard_created_project(job, name):
     if not (path.exists() or path.is_symlink()):
         job.add(f"Aucun dossier {name} créé : rien à retirer.")
         return
-    if any((path / compose).is_file() for compose in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")):
+    if any(
+        (path / compose).is_file()
+        for compose in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
+    ):
         docker_ok, _message = docker_available()
         if docker_ok:
             run_stream(job, docker_command(SETTINGS, "compose", "down"), cwd=path)
@@ -4914,8 +5002,12 @@ def module_provided_by_project(project, name):
 
 
 REPOSITORY_GIT_OPTIONS = (
-    "-c", "core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
-    "-c", "protocol.allow=never", "-c", "protocol.ssh.allow=always",
+    "-c",
+    "core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
+    "-c",
+    "protocol.allow=never",
+    "-c",
+    "protocol.ssh.allow=always",
 )
 REPOSITORY_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 MAX_MANIFEST_BYTES = 512 * 1024
@@ -4951,12 +5043,14 @@ def repository_module_plans(project, modules, states, odoo_version):
     storage_parent = project_addons_storage_parent(project)
     link_parent = project_addons_link_parent(project)
     valid = [module for module in modules if SAFE_MODULE_RE.fullmatch(module["name"]) and "," not in module["name"]]
-    link_states = dict(zip(
-        (module["name"] for module in valid),
-        addon_link_statuses((link_parent / module["name"], storage_parent / module["name"]) for module in valid),
-        # Une sortie WSL tronquée laisse ces modules sans état connu, au lieu d'interrompre l'import.
-        strict=False,
-    ))
+    link_states = dict(
+        zip(
+            (module["name"] for module in valid),
+            addon_link_statuses((link_parent / module["name"], storage_parent / module["name"]) for module in valid),
+            # Une sortie WSL tronquée laisse ces modules sans état connu, au lieu d'interrompre l'import.
+            strict=False,
+        )
+    )
     plans = []
     for module in modules:
         name = module["name"]
@@ -5030,19 +5124,32 @@ def inspect_repository_modules(project, url, branch, db_name=""):
         # Clone sans contenu : seuls les manifestes sont téléchargés ensuite.
         clone = creator.git(
             *REPOSITORY_GIT_OPTIONS,
-            "clone", "--depth", "1", "--filter=blob:none", "--no-checkout",
-            "--single-branch", "--branch", branch, "--", url, creator.command_path(checkout),
+            "clone",
+            "--depth",
+            "1",
+            "--filter=blob:none",
+            "--no-checkout",
+            "--single-branch",
+            "--branch",
+            branch,
+            "--",
+            url,
+            creator.command_path(checkout),
         )
         code, output = creator.project_service.capture(clone, cwd=creator.command_cwd, timeout=180)
         if code:
             raise repository_clone_error(output)
         git_dir = creator.command_path(checkout)
-        code, commit = creator.project_service.capture(creator.git("-C", git_dir, "rev-parse", "HEAD"), cwd=creator.command_cwd, timeout=30)
+        code, commit = creator.project_service.capture(
+            creator.git("-C", git_dir, "rev-parse", "HEAD"), cwd=creator.command_cwd, timeout=30
+        )
         commit = commit.strip()
         if code or not REPOSITORY_COMMIT_RE.fullmatch(commit):
             raise RuntimeError("Lecture du commit de la branche impossible.")
         code, tree = creator.project_service.capture(
-            creator.git("-C", git_dir, "ls-tree", "-r", "--full-tree", "HEAD"), cwd=creator.command_cwd, timeout=60,
+            creator.git("-C", git_dir, "ls-tree", "-r", "--full-tree", "HEAD"),
+            cwd=creator.command_cwd,
+            timeout=60,
         )
         if code:
             raise RuntimeError("Lecture de l’arborescence du dépôt impossible.")
@@ -5054,14 +5161,21 @@ def inspect_repository_modules(project, url, branch, db_name=""):
             sparse = checkout / ".git" / "info" / "sparse-checkout"
             sparse.parent.mkdir(parents=True, exist_ok=True)
             sparse.write_text(
-                "".join(sparse_checkout_pattern(posixpath.join(path, filename) if path else filename)
-                        for path, _name, filename in found),
+                "".join(
+                    sparse_checkout_pattern(posixpath.join(path, filename) if path else filename)
+                    for path, _name, filename in found
+                ),
                 encoding="utf-8",
             )
-            fetch = creator.git(*REPOSITORY_GIT_OPTIONS, "-c", "core.sparseCheckout=true", "-C", git_dir, "checkout", "-q", "HEAD")
+            fetch = creator.git(
+                *REPOSITORY_GIT_OPTIONS, "-c", "core.sparseCheckout=true", "-C", git_dir, "checkout", "-q", "HEAD"
+            )
             code, _ = creator.project_service.capture(fetch, cwd=creator.command_cwd, timeout=180)
             if code == 0:
-                manifests = {path: read_repository_manifest(checkout / path if path else checkout) for path, _name, _file in found}
+                manifests = {
+                    path: read_repository_manifest(checkout / path if path else checkout)
+                    for path, _name, _file in found
+                }
     names = [name for _path, name, _file in found]
     modules = [
         {
@@ -5108,20 +5222,29 @@ def repository_tree_modules(tree_output, repository_name):
 
 def repository_clone_error(stderr):
     details = str(stderr or "").casefold()
-    if any(marker in details for marker in (
-            "permission denied (publickey)", "no such identity", "sign_and_send_pubkey")):
+    if any(
+        marker in details for marker in ("permission denied (publickey)", "no such identity", "sign_and_send_pubkey")
+    ):
         return RuntimeError(
             "GitLab refuse la clé SSH de cet ordinateur. Ouvre l’assistant Clé SSH du manager, "
             "puis vérifie que sa clé publique est autorisée dans GitLab."
         )
     if "host key verification failed" in details:
         return RuntimeError("L’identité du serveur GitLab n’a pas pu être vérifiée par SSH.")
-    if any(marker in details for marker in (
-            "remote branch", "couldn't find remote ref", "could not find remote branch",
-            "not found in upstream origin")):
+    if any(
+        marker in details
+        for marker in (
+            "remote branch",
+            "couldn't find remote ref",
+            "could not find remote branch",
+            "not found in upstream origin",
+        )
+    ):
         return RuntimeError("La branche ou le tag demandé est introuvable dans ce dépôt.")
-    if any(marker in details for marker in (
-            "could not resolve hostname", "failed to connect", "connection timed out", "connection refused")):
+    if any(
+        marker in details
+        for marker in ("could not resolve hostname", "failed to connect", "connection timed out", "connection refused")
+    ):
         return RuntimeError("GitLab est inaccessible depuis cet ordinateur. Vérifie le réseau et le DNS.")
     return RuntimeError(
         "Récupération Git impossible. Vérifie l’URL SSH, la branche et l’autorisation de la clé dans GitLab."
@@ -5141,14 +5264,24 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
         job.add(f"Récupération du dépôt {url}, branche {branch}…")
         command = creator.git(
             *REPOSITORY_GIT_OPTIONS,
-            "clone", "--depth", "1", "--single-branch", "--branch", branch, "--", url, creator.command_path(checkout),
+            "clone",
+            "--depth",
+            "1",
+            "--single-branch",
+            "--branch",
+            branch,
+            "--",
+            url,
+            creator.command_path(checkout),
         )
         code, output = creator.project_service.capture(command, cwd=creator.command_cwd, timeout=300)
         if code:
             raise repository_clone_error(output)
         if commit:
             code, head = creator.project_service.capture(
-                creator.git("-C", creator.command_path(checkout), "rev-parse", "HEAD"), cwd=creator.command_cwd, timeout=30,
+                creator.git("-C", creator.command_path(checkout), "rev-parse", "HEAD"),
+                cwd=creator.command_cwd,
+                timeout=30,
             )
             if code or head.strip() != commit:
                 raise ValueError(
@@ -5296,9 +5429,7 @@ def extract_zip_module_candidates(project, filename, data):
             seen.add(name)
         duplicates = sorted(duplicates)
         if duplicates:
-            raise RuntimeError(
-                "Modules en double dans le ZIP: " + ", ".join(duplicates)
-            )
+            raise RuntimeError("Modules en double dans le ZIP: " + ", ".join(duplicates))
         return import_dir, candidates, skipped_links
     except Exception:
         shutil.rmtree(import_dir, ignore_errors=True)
@@ -5332,9 +5463,7 @@ def import_zip_modules_job(job, project, filename, data, replace_existing=False,
     try:
         import_dir, candidates, skipped_links = extract_zip_module_candidates(project, filename, data)
         if skipped_links:
-            job.add(
-                f"Liens symboliques internes ignores pendant l'extraction securisee: {len(skipped_links)}"
-            )
+            job.add(f"Liens symboliques internes ignores pendant l'extraction securisee: {len(skipped_links)}")
             for name in skipped_links[:10]:
                 job.add(f" - {name}")
             if len(skipped_links) > 10:
@@ -5349,9 +5478,7 @@ def import_zip_modules_job(job, project, filename, data, replace_existing=False,
             by_name = {candidate.name: candidate for candidate in candidates}
             unknown = [name for name in requested if name not in by_name]
             if unknown:
-                raise RuntimeError(
-                    "Modules sélectionnés absents du ZIP: " + ", ".join(unknown)
-                )
+                raise RuntimeError("Modules sélectionnés absents du ZIP: " + ", ".join(unknown))
             candidates = [by_name[name] for name in requested]
             job.add(f"Modules sélectionnés pour l'import: {len(candidates)}")
             for candidate in candidates:
@@ -5375,7 +5502,11 @@ def job_output_payload(job, compact, detail_job_id, output_from):
     window_start = job.output_total - len(output)
     if compact and output_from and window_start <= output_from <= job.output_total:
         # Suite seulement : l'interface possède déjà les caractères précédents.
-        return {"lines": [], "output": output[len(output) - (job.output_total - output_from):], "output_from": output_from}
+        return {
+            "lines": [],
+            "output": output[len(output) - (job.output_total - output_from) :],
+            "output_from": output_from,
+        }
     payload = {"lines": job.lines[-JOB_LINES_LIMIT:], "output": output}
     if compact:
         payload["output_from"] = 0
@@ -5488,9 +5619,7 @@ def event_watch_loop():
                 # `docker ps`, peu coûteux, garde le rythme court des voyants ON/OFF.
                 now = time.monotonic()
                 refresh_docker = (
-                    docker is None
-                    or now - docker_checked_at >= docker_poll_seconds()
-                    or EVENT_DOCKER_REFRESH.is_set()
+                    docker is None or now - docker_checked_at >= docker_poll_seconds() or EVENT_DOCKER_REFRESH.is_set()
                 )
                 if refresh_docker:
                     EVENT_DOCKER_REFRESH.clear()
@@ -5535,7 +5664,11 @@ CONTAINER_LOG_FILE_CANDIDATES = (
 
 def discover_container_log_file(container):
     """Return the path of the first non-empty known Odoo log file inside the container, if any."""
-    shell = "for f in " + " ".join(CONTAINER_LOG_FILE_CANDIDATES) + "; do if [ -s \"$f\" ]; then echo \"$f\"; exit 0; fi; done; exit 1"
+    shell = (
+        "for f in "
+        + " ".join(CONTAINER_LOG_FILE_CANDIDATES)
+        + '; do if [ -s "$f" ]; then echo "$f"; exit 0; fi; done; exit 1'
+    )
     code, output = run_capture(docker_command(SETTINGS, "exec", container, "sh", "-lc", shell), timeout=10)
     if code == 0 and output.strip():
         return output.strip().splitlines()[0].strip()
@@ -5576,7 +5709,11 @@ def start_log_follow_process(project):
 
 
 def read_container_log_file(container):
-    shell = "for f in " + " ".join(CONTAINER_LOG_FILE_CANDIDATES) + "; do if [ -s \"$f\" ]; then echo \"===== $f =====\"; tail -n 260 \"$f\"; exit 0; fi; done; exit 1"
+    shell = (
+        "for f in "
+        + " ".join(CONTAINER_LOG_FILE_CANDIDATES)
+        + '; do if [ -s "$f" ]; then echo "===== $f ====="; tail -n 260 "$f"; exit 0; fi; done; exit 1'
+    )
     code, output = run_capture(docker_command(SETTINGS, "exec", container, "sh", "-lc", shell), timeout=10)
     if code == 0 and output.strip():
         return output.strip()
@@ -5611,7 +5748,9 @@ def tail_logs(project, raw=False):
 
     service = compose_service_for(project)
     if service:
-        code, output = run_capture(docker_command(SETTINGS, "compose", "logs", "--tail", "260", service), cwd=WORKSPACE / project, timeout=14)
+        code, output = run_capture(
+            docker_command(SETTINGS, "compose", "logs", "--tail", "260", service), cwd=WORKSPACE / project, timeout=14
+        )
         if code == 0 and output.strip():
             sections.append(f"===== docker compose logs {service} =====")
             sections.append(output.strip())
@@ -5726,8 +5865,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header(
             "Access-Control-Allow-Headers",
-            "Content-Type, X-Odoo-Database-Name, X-Odoo-Master-Password, "
-            "X-Odoo-Copy, X-Odoo-Neutralize, X-File-Name",
+            "Content-Type, X-Odoo-Database-Name, X-Odoo-Master-Password, X-Odoo-Copy, X-Odoo-Neutralize, X-File-Name",
         )
         self.send_header("Access-Control-Max-Age", "600")
         self.end_headers()
@@ -6190,9 +6328,14 @@ class Handler(BaseHTTPRequestHandler):
             if action == "repository_modules":
                 project = validate_project(payload.get("project", ""))
                 url, branch, names, commit = validate_module_repository(
-                    payload.get("url"), payload.get("branch"), payload.get("modules"), payload.get("commit"))
-                job = Job(f"Importer des modules depuis Git · {project}",
-                          repository_modules_job, (project, url, branch, names, commit), project=project)
+                    payload.get("url"), payload.get("branch"), payload.get("modules"), payload.get("commit")
+                )
+                job = Job(
+                    f"Importer des modules depuis Git · {project}",
+                    repository_modules_job,
+                    (project, url, branch, names, commit),
+                    project=project,
+                )
             elif action == "start_project":
                 project = validate_project(payload.get("project", ""))
                 job = Job(f"Démarrer {project}", start_project_job, (project,), project=project)
@@ -6321,8 +6464,12 @@ class Handler(BaseHTTPRequestHandler):
                 )
             elif action == "migrate_project":
                 name = validate_new_project_name(payload.get("project", ""))
-                job = Job(f"Migrer {name} vers l'environnement Linux", migrate_project_job,
-                          (name, bool(payload.get("force"))), project=name)
+                job = Job(
+                    f"Migrer {name} vers l'environnement Linux",
+                    migrate_project_job,
+                    (name, bool(payload.get("force"))),
+                    project=name,
+                )
             elif action == "cleanup_staging":
                 job = Job("Nettoyer les créations interrompues", cleanup_staging_job)
             elif action == "install_traefik":
@@ -6338,7 +6485,12 @@ class Handler(BaseHTTPRequestHandler):
                 lang = payload.get("lang", "fr_FR")
                 country = payload.get("country", "")
                 demo = bool(payload.get("demo", False))
-                job = Job(f"Créer base {db_name}", create_database_job, (project, db_name, master_pwd, login, password, lang, country, demo), project=project)
+                job = Job(
+                    f"Créer base {db_name}",
+                    create_database_job,
+                    (project, db_name, master_pwd, login, password, lang, country, demo),
+                    project=project,
+                )
             elif action == "drop_database":
                 project = validate_project(payload.get("project", ""))
                 db_name = validate_odoo_db(payload.get("db", ""))
@@ -6406,7 +6558,12 @@ class Handler(BaseHTTPRequestHandler):
                 uninstall_first = bool(payload.get("uninstall_first", False))
                 if uninstall_first:
                     db_name = validate_odoo_db(db_name)
-                job = Job(f"Supprimer modules {modules} du projet", delete_module_code_job, (project, modules, db_name, uninstall_first), project=project)
+                job = Job(
+                    f"Supprimer modules {modules} du projet",
+                    delete_module_code_job,
+                    (project, modules, db_name, uninstall_first),
+                    project=project,
+                )
             elif action in ("install_module", "update_module", "uninstall_module"):
                 project = validate_project(payload.get("project", ""))
                 db_name = validate_odoo_db(payload.get("db", ""))
@@ -6420,12 +6577,19 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     flag = "--update-module"
                     label = "Mettre à jour"
-                job = Job(f"{label} {modules} sur {db_name}", module_command_job, (flag, project, db_name, modules), project=project)
+                job = Job(
+                    f"{label} {modules} sur {db_name}",
+                    module_command_job,
+                    (flag, project, db_name, modules),
+                    project=project,
+                )
             elif action == "install_socle":
                 project = validate_project(payload.get("project", ""))
                 db_name = validate_odoo_db(payload.get("db", ""))
                 presets = ",".join(validate_socle_presets(payload.get("presets", "")))
-                job = Job(f"Installer le socle sur {db_name}", install_socle_job, (project, db_name, presets), project=project)
+                job = Job(
+                    f"Installer le socle sur {db_name}", install_socle_job, (project, db_name, presets), project=project
+                )
             elif action == "repair_enterprise_links":
                 project = validate_project(payload.get("project", ""))
                 job = Job(

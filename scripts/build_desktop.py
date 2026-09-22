@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Construit le backend Python et les paquets Electron de la plateforme courante."""
+
 import argparse
 import os
 import platform
@@ -98,7 +99,14 @@ def main():
         if not installers:
             raise SystemExit("Installateur NSIS introuvable.")
         if installer_smoke_test_allowed(forced=args.installer_smoke_test):
-            run([sys.executable, str(ROOT / "scripts/smoke_test_windows_installer.py"), "--installer", str(installers[-1])])
+            run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts/smoke_test_windows_installer.py"),
+                    "--installer",
+                    str(installers[-1]),
+                ]
+            )
         else:
             print(
                 "Test de l'installateur ignoré : il remplacerait l'installation de ce poste. "

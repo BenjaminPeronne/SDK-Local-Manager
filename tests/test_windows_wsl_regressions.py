@@ -5,6 +5,7 @@ sont créés par WSL. Windows ne les traverse pas (WinError 1920) et ne les voit
 même pas (`exists()` et `is_symlink()` renvoient False). Ces tests simulent cet
 aveuglement sur un système POSIX et exécutent les scripts WSL avec `sh`.
 """
+
 import ast
 import os
 import sys
@@ -46,8 +47,12 @@ class SubprocessDecodingTests(unittest.TestCase):
                     continue
                 encoding = keywords.get("encoding")
                 errors = keywords.get("errors")
-                if not (isinstance(encoding, ast.Constant) and encoding.value == "utf-8"
-                        and isinstance(errors, ast.Constant) and errors.value == "replace"):
+                if not (
+                    isinstance(encoding, ast.Constant)
+                    and encoding.value == "utf-8"
+                    and isinstance(errors, ast.Constant)
+                    and errors.value == "replace"
+                ):
                     offenders.append(f"{source.name}:{node.lineno}")
         self.assertEqual([], offenders)
 
@@ -97,13 +102,15 @@ class ModuleCommandFailureTests(unittest.TestCase):
         service = ProjectService(ManagerSettings(workspace=str(ROOT)), ROOT)
         logs = []
         original = UnicodeDecodeError("charmap", b"\x9d", 0, 1, "character maps to <undefined>")
-        with mock.patch.object(service, "ensure_odoo_containers_ready"), \
-                mock.patch.object(service, "install_project_pip_requirements"), \
-                mock.patch.object(service, "database_is_neutralized", return_value=False), \
-                mock.patch.object(service, "stop_odoo_server"), \
-                mock.patch.object(service, "stream", side_effect=original), \
-                mock.patch.object(service, "start_odoo_server", side_effect=RuntimeError("port 8069")) as start, \
-                mock.patch.object(service, "wait_project_http") as wait_http:
+        with (
+            mock.patch.object(service, "ensure_odoo_containers_ready"),
+            mock.patch.object(service, "install_project_pip_requirements"),
+            mock.patch.object(service, "database_is_neutralized", return_value=False),
+            mock.patch.object(service, "stop_odoo_server"),
+            mock.patch.object(service, "stream", side_effect=original),
+            mock.patch.object(service, "start_odoo_server", side_effect=RuntimeError("port 8069")) as start,
+            mock.patch.object(service, "wait_project_http") as wait_http,
+        ):
             with self.assertRaises(UnicodeDecodeError):
                 service.run_odoo_module_command("DEMO", "demo", "dromcom_mrp", option="-i", log=logs.append)
         start.assert_called_once()
@@ -112,13 +119,15 @@ class ModuleCommandFailureTests(unittest.TestCase):
 
     def test_successful_module_command_still_restarts_and_waits_for_odoo(self):
         service = ProjectService(ManagerSettings(workspace=str(ROOT)), ROOT)
-        with mock.patch.object(service, "ensure_odoo_containers_ready"), \
-                mock.patch.object(service, "install_project_pip_requirements"), \
-                mock.patch.object(service, "database_is_neutralized", return_value=False), \
-                mock.patch.object(service, "stop_odoo_server"), \
-                mock.patch.object(service, "stream", return_value=0), \
-                mock.patch.object(service, "start_odoo_server") as start, \
-                mock.patch.object(service, "wait_project_http") as wait_http:
+        with (
+            mock.patch.object(service, "ensure_odoo_containers_ready"),
+            mock.patch.object(service, "install_project_pip_requirements"),
+            mock.patch.object(service, "database_is_neutralized", return_value=False),
+            mock.patch.object(service, "stop_odoo_server"),
+            mock.patch.object(service, "stream", return_value=0),
+            mock.patch.object(service, "start_odoo_server") as start,
+            mock.patch.object(service, "wait_project_http") as wait_http,
+        ):
             service.run_odoo_module_command("DEMO", "demo", "dromcom_mrp", option="-i", log=lambda _line: None)
         start.assert_called_once()
         wait_http.assert_called_once()
@@ -153,8 +162,10 @@ class WindowsWslLayoutTests(unittest.TestCase):
 
     def windows_blind_to_wsl_links(self):
         """Ce que voit Python sous Windows face à un lien créé par WSL."""
+
         def unreadable(*args, **kwargs):
             raise AssertionError("lecture Windows d'un lien WSL")
+
         return (
             mock.patch.object(Path, "is_symlink", return_value=False),
             mock.patch.object(Path, "symlink_to", side_effect=FileExistsError(183, "WinError 183")),
@@ -164,17 +175,18 @@ class WindowsWslLayoutTests(unittest.TestCase):
     def test_socle_dependencies_are_read_through_wsl_links(self):
         # Manifeste Enterprise lié depuis odoo/addons, avec un guillemet typographique
         # (octets e2 80 9d) : dépendances vides dans la recette Windows.
-        self.add_module("addons-store/odoo_entreprise/sale_subscription", (
-            "{'name': 'Abonnements “pro”', 'depends': ['sale_management', 'payment'], "
-            "'application': True}\n"
-        ))
+        self.add_module(
+            "addons-store/odoo_entreprise/sale_subscription",
+            ("{'name': 'Abonnements “pro”', 'depends': ['sale_management', 'payment'], 'application': True}\n"),
+        )
         self.add_module("addons-store/sale_management", "{'name': 'Sales', 'depends': ['sale']}\n")
         self.add_module("addons-store/sale", "{'name': 'Sale', 'depends': ['mail']}\n")
         self.add_module("addons-store/payment", "{'name': 'Payment'}\n")
         self.add_module("addons-store/mail", "{'name': 'Mail'}\n")
-        self.add_module("addons-store/sale_payment_bridge", (
-            "{'name': 'Bridge', 'depends': ['sale', 'payment'], 'auto_install': True}\n"
-        ))
+        self.add_module(
+            "addons-store/sale_payment_bridge",
+            ("{'name': 'Bridge', 'depends': ['sale', 'payment'], 'auto_install': True}\n"),
+        )
         link = self.project_root / "odoo" / "addons" / "sale_subscription"
         link.symlink_to("../addons-store/odoo_entreprise/sale_subscription")
 
@@ -199,8 +211,7 @@ class WindowsWslLayoutTests(unittest.TestCase):
         (self.project_root / "odoo" / "addons" / "crm").symlink_to("../addons-store/crm")
 
         blind_links, blind_create, blind_manifests = self.windows_blind_to_wsl_links()
-        with blind_links, blind_create, blind_manifests, \
-                mock.patch.object(web, "installed_modules", return_value={}):
+        with blind_links, blind_create, blind_manifests, mock.patch.object(web, "installed_modules", return_value={}):
             catalog = web.socle_catalog(self.project, "demo")
 
         entry = next(app for app in catalog["apps"] if app["id"] == "crm")
@@ -255,7 +266,9 @@ class WindowsWslLayoutTests(unittest.TestCase):
         link = self.project_root / "odoo" / "addons" / "dromcom_mrp"
         link.symlink_to(self.external)
         with mock.patch.object(Path, "is_symlink", return_value=False):
-            self.assertEqual("different", web.addon_link_status(link, self.project_root / "odoo" / "addons-store" / "dromcom_mrp")[0])
+            self.assertEqual(
+                "different", web.addon_link_status(link, self.project_root / "odoo" / "addons-store" / "dromcom_mrp")[0]
+            )
 
     def test_wsl_removal_deletes_the_link_but_never_its_target(self):
         storage = self.add_module("addons-store/dromcom_mrp", "{'name': 'Dromcom MRP'}\n")
@@ -329,8 +342,10 @@ class RikaErrorMessageTests(unittest.TestCase):
         # Sous Windows, le constructeur cherche git dans WSL avec les réglages : un Mock n'y a pas sa place.
         with mock.patch("odoo_manager_core.project_creator.platform_id", return_value="linux"):
             creator = ProjectCreator(mock.Mock(), ROOT, mock.Mock())
-        with mock.patch("odoo_manager_core.project_creator.CookieJar", return_value=[SessionCookie()]), \
-                mock.patch("urllib.request.build_opener", return_value=Opener()):
+        with (
+            mock.patch("odoo_manager_core.project_creator.CookieJar", return_value=[SessionCookie()]),
+            mock.patch("urllib.request.build_opener", return_value=Opener()),
+        ):
             return creator.download_rika_project("dev06", "login", "secret", ROOT)
 
     def test_unknown_instance_explains_the_expected_name(self):

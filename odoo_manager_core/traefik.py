@@ -21,8 +21,14 @@ TRAEFIK_PROJECT_MIDDLEWARES = ("odoo-forward", "odoo-compress", "odoo-headers")
 TRAEFIK_CONFIG_FILENAMES = ("traefik.yml", "traefik.yaml", "traefik.toml")
 TRAEFIK_CONFIG_PATHS = tuple(f"/etc/traefik/{name}" for name in TRAEFIK_CONFIG_FILENAMES)
 DOCKER_PS_FIELDS = (
-    "{{.ID}}", "{{.Names}}", "{{.Image}}", "{{.State}}", "{{.Ports}}", "{{.Networks}}",
-    '{{.Label "com.docker.compose.project.working_dir"}}', "{{.Labels}}",
+    "{{.ID}}",
+    "{{.Names}}",
+    "{{.Image}}",
+    "{{.State}}",
+    "{{.Ports}}",
+    "{{.Networks}}",
+    '{{.Label "com.docker.compose.project.working_dir"}}',
+    "{{.Labels}}",
 )
 DOCKER_PORT_PATTERN = re.compile(
     r"^(?:(?P<ip>\[[0-9a-fA-F:]*\]|[0-9a-fA-F.:]*):)?(?P<host>\d+)(?:-(?P<host_end>\d+))?"
@@ -87,7 +93,9 @@ class TraefikInstance:
             return None
         if self.host_network:
             return container_port
-        candidates = [port for port in self.published if port.protocol == "tcp" and port.container_port == container_port]
+        candidates = [
+            port for port in self.published if port.protocol == "tcp" and port.container_port == container_port
+        ]
         # Une publication IPv4 ou toutes interfaces est joignable par 127.0.0.1, contrairement à [::1].
         candidates.sort(key=lambda port: port.host_ip.startswith("[") or ":" in port.host_ip)
         return candidates[0].host_port if candidates else None
@@ -100,8 +108,7 @@ class TraefikInstance:
     def missing_middlewares(self):
         labels = self.labels.lower()
         return tuple(
-            name for name in TRAEFIK_PROJECT_MIDDLEWARES
-            if f"traefik.http.middlewares.{name}.".lower() not in labels
+            name for name in TRAEFIK_PROJECT_MIDDLEWARES if f"traefik.http.middlewares.{name}.".lower() not in labels
         )
 
     def compatibility_problems(self):
@@ -188,7 +195,7 @@ def entrypoints_from_config(text):
             continue
         current = None
         child_indent = None
-        for child in lines[index + 1:]:
+        for child in lines[index + 1 :]:
             if not child.strip() or child.lstrip().startswith("#"):
                 continue
             indent = len(child) - len(child.lstrip())
@@ -214,7 +221,7 @@ def compose_service_block(text, service):
             continue
         indent = len(line) - len(line.lstrip())
         block = []
-        for child in lines[index + 1:]:
+        for child in lines[index + 1 :]:
             if child.strip() and not child.lstrip().startswith("#") and len(child) - len(child.lstrip()) <= indent:
                 break
             block.append(child)
@@ -334,7 +341,11 @@ def read_entrypoints(capture, docker_prefix, instance):
         match = re.match(r"^--config[fF]ile[=\s](.+)$", str(argument))
         if match:
             config_paths.insert(0, match.group(1).strip())
-    script = "for f in " + " ".join(shlex.quote(path) for path in config_paths) + '; do [ -f "$f" ] && cat "$f" && exit 0; done; exit 3'
+    script = (
+        "for f in "
+        + " ".join(shlex.quote(path) for path in config_paths)
+        + '; do [ -f "$f" ] && cat "$f" && exit 0; done; exit 3'
+    )
     code, output = capture([*docker_prefix, "exec", instance.container_id, "sh", "-c", script], timeout=8)
     if code == 3:
         # Sans fichier ni argument, Traefik crée un unique entrypoint `http` sur :80.

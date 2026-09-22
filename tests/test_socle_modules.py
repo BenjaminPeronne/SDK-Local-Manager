@@ -19,17 +19,21 @@ class SocleModulesTests(ModuleLayoutTests):
         (addons / "broken").symlink_to("../missing")
         (addons / "other").symlink_to(sources["valid"])
         service = mock.Mock()
+
         def execute(command, **kwargs):
             result = subprocess.run(["sh", command[-1]], capture_output=True, text=True, timeout=10)
             return result.returncode, result.stdout
+
         service.capture.side_effect = execute
         creator = web.ProjectCreator(web.SETTINGS, web.WORKSPACE, service)
         creator.settings = mock.Mock(execution_mode="wsl", wsl_distribution="Ubuntu")
-        with mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows"), \
-                mock.patch(
-                    "odoo_manager_core.project_creator.wsl_execution_path",
-                    side_effect=lambda path, distribution: str(path),
-                ):
+        with (
+            mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows"),
+            mock.patch(
+                "odoo_manager_core.project_creator.wsl_execution_path",
+                side_effect=lambda path, distribution: str(path),
+            ),
+        ):
             states = creator.module_link_states(sources, addons)
         self.assertEqual({"valid": "correct", "absent": "missing", "broken": "conflict", "other": "provided"}, states)
         self.assertEqual([], list(addons.glob(".odoo_manager_check_*")))
@@ -39,9 +43,13 @@ class SocleModulesTests(ModuleLayoutTests):
         creator = web.ProjectCreator(web.SETTINGS, web.WORKSPACE, mock.Mock())
         creator.settings = mock.Mock(execution_mode="wsl", wsl_distribution="Ubuntu")
         creator.project_service.capture.return_value = (0, "account_accountant\tcorrect\n")
-        with mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows"), \
-                mock.patch("odoo_manager_core.project_creator.wsl_execution_path", side_effect=lambda path, distribution: str(path)), \
-                mock.patch.object(creator, "path_entry_exists", side_effect=AssertionError("Windows check")):
+        with (
+            mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows"),
+            mock.patch(
+                "odoo_manager_core.project_creator.wsl_execution_path", side_effect=lambda path, distribution: str(path)
+            ),
+            mock.patch.object(creator, "path_entry_exists", side_effect=AssertionError("Windows check")),
+        ):
             states = creator.module_link_states({source.name: source}, source.parent)
         self.assertEqual({source.name: "correct"}, states)
         self.assertEqual(1, creator.project_service.capture.call_count)
@@ -53,11 +61,15 @@ class SocleModulesTests(ModuleLayoutTests):
         creator = web.ProjectCreator(web.SETTINGS, web.WORKSPACE, mock.Mock())
         creator.settings = mock.Mock(execution_mode="native", wsl_distribution="")
         creator.project_service.capture.return_value = (0, "account_accountant\tcorrect\n")
-        with mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows"), \
-                mock.patch("odoo_manager_core.project_creator.contains_wsl_symlink", return_value=True), \
-                mock.patch("odoo_manager_core.project_creator.host_executable_available", return_value=True), \
-                mock.patch("odoo_manager_core.project_creator.wsl_execution_path", side_effect=lambda path, distribution: str(path)), \
-                mock.patch.object(creator, "path_entry_exists", side_effect=AssertionError("Windows check")):
+        with (
+            mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows"),
+            mock.patch("odoo_manager_core.project_creator.contains_wsl_symlink", return_value=True),
+            mock.patch("odoo_manager_core.project_creator.host_executable_available", return_value=True),
+            mock.patch(
+                "odoo_manager_core.project_creator.wsl_execution_path", side_effect=lambda path, distribution: str(path)
+            ),
+            mock.patch.object(creator, "path_entry_exists", side_effect=AssertionError("Windows check")),
+        ):
             states = creator.module_link_states({source.name: source}, source.parent)
         self.assertEqual({source.name: "correct"}, states)
         self.assertEqual(1, creator.project_service.capture.call_count)
@@ -68,13 +80,15 @@ class SocleModulesTests(ModuleLayoutTests):
         source = self.create_enterprise_module("account_accountant")
         creator = web.ProjectCreator(web.SETTINGS, web.WORKSPACE, mock.Mock())
         creator.settings = mock.Mock(execution_mode="native", wsl_distribution="")
-        with mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows"), \
-                mock.patch("odoo_manager_core.project_creator.host_executable_available", return_value=True), \
-                mock.patch(
-                    "odoo_manager_core.project_creator.wsl_execution_path",
-                    side_effect=RuntimeError("Windows Subsystem for Linux has no installed distributions."),
-                ), \
-                mock.patch.object(creator, "path_entry_exists", return_value=False) as path_entry_exists:
+        with (
+            mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows"),
+            mock.patch("odoo_manager_core.project_creator.host_executable_available", return_value=True),
+            mock.patch(
+                "odoo_manager_core.project_creator.wsl_execution_path",
+                side_effect=RuntimeError("Windows Subsystem for Linux has no installed distributions."),
+            ),
+            mock.patch.object(creator, "path_entry_exists", return_value=False) as path_entry_exists,
+        ):
             states = creator.module_link_states({source.name: source}, source.parent)
         self.assertEqual({source.name: "missing"}, states)
         path_entry_exists.assert_called_once()
@@ -84,8 +98,12 @@ class SocleModulesTests(ModuleLayoutTests):
         source = self.create_enterprise_module("account_accountant")
         creator = web.ProjectCreator(web.SETTINGS, web.WORKSPACE, mock.Mock())
         creator.settings = mock.Mock(execution_mode="wsl", wsl_distribution="Ubuntu")
-        with mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows"), \
-                mock.patch("odoo_manager_core.project_creator.wsl_execution_path", side_effect=RuntimeError("no distribution")):
+        with (
+            mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows"),
+            mock.patch(
+                "odoo_manager_core.project_creator.wsl_execution_path", side_effect=RuntimeError("no distribution")
+            ),
+        ):
             with self.assertRaisesRegex(RuntimeError, "no distribution"):
                 creator.module_link_states({source.name: source}, source.parent)
 
@@ -94,8 +112,12 @@ class SocleModulesTests(ModuleLayoutTests):
         creator = web.ProjectCreator(web.SETTINGS, web.WORKSPACE, mock.Mock())
         creator.settings = mock.Mock(execution_mode="wsl", wsl_distribution="Ubuntu")
         creator.project_service.capture.return_value = (0, "")
-        with mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows"), \
-                mock.patch("odoo_manager_core.project_creator.wsl_execution_path", side_effect=lambda path, distribution: str(path)):
+        with (
+            mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows"),
+            mock.patch(
+                "odoo_manager_core.project_creator.wsl_execution_path", side_effect=lambda path, distribution: str(path)
+            ),
+        ):
             with self.assertRaisesRegex(RuntimeError, "depuis WSL"):
                 creator.module_link_states({source.name: source}, source.parent)
 
@@ -109,8 +131,10 @@ class SocleModulesTests(ModuleLayoutTests):
     def test_broken_link_is_not_accepted_as_success(self):
         self.create_enterprise_module("account_accountant")
         link = self.project_root / "odoo" / "addons" / "account_accountant"
+
         def create_broken(*args, **kwargs):
             link.symlink_to("../missing")
+
         with mock.patch.object(web.ProjectCreator, "link_modules", side_effect=create_broken):
             with self.assertRaisesRegex(RuntimeError, "incomplète"):
                 web.ensure_enterprise_module_links(DummyJob(), self.project)
@@ -150,13 +174,21 @@ class SocleModulesTests(ModuleLayoutTests):
         def record_install(job, flag, project, db_name, modules):
             requested.extend(modules.split(","))
 
-        with mock.patch.object(web, "ensure_enterprise_module_links", return_value={"account_accountant", "l10n_fr"}), \
-                mock.patch.object(web, "module_dirs", return_value=iter([
-                    self.create_enterprise_module("account_accountant"),
-                    self.create_enterprise_module("l10n_fr"),
-                ])), \
-                mock.patch.object(web, "installed_modules", return_value={}), \
-                mock.patch.object(web, "module_command_job", side_effect=record_install):
+        with (
+            mock.patch.object(web, "ensure_enterprise_module_links", return_value={"account_accountant", "l10n_fr"}),
+            mock.patch.object(
+                web,
+                "module_dirs",
+                return_value=iter(
+                    [
+                        self.create_enterprise_module("account_accountant"),
+                        self.create_enterprise_module("l10n_fr"),
+                    ]
+                ),
+            ),
+            mock.patch.object(web, "installed_modules", return_value={}),
+            mock.patch.object(web, "module_command_job", side_effect=record_install),
+        ):
             web.install_socle_job(DummyJob(), self.project, "test_db", "accounting_fr")
 
         self.assertEqual(["account_accountant", "l10n_fr"], requested)
@@ -170,12 +202,18 @@ class SocleModulesTests(ModuleLayoutTests):
         sale = self.create_enterprise_module("sale_management")
         calls = []
 
-        with mock.patch.object(web, "ensure_enterprise_module_links", return_value={"sale_management"}), \
-                mock.patch.object(web, "module_dirs", return_value=iter([sale])), \
-                mock.patch.object(web, "installed_modules", return_value={
+        with (
+            mock.patch.object(web, "ensure_enterprise_module_links", return_value={"sale_management"}),
+            mock.patch.object(web, "module_dirs", return_value=iter([sale])),
+            mock.patch.object(
+                web,
+                "installed_modules",
+                return_value={
                     "sale_management": {"state": "installed"},
-                }), \
-                mock.patch.object(web, "module_command_job", side_effect=lambda *args: calls.append(args)):
+                },
+            ),
+            mock.patch.object(web, "module_command_job", side_effect=lambda *args: calls.append(args)),
+        ):
             job = DummyJob()
             web.install_socle_job(job, self.project, "test_db", "sales")
 
@@ -191,13 +229,19 @@ class SocleModulesTests(ModuleLayoutTests):
             calls.append((flag, modules))
 
         job = DummyJob()
-        with mock.patch.object(web, "module_dirs", return_value=iter([alpha, beta])), \
-                mock.patch.object(web, "installed_modules", return_value={
+        with (
+            mock.patch.object(web, "module_dirs", return_value=iter([alpha, beta])),
+            mock.patch.object(
+                web,
+                "installed_modules",
+                return_value={
                     "alpha": {"state": "installed"},
                     "beta": {"state": "uninstalled"},
-                }), \
-                mock.patch.object(web, "ignored_missing_modules", return_value=set()), \
-                mock.patch.object(web, "module_command_job", side_effect=record_command):
+                },
+            ),
+            mock.patch.object(web, "ignored_missing_modules", return_value=set()),
+            mock.patch.object(web, "module_command_job", side_effect=record_command),
+        ):
             web.update_imported_modules_job(job, self.project, "test_db", "alpha,beta")
 
         self.assertEqual(calls, [("--install-module", "beta"), ("--update-module", "alpha")])
@@ -207,24 +251,30 @@ class SocleModulesTests(ModuleLayoutTests):
         mrp = self.create_enterprise_module("mrp")
         (mrp / "__manifest__.py").write_text("{'name': 'MRP', 'depends': ['stock']}\n", encoding="utf-8")
         stock = self.create_enterprise_module("stock")
-        (stock / "__manifest__.py").write_text("{'name': 'Inventory', 'depends': ['product'], 'application': True}\n", encoding="utf-8")
+        (stock / "__manifest__.py").write_text(
+            "{'name': 'Inventory', 'depends': ['product'], 'application': True}\n", encoding="utf-8"
+        )
         product = self.create_enterprise_module("product")
         calls = []
 
-        with mock.patch.object(web, "ensure_enterprise_module_links", return_value=set()), \
-                mock.patch.object(web, "module_dirs", return_value=iter([mrp, stock, product])), \
-                mock.patch.object(web, "installed_modules", return_value={}), \
-                mock.patch.object(web, "module_command_job", side_effect=lambda *args: calls.append(args[1:])):
+        with (
+            mock.patch.object(web, "ensure_enterprise_module_links", return_value=set()),
+            mock.patch.object(web, "module_dirs", return_value=iter([mrp, stock, product])),
+            mock.patch.object(web, "installed_modules", return_value={}),
+            mock.patch.object(web, "module_command_job", side_effect=lambda *args: calls.append(args[1:])),
+        ):
             job = DummyJob()
             web.install_socle_job(job, self.project, "test_db", "manufacturing")
 
         self.assertEqual([("--install-module", self.project, "test_db", "mrp")], calls)
         self.assertTrue(any("Dépendances installées en plus (2) : product, stock" in line for line in job.lines))
 
-        with mock.patch.object(web, "ensure_enterprise_module_links", return_value=set()), \
-                mock.patch.object(web, "module_dirs", return_value=iter([mrp])), \
-                mock.patch.object(web, "installed_modules", return_value={}), \
-                mock.patch.object(web, "module_command_job") as command:
+        with (
+            mock.patch.object(web, "ensure_enterprise_module_links", return_value=set()),
+            mock.patch.object(web, "module_dirs", return_value=iter([mrp])),
+            mock.patch.object(web, "installed_modules", return_value={}),
+            mock.patch.object(web, "module_command_job") as command,
+        ):
             with self.assertRaisesRegex(RuntimeError, r"stock \(requis par mrp\)"):
                 web.install_socle_job(DummyJob(), self.project, "test_db", "manufacturing")
         command.assert_not_called()
@@ -269,7 +319,9 @@ class ModuleInstallPlanTests(unittest.TestCase):
             "stock_only": graph_entry(["stock", "purchase"], auto_install=True),
         }
 
-        plan = web.module_install_plan(graph, {"account": {"state": "installed"}, "stock": {"state": "installed"}}, ["sale"])
+        plan = web.module_install_plan(
+            graph, {"account": {"state": "installed"}, "stock": {"state": "installed"}}, ["sale"]
+        )
 
         self.assertEqual(["sale_pdf", "sale_stock"], [item["name"] for item in plan["auto_installed"]])
         self.assertEqual([], plan["dependencies"])

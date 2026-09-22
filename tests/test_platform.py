@@ -120,9 +120,7 @@ class TerminalLaunchTests(unittest.TestCase):
     @mock.patch("odoo_manager_core.platform.subprocess.run")
     def test_wslpath_receives_path_without_default_shell_reparsing(self, run, path_class):
         run.return_value = mock.Mock(returncode=0, stdout="/mnt/c/Users/Demo/Odoo-projects\n", stderr="")
-        path_class.return_value.expanduser.return_value.resolve.return_value = (
-            r"C:\Users\Demo\Odoo-projects"
-        )
+        path_class.return_value.expanduser.return_value.resolve.return_value = r"C:\Users\Demo\Odoo-projects"
         settings = ManagerSettings.from_dict(
             {"execution_mode": "wsl", "wsl_distribution": "Ubuntu"},
             "/tmp/workspace",

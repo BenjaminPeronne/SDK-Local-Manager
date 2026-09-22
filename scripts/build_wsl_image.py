@@ -5,6 +5,7 @@
 que Windows importe avec `wsl --install --from-file`. L'empreinte SHA-256 accompagne
 l'archive : l'application refuse d'importer une image qui ne correspond pas.
 """
+
 import argparse
 import hashlib
 import json
@@ -80,19 +81,23 @@ def build(version, output_directory=None, keep_image=False):
     output_directory.mkdir(parents=True, exist_ok=True)
     tag = image_tag(version)
     # L'image doit être amd64 même construite depuis un Mac ARM : WSL 2 n'exécute que x86-64.
-    run([
-        "docker", "build",
-        "--platform", "linux/amd64",
-        "--build-arg", f"SDK_MANAGER_VERSION={version}",
-        "-t", tag,
-        str(WSL_DIRECTORY),
-    ])
+    run(
+        [
+            "docker",
+            "build",
+            "--platform",
+            "linux/amd64",
+            "--build-arg",
+            f"SDK_MANAGER_VERSION={version}",
+            "-t",
+            tag,
+            str(WSL_DIRECTORY),
+        ]
+    )
     archive = output_directory / image_file_name(version)
     export_container_filesystem(tag, archive)
     digest = sha256_of(archive)
-    (output_directory / checksum_file_name(version)).write_text(
-        f"{digest}  {archive.name}\n", encoding="utf-8"
-    )
+    (output_directory / checksum_file_name(version)).write_text(f"{digest}  {archive.name}\n", encoding="utf-8")
     if not keep_image:
         subprocess.run(["docker", "image", "rm", tag], check=False, stdout=subprocess.DEVNULL)
     size_mb = archive.stat().st_size / (1024 * 1024)

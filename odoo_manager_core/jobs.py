@@ -344,7 +344,9 @@ def mark_docker_arguments(prefix, arguments):
     detached = False
     while index < len(arguments) and str(arguments[index]).startswith("-"):
         option = str(arguments[index])
-        if option in {"-d", "--detach"} or (option.startswith("-") and not option.startswith("--") and "d" in option[1:]):
+        if option in {"-d", "--detach"} or (
+            option.startswith("-") and not option.startswith("--") and "d" in option[1:]
+        ):
             detached = True
         index += 2 if option in DOCKER_EXEC_VALUE_OPTIONS else 1
     if detached or index >= len(arguments):

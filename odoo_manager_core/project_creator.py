@@ -64,6 +64,8 @@ def abandoned_staging_entries(workspace, now=None, min_age_seconds=ABANDONED_STA
             continue
         entries.append({"path": str(entry), "name": entry.name, "modified_at": modified_at})
     return entries
+
+
 RIKA_BASE_URL = "https://rika.sudokeys.com/"
 MAX_RIKA_ARCHIVE_BYTES = 100 * 1024 * 1024 * 1024
 MAX_RIKA_ARCHIVE_ENTRIES = 2_000_000
@@ -72,9 +74,7 @@ MAX_RIKA_ARCHIVE_ENTRIES = 2_000_000
 def validate_new_project_name(name):
     name = str(name or "").strip()
     if not PROJECT_NAME_RE.fullmatch(name) or name in {".", ".."}:
-        raise ValueError(
-            "Nom de projet invalide. Utilise des lettres, chiffres, points, tirets ou underscores."
-        )
+        raise ValueError("Nom de projet invalide. Utilise des lettres, chiffres, points, tirets ou underscores.")
     if name.startswith(".odoo_manager"):
         raise ValueError("Ce nom de projet est réservé au gestionnaire.")
     return name
@@ -103,9 +103,7 @@ def validate_git_ref(branch):
 def validate_gitlab_repository(url):
     url = str(url or "").strip()
     if not SUDOKEYS_GITLAB_RE.fullmatch(url):
-        raise ValueError(
-            "URL GitLab SSH invalide. Utilise une URL du GitLab Sudokeys terminée par .git."
-        )
+        raise ValueError("URL GitLab SSH invalide. Utilise une URL du GitLab Sudokeys terminée par .git.")
     return url
 
 
@@ -149,7 +147,9 @@ class ProjectCreator:
         needs_wsl_probe = platform_id() == "windows" and (bool(detected_wsl) or not native_git)
         wsl_distribution = find_wsl_executable_distribution("git", distribution) if needs_wsl_probe else None
         wsl_git = wsl_distribution is not None
-        self.git_wsl_distribution = wsl_distribution if ((detected_wsl and wsl_git) or (not native_git and wsl_git)) else None
+        self.git_wsl_distribution = (
+            wsl_distribution if ((detected_wsl and wsl_git) or (not native_git and wsl_git)) else None
+        )
 
     @property
     def command_cwd(self):
@@ -239,9 +239,7 @@ class ProjectCreator:
         reference = self.reference_repository(repository)
         if reference is not None:
             self.log(log, f"Réutilisation des objets Git locaux: {reference}")
-            clone_arguments.extend(
-                ["--reference-if-able", self.command_path(reference), "--dissociate"]
-            )
+            clone_arguments.extend(["--reference-if-able", self.command_path(reference), "--dissociate"])
         clone_arguments.extend([repository, self.command_path(destination)])
         command = self.git(*clone_arguments)
         started_at = time.monotonic()
@@ -265,8 +263,7 @@ class ProjectCreator:
             dirs[:] = sorted(
                 directory
                 for directory in dirs
-                if not directory.startswith(".")
-                and directory not in {"__pycache__", "node_modules", "setup"}
+                if not directory.startswith(".") and directory not in {"__pycache__", "node_modules", "setup"}
             )
             if "__manifest__.py" in files or "__openerp__.py" in files:
                 modules.append(current_path)
@@ -323,9 +320,7 @@ class ProjectCreator:
         if platform_id() != "windows":
             return False
         return (
-            self.wsl_workspace_links()
-            or contains_wsl_symlink(addons_dir)
-            or not native_symlinks_supported(addons_dir)
+            self.wsl_workspace_links() or contains_wsl_symlink(addons_dir) or not native_symlinks_supported(addons_dir)
         )
 
     def wsl_link_paths(self, candidates, addons_dir):
@@ -369,39 +364,51 @@ class ProjectCreator:
             for name, source in candidates.items():
                 link = shlex.quote(f"{addons_wsl}/{name}")
                 target = shlex.quote(f"{source_parents[source.parent]}/{source.name}")
-                lines.extend([
-                    f"if [ -L {link} ] && [ -d {link} ] && [ \"$(readlink -f -- {link})\" = \"$(readlink -f -- {target})\" ]; then",
-                    f"printf '%s\\t%s\\n' {shlex.quote(name)} correct",
-                    f"elif [ -L {link} ] && [ -d {link} ] && {{ [ -f {link}/__manifest__.py ] || [ -f {link}/__openerp__.py ]; }}; then",
-                    f"printf '%s\\t%s\\n' {shlex.quote(name)} provided",
-                    f"elif [ -e {link} ] || [ -L {link} ]; then",
-                    f"printf '%s\\t%s\\n' {shlex.quote(name)} conflict",
-                    "else",
-                    f"printf '%s\\t%s\\n' {shlex.quote(name)} missing",
-                    "fi",
-                ])
+                lines.extend(
+                    [
+                        f'if [ -L {link} ] && [ -d {link} ] && [ "$(readlink -f -- {link})" = "$(readlink -f -- {target})" ]; then',
+                        f"printf '%s\\t%s\\n' {shlex.quote(name)} correct",
+                        f"elif [ -L {link} ] && [ -d {link} ] && {{ [ -f {link}/__manifest__.py ] || [ -f {link}/__openerp__.py ]; }}; then",
+                        f"printf '%s\\t%s\\n' {shlex.quote(name)} provided",
+                        f"elif [ -e {link} ] || [ -L {link} ]; then",
+                        f"printf '%s\\t%s\\n' {shlex.quote(name)} conflict",
+                        "else",
+                        f"printf '%s\\t%s\\n' {shlex.quote(name)} missing",
+                        "fi",
+                    ]
+                )
             # Enterprise contains hundreds of modules: do not exceed Windows'
             # command-line limit by passing the generated script with sh -c.
             script_path = None
             try:
                 with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8", newline="\n", suffix=".sh",
-                    prefix=".odoo_manager_check_", dir=addons_dir, delete=False,
+                    mode="w",
+                    encoding="utf-8",
+                    newline="\n",
+                    suffix=".sh",
+                    prefix=".odoo_manager_check_",
+                    dir=addons_dir,
+                    delete=False,
                 ) as script:
                     script_path = Path(script.name)
                     script.write("\n".join(lines) + "\n")
                 code, output = self.project_service.capture(
                     [*wsl_command_prefix(distribution), "sh", f"{addons_wsl}/{script_path.name}"],
-                    cwd=self.command_cwd, timeout=60,
+                    cwd=self.command_cwd,
+                    timeout=60,
                 )
             finally:
                 if script_path is not None:
                     script_path.unlink(missing_ok=True)
             states = dict(line.split("\t", 1) for line in output.splitlines() if "\t" in line)
-            if code != 0 or set(states) != set(candidates) or any(
-                state not in {"correct", "provided", "conflict", "missing"} for state in states.values()
+            if (
+                code != 0
+                or set(states) != set(candidates)
+                or any(state not in {"correct", "provided", "conflict", "missing"} for state in states.values())
             ):
-                raise RuntimeError("Impossible de vérifier les liens Enterprise depuis WSL. Vérifie l'accès au workspace et réessaie.")
+                raise RuntimeError(
+                    "Impossible de vérifier les liens Enterprise depuis WSL. Vérifie l'accès au workspace et réessaie."
+                )
             return states
         states = {}
         for name, source in candidates.items():
@@ -410,7 +417,11 @@ class ProjectCreator:
                 states[name] = "missing"
             elif link.is_symlink() and link.is_dir() and link.resolve() == source.resolve():
                 states[name] = "correct"
-            elif link.is_symlink() and link.is_dir() and ((link / "__manifest__.py").is_file() or (link / "__openerp__.py").is_file()):
+            elif (
+                link.is_symlink()
+                and link.is_dir()
+                and ((link / "__manifest__.py").is_file() or (link / "__openerp__.py").is_file())
+            ):
                 states[name] = "provided"
             else:
                 states[name] = "conflict"
@@ -510,7 +521,7 @@ class ProjectCreator:
                 lines.append("fi")
             if index % 100 == 0 or index == total:
                 lines.append(f"printf '%s\\n' 'Préparation des liens: {index}/{total}'")
-        lines.append("printf 'Liens terminés: %s créé(s), %s conservé(s).\\n' \"$linked\" \"$skipped\"")
+        lines.append('printf \'Liens terminés: %s créé(s), %s conservé(s).\\n\' "$linked" "$skipped"')
 
         try:
             with script_path.open("w", encoding="utf-8", newline="\n") as script:
@@ -637,11 +648,13 @@ class ProjectCreator:
         cookies = CookieJar()
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
         archive_requested = False
-        auth_payload = urllib.parse.urlencode({
-            "name": login,
-            "password": password,
-            "submit": "Connexion",
-        }).encode("utf-8")
+        auth_payload = urllib.parse.urlencode(
+            {
+                "name": login,
+                "password": password,
+                "submit": "Connexion",
+            }
+        ).encode("utf-8")
         try:
             self.log(log, "Connexion sécurisée à RIKA...")
             with opener.open(
@@ -667,10 +680,13 @@ class ProjectCreator:
 
             archive = Path(temporary) / f"{instance}.zip"
             self.log(log, f"Téléchargement de la copie RIKA de {instance}...")
-            with opener.open(
-                urllib.parse.urljoin(RIKA_BASE_URL, f"{encoded_instance}.zip"),
-                timeout=300,
-            ) as response, archive.open("wb") as output:
+            with (
+                opener.open(
+                    urllib.parse.urljoin(RIKA_BASE_URL, f"{encoded_instance}.zip"),
+                    timeout=300,
+                ) as response,
+                archive.open("wb") as output,
+            ):
                 content_length = int(response.headers.get("Content-Length") or 0)
                 if content_length > MAX_RIKA_ARCHIVE_BYTES:
                     raise RuntimeError("La copie RIKA dépasse la taille maximale autorisée.")
@@ -789,9 +805,7 @@ class ProjectCreator:
                 self.clone(repository_url, repository_branch, custom_dir, log=log)
                 custom_count = self.link_modules(custom_dir, addons_dir, log=log, replace=True)
                 if custom_count == 0:
-                    raise RuntimeError(
-                        "Aucun module Odoo (__manifest__.py) n'a été trouvé dans le dépôt d'addons."
-                    )
+                    raise RuntimeError("Aucun module Odoo (__manifest__.py) n'a été trouvé dans le dépôt d'addons.")
 
             self.configure_template(staged_project, name)
             staged_project.replace(target)

@@ -21,11 +21,18 @@ TRAEFIK_MIDDLEWARE_LABELS = (
 
 
 def has_command_tail(commands, tail):
-    return any(command[-len(tail):] == tail for command in commands)
+    return any(command[-len(tail) :] == tail for command in commands)
 
 
-def traefik_container(name="traefik", state="running", ports="127.0.0.1:80->80/tcp", networks="traefik-local",
-                      working_dir="", labels=TRAEFIK_MIDDLEWARE_LABELS, container_id=None):
+def traefik_container(
+    name="traefik",
+    state="running",
+    ports="127.0.0.1:80->80/tcp",
+    networks="traefik-local",
+    working_dir="",
+    labels=TRAEFIK_MIDDLEWARE_LABELS,
+    container_id=None,
+):
     """Ligne `docker ps` d'un conteneur Traefik, telle que la lit la détection."""
     return "\t".join((container_id or f"id-{name}", name, "traefik:3.6", state, ports, networks, working_dir, labels))
 
@@ -189,9 +196,10 @@ class ProjectServiceTests(unittest.TestCase):
             return original_capture(command, cwd, timeout)
 
         self.runner.capture = capture
-        with patch.object(self.service, "container_status", return_value="exited"), patch.object(
-            self.service, "wait_for_postgres"
-        ) as wait_for_postgres:
+        with (
+            patch.object(self.service, "container_status", return_value="exited"),
+            patch.object(self.service, "wait_for_postgres") as wait_for_postgres,
+        ):
             result = self.service.recover_macos_postgres_bootstrap("DEMO", self.project_path, log=lambda _line: None)
 
         self.assertEqual(result, 0)
@@ -199,7 +207,9 @@ class ProjectServiceTests(unittest.TestCase):
         commands = [command for command, _cwd in self.runner.streams]
         self.assertTrue(has_command_tail(commands, ["compose", "up", "-d", "--no-recreate"]))
         captures = [command for command, _cwd, _timeout in self.runner.captures]
-        self.assertTrue(any("CREATE ROLE \"odoo\"" in command[-1] for command in captures if command and "psql" in command))
+        self.assertTrue(
+            any('CREATE ROLE "odoo"' in command[-1] for command in captures if command and "psql" in command)
+        )
         self.assertFalse(has_command_tail(commands, ["compose", "up", "--pull", "always", "-d"]))
 
     def test_start_project_creates_missing_containers_without_forced_pull(self):
@@ -267,7 +277,9 @@ class ProjectServiceTests(unittest.TestCase):
         )
         for probe_result, expected in cases:
             with self.subTest(probe_result=probe_result):
-                service = ProjectService(self.settings, self.root, runner=self.runner, http_probe=lambda _url, result=probe_result: result)
+                service = ProjectService(
+                    self.settings, self.root, runner=self.runner, http_probe=lambda _url, result=probe_result: result
+                )
                 with self.assertRaises(RuntimeError) as raised:
                     service.wait_project_http("DEMO", max_wait=4, log=lambda _line: None, sleep=lambda _seconds: None)
                 for fragment in expected:
@@ -280,14 +292,14 @@ class ProjectServiceTests(unittest.TestCase):
             "services:\n"
             "  postgresql-DEMO:\n"
             "    healthcheck:\n"
-            "      test: [\"CMD-SHELL\", \"pg_isready -U postgres\"]\n"
+            '      test: ["CMD-SHELL", "pg_isready -U postgres"]\n'
             "      interval: 3s\n"
             "      retries: 5\n"
             "    environment:\n"
             "      - POSTGRES_PASSWORD=postgres\n"
             "  odoo-DEMO:\n"
             "    healthcheck:\n"
-            "      test: [\"CMD\", \"curl\", \"-f\", \"http://localhost:8069\"]\n",
+            '      test: ["CMD", "curl", "-f", "http://localhost:8069"]\n',
             encoding="utf-8",
         )
         logs = []
@@ -352,7 +364,8 @@ class ProjectServiceTests(unittest.TestCase):
         self.runner.odoo_server_running = False
         original_capture = self.runner.capture
         self.runner.capture = lambda command, cwd=None, timeout=10: (
-            (2, "sans réponse : ConnectionRefusedError") if "python3" in command and "/web/login" in command[-2]
+            (2, "sans réponse : ConnectionRefusedError")
+            if "python3" in command and "/web/login" in command[-2]
             else original_capture(command, cwd, timeout)
         )
 
@@ -432,7 +445,8 @@ class ProjectServiceTests(unittest.TestCase):
 
     def odoo_launches(self):
         return [
-            command for command, _cwd in self.runner.streams
+            command
+            for command, _cwd in self.runner.streams
             if command[1:3] == ["exec", "-e"] and "LOG_ATTACHMENTS=False" in command
         ]
 
@@ -486,13 +500,15 @@ class ProjectServiceTests(unittest.TestCase):
     def test_stopped_server_reports_the_error_of_the_current_run_only(self):
         self.runner.odoo_port_ready = False
         self.runner.odoo_states = ["exited:255"]
-        odoo_log = "\n".join((
-            "2026-09-15 19:41:21,556 379 ERROR PROTEX odoo.http: Exception during request handling.",
-            "FileNotFoundError: [Errno 2] No such file or directory: '/home/odoo/srv/data/filestore/old'",
-            "2026-09-17 14:17:31,000 90 INFO ? odoo: Odoo version 17.0",
-            "2026-09-17 14:17:33,000 90 CRITICAL PROTEX odoo.service.server: Failed to initialize database `PROTEX`.",
-            "psycopg2.OperationalError: connection to server at \"postgresql-DEMO\" failed",
-        ))
+        odoo_log = "\n".join(
+            (
+                "2026-09-15 19:41:21,556 379 ERROR PROTEX odoo.http: Exception during request handling.",
+                "FileNotFoundError: [Errno 2] No such file or directory: '/home/odoo/srv/data/filestore/old'",
+                "2026-09-17 14:17:31,000 90 INFO ? odoo: Odoo version 17.0",
+                "2026-09-17 14:17:33,000 90 CRITICAL PROTEX odoo.service.server: Failed to initialize database `PROTEX`.",
+                'psycopg2.OperationalError: connection to server at "postgresql-DEMO" failed',
+            )
+        )
         original_capture = self.runner.capture
         self.runner.capture = lambda command, cwd=None, timeout=10: (
             (0, odoo_log) if "tail -n 120" in command[-1] else original_capture(command, cwd, timeout)
@@ -528,13 +544,19 @@ class ProjectServiceTests(unittest.TestCase):
 
         reason = ProjectService.odoo_command_failure_reason(lines)
 
-        self.assertTrue(reason.endswith("res_config_settings_views.xml:3 — Le champ `payslip_generate_and_send_trigger` n'existe pas"))
+        self.assertTrue(
+            reason.endswith(
+                "res_config_settings_views.xml:3 — Le champ `payslip_generate_and_send_trigger` n'existe pas"
+            )
+        )
 
     def test_cancelled_start_stops_only_containers_that_were_stopped_before(self):
         from odoo_manager_core import jobs
 
-        for statuses, expected_stop in (({"odoo-DEMO": "exited", "postgresql-DEMO": "running"}, True),
-                                        ({"odoo-DEMO": "running", "postgresql-DEMO": "running"}, False)):
+        for statuses, expected_stop in (
+            ({"odoo-DEMO": "exited", "postgresql-DEMO": "running"}, True),
+            ({"odoo-DEMO": "running", "postgresql-DEMO": "running"}, False),
+        ):
             with self.subTest(statuses=statuses):
                 self.runner.streams.clear()
                 self.runner.statuses = dict(statuses)
@@ -624,8 +646,10 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertEqual(["docker-compose.yml"], sorted(path.name for path in traefik.iterdir()))
 
     def test_traefik_ports_are_left_unchanged_when_override_is_unsupported(self):
-        for version, compose_text in (((2, 20, 0), "services:\n  traefik:\n    image: traefik\n"),
-                                      ((2, 29, 1), "services:\n  proxy:\n    image: traefik\n")):
+        for version, compose_text in (
+            ((2, 20, 0), "services:\n  traefik:\n    image: traefik\n"),
+            ((2, 29, 1), "services:\n  proxy:\n    image: traefik\n"),
+        ):
             with self.subTest(version=version):
                 self.runner.streams.clear()
                 service, traefik = self.make_traefik_service(compose_text)
@@ -640,11 +664,17 @@ class ProjectServiceTests(unittest.TestCase):
                 traefik.parent.rmdir()
 
     def test_traefik_custom_host_port_is_kept_and_used_for_project_urls(self):
-        service, traefik = self.make_traefik_service('services:\n  traefik:\n    container_name: traefik\n    ports:\n      - "8080:80"\n')
-        (self.project_path / "compose.yml").write_text("labels:\n  - rule=Host(`dev.DEMO.localhost`)\n", encoding="utf-8")
+        service, traefik = self.make_traefik_service(
+            'services:\n  traefik:\n    container_name: traefik\n    ports:\n      - "8080:80"\n'
+        )
+        (self.project_path / "compose.yml").write_text(
+            "labels:\n  - rule=Host(`dev.DEMO.localhost`)\n", encoding="utf-8"
+        )
         managed = str(traefik)
         self.runner.traefik_containers = [traefik_container(state="exited", ports="", working_dir=managed)]
-        self.runner.traefik_containers_after_up = [traefik_container(ports="127.0.0.1:8080->80/tcp", working_dir=managed)]
+        self.runner.traefik_containers_after_up = [
+            traefik_container(ports="127.0.0.1:8080->80/tcp", working_dir=managed)
+        ]
         logs = []
 
         self.assertEqual("http://dev.DEMO.localhost:8080/", service.project_url("DEMO"))
@@ -658,9 +688,13 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertEqual("http://dev.DEMO.localhost:8080/", service.project_url("DEMO"))
 
     def test_existing_compatible_traefik_is_reused_instead_of_starting_a_second_one(self):
-        service, _traefik = self.make_traefik_service("services:\n  traefik:\n    container_name: traefik\n    ports:\n      - 80:80\n")
+        service, _traefik = self.make_traefik_service(
+            "services:\n  traefik:\n    container_name: traefik\n    ports:\n      - 80:80\n"
+        )
         self.runner.traefik_containers = [
-            traefik_container(name="proxy", ports="0.0.0.0:8000->80/tcp, :::8000->80/tcp", working_dir="/home/demo/proxy"),
+            traefik_container(
+                name="proxy", ports="0.0.0.0:8000->80/tcp, :::8000->80/tcp", working_dir="/home/demo/proxy"
+            ),
         ]
         logs = []
 
@@ -671,7 +705,9 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertEqual("http://dev.DEMO.localhost:8000/", service.project_url("DEMO"))
 
     def test_incompatible_traefik_holding_the_port_stops_startup_immediately(self):
-        service, _traefik = self.make_traefik_service("services:\n  traefik:\n    container_name: traefik\n    ports:\n      - 80:80\n")
+        service, _traefik = self.make_traefik_service(
+            "services:\n  traefik:\n    container_name: traefik\n    ports:\n      - 80:80\n"
+        )
         self.runner.traefik_containers = [
             traefik_container(name="edge", ports="0.0.0.0:80->80/tcp", networks="proxy", labels=""),
         ]
@@ -690,8 +726,12 @@ class ProjectServiceTests(unittest.TestCase):
     def test_port_used_outside_docker_names_its_owner_without_running_compose(self):
         traefik = self.root / "docker-local-tools" / "traefik"
         traefik.mkdir(parents=True)
-        (traefik / "docker-compose.yml").write_text("services:\n  traefik:\n    ports:\n      - 80:80\n", encoding="utf-8")
-        service = ProjectService(self.settings, self.root, traefik_dir=traefik, runner=self.runner, port_in_use=lambda port: port == 80)
+        (traefik / "docker-compose.yml").write_text(
+            "services:\n  traefik:\n    ports:\n      - 80:80\n", encoding="utf-8"
+        )
+        service = ProjectService(
+            self.settings, self.root, traefik_dir=traefik, runner=self.runner, port_in_use=lambda port: port == 80
+        )
         self.runner.published_port_owners = {"80": "nginx-legacy"}
 
         with self.assertRaises(RuntimeError) as raised:
@@ -701,8 +741,12 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertFalse(self.runner.streams)
 
     def test_foreign_stopped_container_with_traefik_name_is_reported_before_compose(self):
-        service, traefik = self.make_traefik_service("services:\n  traefik:\n    container_name: traefik\n    ports:\n      - 80:80\n")
-        self.runner.traefik_containers = [traefik_container(state="exited", ports="", working_dir="/old/docker-local-tools/traefik")]
+        service, traefik = self.make_traefik_service(
+            "services:\n  traefik:\n    container_name: traefik\n    ports:\n      - 80:80\n"
+        )
+        self.runner.traefik_containers = [
+            traefik_container(state="exited", ports="", working_dir="/old/docker-local-tools/traefik")
+        ]
 
         with self.assertRaises(RuntimeError) as raised:
             service.start_traefik(log=lambda _line: None)
@@ -739,7 +783,9 @@ class ProjectServiceTests(unittest.TestCase):
                 self.runner.traefik_containers = containers
                 probes = []
                 service = ProjectService(
-                    self.settings, self.root, runner=self.runner,
+                    self.settings,
+                    self.root,
+                    runner=self.runner,
                     http_probe=lambda url, result=probe_result, probes=probes: probes.append(url) or result,
                 )
 
@@ -755,7 +801,9 @@ class ProjectServiceTests(unittest.TestCase):
         self.runner.traefik_containers = [traefik_container()]
         probes = []
         service = ProjectService(
-            self.settings, self.root, runner=self.runner,
+            self.settings,
+            self.root,
+            runner=self.runner,
             http_probe=lambda url: probes.append(url) or (0, "reset"),
         )
 
@@ -787,10 +835,14 @@ class ProjectServiceTests(unittest.TestCase):
         commands = [command for command, _cwd in self.runner.streams]
         update = next(command for command in commands if any("--stop-after-init" in argument for argument in command))
         self.assertEqual(update[-3:-1], ["bash", "-lc"])
-        self.assertIn("odoo -c /home/odoo/srv/conf/odoo.conf -d PROTEX_20812 -u sale_custom --stop-after-init", update[-1])
+        self.assertIn(
+            "odoo -c /home/odoo/srv/conf/odoo.conf -d PROTEX_20812 -u sale_custom --stop-after-init", update[-1]
+        )
         self.assertIn("| tee /home/odoo/srv/data/odoo-manager-module-", update[-1])
         self.assertIn('exit "${PIPESTATUS[0]}"', update[-1])
-        self.assertTrue(any("Équivalent: odoo -d PROTEX_20812 -u sale_custom --stop-after-init" in line for line in logs))
+        self.assertTrue(
+            any("Équivalent: odoo -d PROTEX_20812 -u sale_custom --stop-after-init" in line for line in logs)
+        )
         self.assertTrue(any("Redémarrage du serveur Odoo" in line for line in logs))
 
     def test_module_update_failure_reports_odoo_error_after_restart(self):
@@ -807,7 +859,11 @@ class ProjectServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "ModuleNotFoundError.*missing_dependency"):
             self.service.run_odoo_module_command(
-                "DEMO", "demo", "all", option="-u", log=logs.append,
+                "DEMO",
+                "demo",
+                "all",
+                option="-u",
+                log=logs.append,
             )
 
         self.assertTrue(any("Redémarrage du serveur Odoo" in line for line in logs))
@@ -828,11 +884,13 @@ class ProjectServiceTests(unittest.TestCase):
             self.service.run_odoo_module_command("DEMO", "demo", "all", log=lambda _line: None)
 
     def test_info_filestore_traceback_is_not_reported_as_module_failure(self):
-        reason = self.service.odoo_command_failure_reason([
-            "2026-09-15 13:29:13 INFO demo ir_attachment: _file_gc could not unlink",
-            "Traceback (most recent call last):",
-            "FileNotFoundError: missing filestore item",
-        ])
+        reason = self.service.odoo_command_failure_reason(
+            [
+                "2026-09-15 13:29:13 INFO demo ir_attachment: _file_gc could not unlink",
+                "Traceback (most recent call last):",
+                "FileNotFoundError: missing filestore item",
+            ]
+        )
         self.assertIn("Cause non présente", reason)
 
     def test_module_update_failure_without_odoo_output_points_to_job_logs(self):
@@ -843,7 +901,11 @@ class ProjectServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Cause non présente.*Logs de cette tâche"):
             self.service.run_odoo_module_command(
-                "DEMO", "demo", "all", option="-u", log=lambda _line: None,
+                "DEMO",
+                "demo",
+                "all",
+                option="-u",
+                log=lambda _line: None,
             )
 
     def test_module_update_reneutralizes_an_already_neutralized_database_before_restart(self):
@@ -869,13 +931,15 @@ class ProjectServiceTests(unittest.TestCase):
         )
 
         commands = [command for command, _cwd in self.runner.streams]
-        update_index = next(index for index, command in enumerate(commands) if any("--stop-after-init" in argument for argument in command))
+        update_index = next(
+            index
+            for index, command in enumerate(commands)
+            if any("--stop-after-init" in argument for argument in command)
+        )
         neutralize_index = next(
             index for index, command in enumerate(commands) if "ODOO_MANAGER_NEUTRALIZATION_DONE" in command[-1]
         )
-        restart_index = next(
-            index for index, command in enumerate(commands) if ODOO_STARTUP_LOG in command[-1]
-        )
+        restart_index = next(index for index, command in enumerate(commands) if ODOO_STARTUP_LOG in command[-1])
         self.assertLess(update_index, neutralize_index)
         self.assertLess(neutralize_index, restart_index)
         self.assertTrue(any("nouvelle passe après l'opération module" in line for line in logs))
@@ -911,16 +975,23 @@ class ProjectServiceTests(unittest.TestCase):
         logs = []
 
         self.service.run_odoo_module_command(
-            "DEMO", "PROTEX_20812", "sale_custom", option="-u", log=logs.append, overwrite_translations=True,
+            "DEMO",
+            "PROTEX_20812",
+            "sale_custom",
+            option="-u",
+            log=logs.append,
+            overwrite_translations=True,
         )
 
         commands = [command for command, _cwd in self.runner.streams]
         update = next(command for command in commands if any("--stop-after-init" in argument for argument in command))
         self.assertIn("-u sale_custom --i18n-overwrite --stop-after-init", update[-1])
-        self.assertTrue(any(
-            "Équivalent: odoo -d PROTEX_20812 -u sale_custom --i18n-overwrite --stop-after-init" in line
-            for line in logs
-        ))
+        self.assertTrue(
+            any(
+                "Équivalent: odoo -d PROTEX_20812 -u sale_custom --i18n-overwrite --stop-after-init" in line
+                for line in logs
+            )
+        )
 
     def test_asset_regeneration_unlinks_web_asset_attachments(self):
         self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
@@ -1020,9 +1091,7 @@ class ProjectServiceTests(unittest.TestCase):
             )
 
         self.assertTrue(any("Redémarrage du serveur Odoo" in line for line in logs))
-        self.assertTrue(
-            any(ODOO_STARTUP_LOG in command[-1] for command, _cwd in self.runner.streams)
-        )
+        self.assertTrue(any(ODOO_STARTUP_LOG in command[-1] for command, _cwd in self.runner.streams))
 
     @patch("odoo_manager_core.platform.wsl_execution_path", return_value="/home/demo/Odoo-projects")
     @patch("odoo_manager_core.project_service.platform.system", return_value="Windows")
@@ -1170,7 +1239,9 @@ class ProjectServiceTests(unittest.TestCase):
         self.service.update_project("DEMO", log=lambda _line: None)
 
         commands = [command for command, _cwd in self.runner.streams]
-        self.assertTrue(any(Path(command[0]).stem.lower() == "git" and command[1:] == ["pull", "--ff-only"] for command in commands))
+        self.assertTrue(
+            any(Path(command[0]).stem.lower() == "git" and command[1:] == ["pull", "--ff-only"] for command in commands)
+        )
         self.assertTrue(has_command_tail(commands, ["compose", "pull"]))
         self.assertTrue(has_command_tail(commands, ["compose", "up", "-d", "--no-recreate"]))
 
@@ -1211,7 +1282,9 @@ class ProjectServiceTests(unittest.TestCase):
         service.install_traefik("ssh://git@example.invalid/tools.git", log=lambda _line: None)
 
         commands = [command for command, _cwd in self.runner.streams]
-        self.assertTrue(any(Path(command[0]).stem.lower() == "git" and command[1:] == ["pull", "--ff-only"] for command in commands))
+        self.assertTrue(
+            any(Path(command[0]).stem.lower() == "git" and command[1:] == ["pull", "--ff-only"] for command in commands)
+        )
         self.assertTrue(has_command_tail(commands, ["compose", "up", "-d"]))
         self.assertFalse(any(command[0] == "sh" for command in commands))
 

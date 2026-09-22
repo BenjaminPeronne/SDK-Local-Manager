@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Verify a real Electron renderer and its backend using an isolated workspace."""
+
 import argparse
 import json
 import os
@@ -33,14 +34,22 @@ def main():
         workspace.mkdir()
         report = root / "report.json"
         env = os.environ.copy()
-        env.update({"ODOO_WORKSPACE": str(workspace), "ODOO_MANAGER_CONFIG_DIR": str(root / "config"),
-                    "ODOO_MANAGER_LOG_DIR": str(root / "logs"), "ODOO_MANAGER_SMOKE_REPORT": str(report)})
+        env.update(
+            {
+                "ODOO_WORKSPACE": str(workspace),
+                "ODOO_MANAGER_CONFIG_DIR": str(root / "config"),
+                "ODOO_MANAGER_LOG_DIR": str(root / "logs"),
+                "ODOO_MANAGER_SMOKE_REPORT": str(report),
+            }
+        )
         env.pop("ODOO_MANAGER_CONFIG", None)
         env.pop("ELECTRON_RUN_AS_NODE", None)
         try:
             result = subprocess.run([str(application)], env=env, capture_output=True, text=True, timeout=args.timeout)
         except subprocess.TimeoutExpired as error:
-            raise SystemExit(f"L’application ne termine pas son smoke test après {args.timeout}s: {error.stderr}") from error
+            raise SystemExit(
+                f"L’application ne termine pas son smoke test après {args.timeout}s: {error.stderr}"
+            ) from error
         payload = json.loads(report.read_text()) if report.exists() else {"ok": False, "error": "Rapport absent"}
         if result.returncode or not payload.get("ok"):
             raise SystemExit(json.dumps(payload, indent=2) + "\n" + result.stdout + "\n" + result.stderr)

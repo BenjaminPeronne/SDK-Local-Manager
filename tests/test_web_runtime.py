@@ -96,7 +96,9 @@ class LocalApiRequestGuardTests(unittest.TestCase):
     def post_report(self, message, headers):
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
         body = json.dumps({"message": message})
-        connection.request("POST", "/api/errors/report", body=body, headers={"Host": f"127.0.0.1:{self.port}", **headers})
+        connection.request(
+            "POST", "/api/errors/report", body=body, headers={"Host": f"127.0.0.1:{self.port}", **headers}
+        )
         status = connection.getresponse().status
         connection.close()
         return status
@@ -117,7 +119,9 @@ class LocalApiRequestGuardTests(unittest.TestCase):
 
     def test_trusted_clients_and_json_content_type_are_required(self):
         self.assertEqual(201, self.post_report("electron", {"Origin": "app://sdk", "Content-Type": "application/json"}))
-        self.assertEqual(201, self.post_report("next-dev", {"Origin": "http://localhost:3000", "Content-Type": "application/json"}))
+        self.assertEqual(
+            201, self.post_report("next-dev", {"Origin": "http://localhost:3000", "Content-Type": "application/json"})
+        )
         self.assertEqual(201, self.post_report("local-client", {"Content-Type": "application/json"}))
         self.assertEqual(400, self.post_report("no-json", {"Origin": "app://sdk", "Content-Type": "text/plain"}))
         self.assertTrue(self.logged("electron") and self.logged("next-dev") and self.logged("local-client"))
@@ -210,7 +214,12 @@ class OutputProgressTests(unittest.TestCase):
         cases = {
             "remote: Compressing objects:  45% (9/20)": ("Compression des objets", 9, 20, True),
             "Receiving objects:  17% (2451/14000), 12.00 MiB | 3.00 MiB/s": ("Réception des objets", 2451, 14000, True),
-            "Receiving objects: 100% (14000/14000), 48.00 MiB | 3.00 MiB/s, done.": ("Réception des objets", 14000, 14000, False),
+            "Receiving objects: 100% (14000/14000), 48.00 MiB | 3.00 MiB/s, done.": (
+                "Réception des objets",
+                14000,
+                14000,
+                False,
+            ),
             "Resolving deltas:  60% (600/1000)": ("Application des différences", 600, 1000, True),
             "Updating files:  99% (1400/1416)": ("Écriture des fichiers", 1400, 1416, True),
             "Filtering content:  20%": ("Récupération des fichiers volumineux", 20, 100, True),
@@ -227,8 +236,10 @@ class OutputProgressTests(unittest.TestCase):
     def test_manager_counters_drive_the_bar_and_stay_in_the_history(self):
         progress = web.parse_output_progress("Préparation des liens: 1200/1416")
 
-        self.assertEqual(("Préparation des liens", 1200, 1416, False),
-                         (progress["label"], progress["current"], progress["total"], progress["transient"]))
+        self.assertEqual(
+            ("Préparation des liens", 1200, 1416, False),
+            (progress["label"], progress["current"], progress["total"], progress["transient"]),
+        )
 
     def test_ordinary_output_is_never_mistaken_for_progress(self):
         for line in (
@@ -369,7 +380,9 @@ class DatabaseRestoreTests(unittest.TestCase):
         connection.getresponse.return_value = Mock(status=303)
         connection_type.return_value = connection
 
-        status, content = web.post_form_no_redirect("http://dev.DEMO_01.localhost/web/database/create", {"name": "demo"})
+        status, content = web.post_form_no_redirect(
+            "http://dev.DEMO_01.localhost/web/database/create", {"name": "demo"}
+        )
 
         self.assertEqual((303, ""), (status, content))
         connection_type.assert_called_once_with("127.0.0.1", None, timeout=240)
@@ -673,7 +686,9 @@ class EventWatchCostTests(unittest.TestCase):
 
         web.invalidate_overview_databases("DEMO")
         self.assertEqual(["demo", "other"], web.overview_databases_by_project(["DEMO"], max_age=30)["DEMO"])
-        self.assertEqual(["demo", "other"], web.overview_databases_by_project(["DEMO"])["DEMO"], "sans max_age, lecture directe")
+        self.assertEqual(
+            ["demo", "other"], web.overview_databases_by_project(["DEMO"])["DEMO"], "sans max_age, lecture directe"
+        )
 
     @patch("odoo_manager_web.list_databases_for")
     def test_overview_probes_running_projects_in_parallel_and_skips_cached_ones(self, list_databases):
@@ -805,12 +820,18 @@ class MigrationSourceTests(unittest.TestCase):
 
     def test_source_comes_from_the_application_when_not_configured(self):
         settings = ManagerSettings.from_dict({}, "/tmp/workspace")
-        with patch.object(web, "SETTINGS", settings),                 patch.dict(web.os.environ, {"ODOO_MANAGER_LEGACY_WORKSPACE": "/mnt/c/Users/a/Odoo-projects"}):
+        with (
+            patch.object(web, "SETTINGS", settings),
+            patch.dict(web.os.environ, {"ODOO_MANAGER_LEGACY_WORKSPACE": "/mnt/c/Users/a/Odoo-projects"}),
+        ):
             self.assertEqual(Path("/mnt/c/Users/a/Odoo-projects"), web.legacy_workspace_path())
 
     def test_an_explicit_setting_wins(self):
         settings = ManagerSettings.from_dict({"legacy_workspace": "/mnt/d/Projets"}, "/tmp/workspace")
-        with patch.object(web, "SETTINGS", settings),                 patch.dict(web.os.environ, {"ODOO_MANAGER_LEGACY_WORKSPACE": "/mnt/c/Users/a/Odoo-projects"}):
+        with (
+            patch.object(web, "SETTINGS", settings),
+            patch.dict(web.os.environ, {"ODOO_MANAGER_LEGACY_WORKSPACE": "/mnt/c/Users/a/Odoo-projects"}),
+        ):
             self.assertEqual(Path("/mnt/d/Projets"), web.legacy_workspace_path())
 
     def test_no_source_means_no_migration_offer(self):
@@ -973,6 +994,7 @@ class WslManagerCommandTests(unittest.TestCase):
             r"C:\Users\Demo\docker-local-tools\traefik",
         )
 
+
 class BootstrapSnapshotTests(unittest.TestCase):
     @patch("odoo_manager_web.jobs_snapshot", return_value=[])
     @patch("odoo_manager_web.container_status", return_value="absent")
@@ -1123,7 +1145,9 @@ class TraefikDetectionStatusTests(unittest.TestCase):
         )
         self.project = self.root / "DEMO"
         self.project.mkdir()
-        (self.project / "docker-compose.yml").write_text("labels:\n  - rule=Host(`dev.DEMO.localhost`)\n", encoding="utf-8")
+        (self.project / "docker-compose.yml").write_text(
+            "labels:\n  - rule=Host(`dev.DEMO.localhost`)\n", encoding="utf-8"
+        )
         web.invalidate_traefik_detection()
         reset_traefik_entrypoint_cache()
 
@@ -1134,9 +1158,11 @@ class TraefikDetectionStatusTests(unittest.TestCase):
     def status_with(self, containers, docker_running=True):
         runner = self.DockerRunner(containers)
         service = web.ProjectService(web.SETTINGS, self.root, traefik_dir=self.traefik, runner=runner)
-        with patch("odoo_manager_web.project_service", return_value=service), \
-                patch("odoo_manager_web.local_traefik_directory", return_value=self.traefik), \
-                patch("odoo_manager_web.compose_file", return_value=self.project / "docker-compose.yml"):
+        with (
+            patch("odoo_manager_web.project_service", return_value=service),
+            patch("odoo_manager_web.local_traefik_directory", return_value=self.traefik),
+            patch("odoo_manager_web.compose_file", return_value=self.project / "docker-compose.yml"),
+        ):
             web.invalidate_traefik_detection()
             return web.traefik_status({"running": docker_running}), web.project_url("DEMO")
 
@@ -1363,14 +1389,17 @@ class ModuleFailureHintTests(unittest.TestCase):
 
     @patch("odoo_manager_web.ignored_missing_modules", return_value={"old_excluded"})
     @patch("odoo_manager_web.module_dirs", return_value=[Path("/addons/base"), Path("/addons/project")])
-    @patch("odoo_manager_web.installed_modules", return_value={
-        "base": {"state": "installed"},
-        "project": {"state": "installed"},
-        "hr_payroll": {"state": "installed"},
-        "old_excluded": {"state": "installed"},
-        "studio_customization": {"state": "installed"},
-        "website": {"state": "uninstalled"},
-    })
+    @patch(
+        "odoo_manager_web.installed_modules",
+        return_value={
+            "base": {"state": "installed"},
+            "project": {"state": "installed"},
+            "hr_payroll": {"state": "installed"},
+            "old_excluded": {"state": "installed"},
+            "studio_customization": {"state": "installed"},
+            "website": {"state": "uninstalled"},
+        },
+    )
     def test_missing_field_error_names_installed_modules_without_code(self, _states, _dirs, _ignored):
         hint = web.missing_code_failure_hint("sudokeys_v19", "sudokeys_17092016", self.PARSE_ERROR)
 
@@ -1474,7 +1503,9 @@ class ProjectCreationPrerequisitesTests(unittest.TestCase):
         self.assertTrue(payload["git_available"])
         self.assertEqual(payload["ssh_keys"], ["id_ed25519.pub"])
         self.assertEqual(payload["tool_environment"], "WSL (Ubuntu-24.04)")
-        git_command = next(command for command in (call.args[0] for call in run_capture.call_args_list) if "git" in command)
+        git_command = next(
+            command for command in (call.args[0] for call in run_capture.call_args_list) if "git" in command
+        )
         self.assertEqual(git_command[:5], ["wsl.exe", "-d", "Ubuntu-24.04", "--exec", "git"])
 
     @patch("odoo_manager_web.run_capture", return_value=(0, "git version 2.50.0"))
@@ -1544,7 +1575,6 @@ class ProjectCreationPrerequisitesTests(unittest.TestCase):
                 web.generate_ssh_key()
 
         run_capture.assert_not_called()
-
 
     @patch("odoo_manager_web.run_capture")
     @patch("odoo_manager_web.resolve_executable", return_value="ssh-keygen")
@@ -1706,16 +1736,22 @@ class DiagnosticModuleTests(unittest.TestCase):
             time.sleep(delays[db_name])
             return {} if db_name == "db_2" else {"ghost": {"state": "installed"}}
 
-        with patch.object(web, "validate_project", side_effect=lambda project: project), \
-                patch.object(web, "docker_available", return_value=(True, "")), \
-                patch.object(web, "container_statuses", return_value={"odoo-DEMO": "running", "postgresql-DEMO": "running"}), \
-                patch.object(web, "container_status", side_effect=AssertionError("un seul docker ps suffit")), \
-                patch.object(web, "module_dirs", return_value=[]), \
-                patch.object(web, "list_databases_for", return_value=["db_1", "db_2", "postgres", "db_3"]) as list_databases, \
-                patch.object(web, "installed_modules", side_effect=states), \
-                patch.object(web, "ignored_missing_modules", return_value=set()), \
-                patch.object(web, "db_query_lines", return_value=[]), \
-                patch.object(web, "filestore_files", side_effect=lambda project, db: (set(), Path("/filestore") / db)):
+        with (
+            patch.object(web, "validate_project", side_effect=lambda project: project),
+            patch.object(web, "docker_available", return_value=(True, "")),
+            patch.object(
+                web, "container_statuses", return_value={"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+            ),
+            patch.object(web, "container_status", side_effect=AssertionError("un seul docker ps suffit")),
+            patch.object(web, "module_dirs", return_value=[]),
+            patch.object(
+                web, "list_databases_for", return_value=["db_1", "db_2", "postgres", "db_3"]
+            ) as list_databases,
+            patch.object(web, "installed_modules", side_effect=states),
+            patch.object(web, "ignored_missing_modules", return_value=set()),
+            patch.object(web, "db_query_lines", return_value=[]),
+            patch.object(web, "filestore_files", side_effect=lambda project, db: (set(), Path("/filestore") / db)),
+        ):
             diagnostics = web.project_diagnostics("DEMO")
 
         list_databases.assert_called_once_with("DEMO", check_container=False)
@@ -1850,7 +1886,10 @@ class DiagnosticModuleTests(unittest.TestCase):
     def test_local_ignored_modules_are_persisted_per_workspace_project_and_database(self):
         with tempfile.TemporaryDirectory() as directory:
             overrides = Path(directory) / "local_module_overrides.json"
-            with patch.object(web, "LOCAL_MODULE_OVERRIDES", overrides), patch.object(web, "WORKSPACE", Path("/workspace-a")):
+            with (
+                patch.object(web, "LOCAL_MODULE_OVERRIDES", overrides),
+                patch.object(web, "WORKSPACE", Path("/workspace-a")),
+            ):
                 web.remember_ignored_missing_modules("DEMO", "demo", ["auto_backup"])
                 web.remember_ignored_missing_modules("DEMO", "demo", ["auto_backup_sh"])
 
@@ -1992,7 +2031,10 @@ class DatabaseNeutralizationTests(unittest.TestCase):
         clear_cache.assert_called_once_with("DEMO")
         self.assertIn("Base supprimée (filestore inclus) : demo", job.lines)
 
-    @patch("odoo_manager_web.post_form_no_redirect", return_value=(200, '<div class="alert alert-danger">Access Denied</div>'))
+    @patch(
+        "odoo_manager_web.post_form_no_redirect",
+        return_value=(200, '<div class="alert alert-danger">Access Denied</div>'),
+    )
     @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
     @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
     @patch("odoo_manager_web.validate_project", return_value="DEMO")
@@ -2013,7 +2055,9 @@ class DatabaseNeutralizationTests(unittest.TestCase):
     @patch("odoo_manager_web.normalize_module_layout_for_action")
     @patch("odoo_manager_web.project_service")
     @patch("odoo_manager_web.validate_project", return_value="DEMO")
-    def test_translation_reset_updates_modules_with_i18n_overwrite(self, _validate_project, project_service, _normalize):
+    def test_translation_reset_updates_modules_with_i18n_overwrite(
+        self, _validate_project, project_service, _normalize
+    ):
         job = self.LogJob()
 
         web.reset_module_translations_job(job, "DEMO", "demo", "sale_custom,stock_custom")
@@ -2040,13 +2084,18 @@ class DatabaseNeutralizationTests(unittest.TestCase):
     @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
     @patch("odoo_manager_web.project_service")
     @patch("odoo_manager_web.validate_project", return_value="DEMO")
-    def test_all_translations_reset_job_validates_language_codes(self, _validate_project, project_service, _list_databases):
+    def test_all_translations_reset_job_validates_language_codes(
+        self, _validate_project, project_service, _list_databases
+    ):
         job = self.LogJob()
 
         web.reset_all_translations_job(job, "DEMO", "demo", "fr_FR,sr@latin,fr_FR")
 
         project_service.return_value.run_odoo_reset_all_translations.assert_called_once_with(
-            "DEMO", "demo", ["fr_FR", "sr@latin"], log=job.add,
+            "DEMO",
+            "demo",
+            ["fr_FR", "sr@latin"],
+            log=job.add,
         )
         self.assertEqual([], web.validate_language_codes(""))
         with self.assertRaisesRegex(ValueError, "invalide"):
@@ -2061,7 +2110,10 @@ class DatabaseNeutralizationTests(unittest.TestCase):
         web.reset_admin_password_job(job, "DEMO", "demo", "admin")
 
         project_service.return_value.run_odoo_reset_admin_password.assert_called_once_with(
-            "DEMO", "demo", "admin", log=job.add,
+            "DEMO",
+            "demo",
+            "admin",
+            log=job.add,
         )
         for invalid in ("", "   ", "a\nb", "x" * 129):
             with self.assertRaises(ValueError):

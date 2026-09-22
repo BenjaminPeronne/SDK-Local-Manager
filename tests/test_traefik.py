@@ -78,7 +78,9 @@ class TraefikParsingTests(unittest.TestCase):
         self.assertEqual([], compose_service_ports("services:\n  traefik:\n    image: traefik\n"))
 
     def test_entrypoints_are_read_from_yaml_toml_arguments_and_environment(self):
-        yaml = 'entryPoints:\n  web:\n    address: ":8000"\n  websecure:\n    address: ":8443"\napi:\n  dashboard: true\n'
+        yaml = (
+            'entryPoints:\n  web:\n    address: ":8000"\n  websecure:\n    address: ":8443"\napi:\n  dashboard: true\n'
+        )
         toml = '[entryPoints]\n  [entryPoints.http]\n    address = ":8081"\n'
 
         self.assertEqual({"web": 8000, "websecure": 8443}, entrypoints_from_config(yaml))
@@ -86,15 +88,22 @@ class TraefikParsingTests(unittest.TestCase):
         self.assertIsNone(entrypoints_from_config("api:\n  dashboard: true\n"))
         self.assertEqual(
             {"web": 80, "metrics": 9100},
-            entrypoints_from_arguments(["--entrypoints.web.address=:80", "--entryPoints.metrics.address=:9100", "--dns.address=:53/udp"]),
+            entrypoints_from_arguments(
+                ["--entrypoints.web.address=:80", "--entryPoints.metrics.address=:9100", "--dns.address=:53/udp"]
+            ),
         )
-        self.assertEqual({"web": 8888}, entrypoints_from_environment(["TRAEFIK_ENTRYPOINTS_WEB_ADDRESS=:8888", "TZ=UTC"]))
+        self.assertEqual(
+            {"web": 8888}, entrypoints_from_environment(["TRAEFIK_ENTRYPOINTS_WEB_ADDRESS=:8888", "TZ=UTC"])
+        )
 
     def test_http_port_follows_the_web_entrypoint_mapping(self):
-        custom = instance(entrypoints={"web": 8000, "traefik": 8080}, published=(
-            PublishedPort("0.0.0.0", 8080, 8080),
-            PublishedPort("0.0.0.0", 9000, 8000),
-        ))
+        custom = instance(
+            entrypoints={"web": 8000, "traefik": 8080},
+            published=(
+                PublishedPort("0.0.0.0", 8080, 8080),
+                PublishedPort("0.0.0.0", 9000, 8000),
+            ),
+        )
 
         self.assertEqual(9000, custom.http_port)
         self.assertEqual(8000, instance(networks=("host",), published=(), entrypoints={"web": 8000}).http_port)
@@ -116,14 +125,20 @@ class TraefikParsingTests(unittest.TestCase):
         foreign = instance(container_id="2", name="proxy", networks=("proxy",))
         managed = instance(container_id="3", working_dir="/tools/traefik")
 
-        selected = select_traefik_instance([stopped, foreign, managed], lambda item: item.working_dir == "/tools/traefik")
+        selected = select_traefik_instance(
+            [stopped, foreign, managed], lambda item: item.working_dir == "/tools/traefik"
+        )
 
         self.assertEqual("3", selected.container_id)
         self.assertIsNone(select_traefik_instance([], lambda _item: False))
 
     def test_compose_working_directory_matches_windows_and_wsl_paths(self):
-        self.assertTrue(same_directory(r"C:\Users\Demo\docker-local-tools\traefik", "c:/users/demo/docker-local-tools/traefik"))
-        self.assertTrue(same_directory("/mnt/c/Users/Demo/traefik", r"C:\Users\Demo\traefik", "/mnt/c/Users/Demo/traefik"))
+        self.assertTrue(
+            same_directory(r"C:\Users\Demo\docker-local-tools\traefik", "c:/users/demo/docker-local-tools/traefik")
+        )
+        self.assertTrue(
+            same_directory("/mnt/c/Users/Demo/traefik", r"C:\Users\Demo\traefik", "/mnt/c/Users/Demo/traefik")
+        )
         self.assertFalse(same_directory("", "/tools/traefik"))
 
     def test_url_gets_port_only_when_it_is_not_80(self):
@@ -138,11 +153,21 @@ class TraefikDetectionTests(unittest.TestCase):
 
     def test_detection_reads_ports_networks_and_config_once_per_container_state(self):
         calls = []
-        line = "\t".join((
-            "id1", "edge", "docker.io/library/traefik:v2.11", "running", "0.0.0.0:8000->80/tcp",
-            "traefik-local", "/home/demo/proxy", MIDDLEWARE_LABELS,
-        ))
-        unrelated = "\t".join(("id2", "odoo-DEMO", "sudokeys/docker-odoo-local:18.0", "running", "8069/tcp", "traefik-local", "", ""))
+        line = "\t".join(
+            (
+                "id1",
+                "edge",
+                "docker.io/library/traefik:v2.11",
+                "running",
+                "0.0.0.0:8000->80/tcp",
+                "traefik-local",
+                "/home/demo/proxy",
+                MIDDLEWARE_LABELS,
+            )
+        )
+        unrelated = "\t".join(
+            ("id2", "odoo-DEMO", "sudokeys/docker-odoo-local:18.0", "running", "8069/tcp", "traefik-local", "", "")
+        )
 
         def capture(command, timeout=10):
             calls.append(command)

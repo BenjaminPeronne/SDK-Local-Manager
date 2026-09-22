@@ -4,6 +4,7 @@ Chaque wsl.exe démarre ou maintient la VM WSL et coûte de 0,3 à plusieurs sec
 L'overview est rafraîchi toutes les 10 s : une sonde WSL oubliée tient la VM éveillée
 en permanence. Windows est simulé ; les commandes sont enregistrées, jamais exécutées.
 """
+
 import os
 import platform
 import shutil
@@ -147,9 +148,11 @@ class WindowsGitEnvironmentTests(unittest.TestCase):
     def test_git_search_in_wsl_is_cached(self):
         manager_platform.reset_wsl_executable_cache()
         self.addCleanup(manager_platform.reset_wsl_executable_cache)
-        with mock.patch.object(manager_platform.platform, "system", return_value="Windows"), \
-                mock.patch.object(manager_platform, "host_executable_available", return_value=True), \
-                mock.patch.object(manager_platform, "_probe_wsl_executable_distribution", return_value="Ubuntu") as probe:
+        with (
+            mock.patch.object(manager_platform.platform, "system", return_value="Windows"),
+            mock.patch.object(manager_platform, "host_executable_available", return_value=True),
+            mock.patch.object(manager_platform, "_probe_wsl_executable_distribution", return_value="Ubuntu") as probe,
+        ):
             self.assertEqual("Ubuntu", manager_platform.find_wsl_executable_distribution("git"))
             self.assertEqual("Ubuntu", manager_platform.find_wsl_executable_distribution("git"))
         probe.assert_called_once()
@@ -158,10 +161,14 @@ class WindowsGitEnvironmentTests(unittest.TestCase):
         manager_platform.reset_wsl_executable_cache()
         self.addCleanup(manager_platform.reset_wsl_executable_cache)
         clock = [1000.0]
-        with mock.patch.object(manager_platform.platform, "system", return_value="Windows"), \
-                mock.patch.object(manager_platform, "host_executable_available", return_value=True), \
-                mock.patch.object(manager_platform.time, "monotonic", side_effect=lambda: clock[0]), \
-                mock.patch.object(manager_platform, "_probe_wsl_executable_distribution", side_effect=[None, "Ubuntu"]) as probe:
+        with (
+            mock.patch.object(manager_platform.platform, "system", return_value="Windows"),
+            mock.patch.object(manager_platform, "host_executable_available", return_value=True),
+            mock.patch.object(manager_platform.time, "monotonic", side_effect=lambda: clock[0]),
+            mock.patch.object(
+                manager_platform, "_probe_wsl_executable_distribution", side_effect=[None, "Ubuntu"]
+            ) as probe,
+        ):
             self.assertIsNone(manager_platform.find_wsl_executable_distribution("git"))
             clock[0] += manager_platform.WSL_EXECUTABLE_MISSING_TTL_SECONDS + 1
             self.assertEqual("Ubuntu", manager_platform.find_wsl_executable_distribution("git"))
@@ -169,8 +176,10 @@ class WindowsGitEnvironmentTests(unittest.TestCase):
 
     def test_non_interactive_git_settings_reach_wsl(self):
         service = ProjectService(ManagerSettings(workspace="C:/Odoo"), Path("C:/Odoo"))
-        with mock.patch("odoo_manager_core.project_service.platform.system", return_value="Windows"), \
-                mock.patch.dict(os.environ, {"WSLENV": "USERPROFILE/p"}, clear=False):
+        with (
+            mock.patch("odoo_manager_core.project_service.platform.system", return_value="Windows"),
+            mock.patch.dict(os.environ, {"WSLENV": "USERPROFILE/p"}, clear=False),
+        ):
             os.environ.pop("GIT_SSH_COMMAND", None)
             env = service.env()
         self.assertEqual(GIT_SSH_COMMAND, env["GIT_SSH_COMMAND"])
@@ -178,13 +187,18 @@ class WindowsGitEnvironmentTests(unittest.TestCase):
 
     def test_custom_windows_ssh_command_is_not_forwarded_to_wsl(self):
         service = ProjectService(ManagerSettings(workspace="C:/Odoo"), Path("C:/Odoo"))
-        with mock.patch("odoo_manager_core.project_service.platform.system", return_value="Windows"), \
-                mock.patch.dict(os.environ, {"GIT_SSH_COMMAND": r"C:\PuTTY\plink.exe -batch", "WSLENV": ""}):
+        with (
+            mock.patch("odoo_manager_core.project_service.platform.system", return_value="Windows"),
+            mock.patch.dict(os.environ, {"GIT_SSH_COMMAND": r"C:\PuTTY\plink.exe -batch", "WSLENV": ""}),
+        ):
             env = service.env()
         self.assertEqual("GIT_TERMINAL_PROMPT", env["WSLENV"])
 
     def test_wslenv_merge_keeps_existing_flags_without_duplicates(self):
-        self.assertEqual("A/p:GIT_TERMINAL_PROMPT", merge_wslenv("A/p:GIT_TERMINAL_PROMPT/u", ["GIT_TERMINAL_PROMPT"]).replace("/u", ""))
+        self.assertEqual(
+            "A/p:GIT_TERMINAL_PROMPT",
+            merge_wslenv("A/p:GIT_TERMINAL_PROMPT/u", ["GIT_TERMINAL_PROMPT"]).replace("/u", ""),
+        )
         self.assertEqual("GIT_TERMINAL_PROMPT", merge_wslenv("", ["GIT_TERMINAL_PROMPT"]))
 
 

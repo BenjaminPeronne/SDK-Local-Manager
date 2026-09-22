@@ -156,8 +156,7 @@ class ModuleLayoutTests(unittest.TestCase):
         execution_path.side_effect = translate
         run_capture.return_value = (
             0,
-            f"{linux_root}/odoo/addons/account_3way_match\t"
-            f"{linux_root}/odoo/addons-store/account_3way_match\t1",
+            f"{linux_root}/odoo/addons/account_3way_match\t{linux_root}/odoo/addons-store/account_3way_match\t1",
         )
         # Un résultat négatif mis en cache par un test précédent ne doit pas masquer WSL.
         web.WSL_SHELL_AVAILABILITY.clear()
@@ -394,7 +393,6 @@ class ModuleLayoutTests(unittest.TestCase):
         staging_root = web.project_staging_imports_root(self.project)
         self.assertFalse(any(staging_root.iterdir()))
         self.assertTrue(any("Archive temporaire nettoyée" in line for line in job.lines))
-
 
 
 class PathScopeTests(unittest.TestCase):

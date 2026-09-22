@@ -25,7 +25,9 @@ def build_project(root, name, *, running=False, with_links=True):
     project = root / name
     (project / "odoo" / "addons-store" / "mon_module").mkdir(parents=True)
     (project / "odoo" / "addons").mkdir(parents=True)
-    (project / "odoo" / "addons-store" / "mon_module" / "__manifest__.py").write_text("{'name': 'mon'}", encoding="utf-8")
+    (project / "odoo" / "addons-store" / "mon_module" / "__manifest__.py").write_text(
+        "{'name': 'mon'}", encoding="utf-8"
+    )
     (project / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
     (project / "odoo.conf").write_text("[options]\n", encoding="utf-8")
     data = project / "postgresql_data"
@@ -94,7 +96,9 @@ class ProjectMigrationTests(unittest.TestCase):
     def test_copy_brings_the_database_and_the_filestore(self):
         source = build_project(self.windows, "CLIENT_E")
         copy_project(source, self.linux / "CLIENT_E")
-        self.assertEqual("14\n", (self.linux / "CLIENT_E" / "postgresql_data" / "PG_VERSION").read_text(encoding="utf-8"))
+        self.assertEqual(
+            "14\n", (self.linux / "CLIENT_E" / "postgresql_data" / "PG_VERSION").read_text(encoding="utf-8")
+        )
         self.assertEqual(
             "piece jointe",
             (self.linux / "CLIENT_E" / "odoo_data" / "filestore" / "test" / "a1").read_text(encoding="utf-8"),
@@ -256,8 +260,13 @@ class PrivilegedMigrationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(RuntimeError, "No space left"):
-                copy_project_privileged("/src", Path(temporary) / "DEMO", SUDO,
-                                        popen=lambda *_a, **_k: Process(), run=lambda *_a, **_k: completed())
+                copy_project_privileged(
+                    "/src",
+                    Path(temporary) / "DEMO",
+                    SUDO,
+                    popen=lambda *_a, **_k: Process(),
+                    run=lambda *_a, **_k: completed(),
+                )
 
 
 class ContainerStateTests(unittest.TestCase):
@@ -302,7 +311,9 @@ class ContainerStateTests(unittest.TestCase):
     def test_a_state_read_from_an_engine_is_confirmed(self):
         build_project(self.windows, "DEMO_01", running=True, with_links=False)
         self.assertEqual((True, True), project_status(self.windows / "DEMO_01", container_state=lambda _name: "exited"))
-        self.assertEqual((False, True), project_status(self.windows / "DEMO_01", container_state=lambda _name: "running"))
+        self.assertEqual(
+            (False, True), project_status(self.windows / "DEMO_01", container_state=lambda _name: "running")
+        )
 
     def test_the_engine_is_asked_about_the_project_name(self):
         build_project(self.windows, "CARITEL", running=True, with_links=False)
@@ -340,16 +351,22 @@ class LegacyEngineTests(unittest.TestCase):
 
     def test_no_socket_means_no_second_engine_and_no_docker_call(self):
         called = []
-        states = legacy_engine_states(SUDO, lambda *_a, **_k: called.append(1) or completed(), "/introuvable/docker.sock")
+        states = legacy_engine_states(
+            SUDO, lambda *_a, **_k: called.append(1) or completed(), "/introuvable/docker.sock"
+        )
         self.assertEqual({}, states)
         self.assertEqual([], called)
 
     def test_an_unreachable_engine_is_not_an_answer(self):
-        self.assertEqual({}, legacy_engine_states(SUDO, lambda *_a, **_k: completed("", returncode=1), str(self.socket)))
+        self.assertEqual(
+            {}, legacy_engine_states(SUDO, lambda *_a, **_k: completed("", returncode=1), str(self.socket))
+        )
 
     def test_a_project_is_running_as_soon_as_one_of_its_containers_runs(self):
         self.assertEqual("running", container_state_of({"postgresql-DEMO_01": "running"}, "DEMO_01"))
-        self.assertEqual("running", container_state_of({"odoo-DEMO_01": "running", "postgresql-DEMO_01": "exited"}, "DEMO_01"))
+        self.assertEqual(
+            "running", container_state_of({"odoo-DEMO_01": "running", "postgresql-DEMO_01": "exited"}, "DEMO_01")
+        )
 
     def test_a_killed_project_keeps_its_last_known_state(self):
         self.assertEqual("exited", container_state_of({"postgresql-CARITEL": "exited"}, "CARITEL"))

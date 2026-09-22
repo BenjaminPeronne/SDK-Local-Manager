@@ -1,4 +1,5 @@
 """Liens d'addons hérités de WSL sous Windows : détection, décision et conversion."""
+
 import os
 import subprocess
 import tempfile
@@ -93,7 +94,9 @@ class ConversionTests(unittest.TestCase):
 
         return (
             mock.patch.object(windows_links, "wsl_symlinks", side_effect=remaining_wsl_links),
-            mock.patch.object(windows_links, "read_wsl_symlink", side_effect=lambda path: self.targets[Path(path).name]),
+            mock.patch.object(
+                windows_links, "read_wsl_symlink", side_effect=lambda path: self.targets[Path(path).name]
+            ),
             mock.patch.object(windows_links, "reparse_tag", side_effect=tag),
         )
 
@@ -133,7 +136,12 @@ class ConversionTests(unittest.TestCase):
             return real_symlink(value, path, target_is_directory=target_is_directory)
 
         wsl_links, targets, tags = self.simulated_wsl()
-        with wsl_links, targets, tags, mock.patch.object(windows_links.os, "symlink", side_effect=symlink_failing_for_sale):
+        with (
+            wsl_links,
+            targets,
+            tags,
+            mock.patch.object(windows_links.os, "symlink", side_effect=symlink_failing_for_sale),
+        ):
             first = convert_wsl_symlinks(self.addons)
         self.assertEqual(2, first["converted"])
         self.assertEqual("sale", first["failures"][0][0])
@@ -167,13 +175,27 @@ class RealWslLinkTests(unittest.TestCase):
             try:
                 linux_root = subprocess.run(
                     ["wsl.exe", "--exec", "wslpath", "-a", "-u", str(root).replace("\\", "/")],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, check=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=30,
+                    check=True,
                 ).stdout.strip()
                 # Une cible absente au moment de `ln -s` force un lien WSL même avec le mode développeur.
                 subprocess.run(
-                    ["wsl.exe", "--cd", f"{linux_root}/addons", "--exec", "sh", "-c",
-                     "ln -s ../store/mod_a mod_a && mkdir -p ../store/mod_a && touch ../store/mod_a/__manifest__.py"],
-                    capture_output=True, timeout=30, check=True,
+                    [
+                        "wsl.exe",
+                        "--cd",
+                        f"{linux_root}/addons",
+                        "--exec",
+                        "sh",
+                        "-c",
+                        "ln -s ../store/mod_a mod_a && mkdir -p ../store/mod_a && touch ../store/mod_a/__manifest__.py",
+                    ],
+                    capture_output=True,
+                    timeout=30,
+                    check=True,
                 )
             except (OSError, subprocess.SubprocessError):
                 self.skipTest("aucune distribution WSL utilisable")
@@ -198,29 +220,37 @@ class BackendDecisionTests(unittest.TestCase):
     def test_windows_lists_native_links_without_wsl(self):
         (self.project_root / "odoo" / "addons-store" / "sale").mkdir()
         (self.project_root / "odoo" / "addons-store" / "sale" / "__manifest__.py").write_text("{}\n", encoding="utf-8")
-        with mock.patch.object(web, "platform_id", return_value="windows"), \
-                mock.patch.object(web, "contains_wsl_symlink", return_value=False), \
-                mock.patch.object(web, "wsl_shell_available", side_effect=AssertionError("sonde WSL")), \
-                mock.patch.object(web, "wsl_module_dirs", side_effect=AssertionError("scan WSL")), \
-                mock.patch.object(web, "wsl_module_graph", side_effect=AssertionError("graphe WSL")):
+        with (
+            mock.patch.object(web, "platform_id", return_value="windows"),
+            mock.patch.object(web, "contains_wsl_symlink", return_value=False),
+            mock.patch.object(web, "wsl_shell_available", side_effect=AssertionError("sonde WSL")),
+            mock.patch.object(web, "wsl_module_dirs", side_effect=AssertionError("scan WSL")),
+            mock.patch.object(web, "wsl_module_graph", side_effect=AssertionError("graphe WSL")),
+        ):
             self.assertEqual(["sale"], [path.name for path in web.module_dirs(self.project)])
             self.assertIn("sale", web.project_module_graph(self.project))
 
     def test_wsl_is_used_only_for_folders_windows_cannot_handle(self):
-        with mock.patch.object(web, "platform_id", return_value="windows"), \
-                mock.patch.object(web, "wsl_shell_available", return_value=True), \
-                mock.patch.object(web, "native_symlinks_supported", return_value=True), \
-                mock.patch.object(web, "contains_wsl_symlink", return_value=False):
+        with (
+            mock.patch.object(web, "platform_id", return_value="windows"),
+            mock.patch.object(web, "wsl_shell_available", return_value=True),
+            mock.patch.object(web, "native_symlinks_supported", return_value=True),
+            mock.patch.object(web, "contains_wsl_symlink", return_value=False),
+        ):
             self.assertIsNone(web.addon_links_wsl_distribution(self.addons))
             self.assertIsNone(web.addon_links_wsl_distribution(self.addons, creating=True))
-        with mock.patch.object(web, "platform_id", return_value="windows"), \
-                mock.patch.object(web, "wsl_shell_available", return_value=True), \
-                mock.patch.object(web, "contains_wsl_symlink", return_value=True):
+        with (
+            mock.patch.object(web, "platform_id", return_value="windows"),
+            mock.patch.object(web, "wsl_shell_available", return_value=True),
+            mock.patch.object(web, "contains_wsl_symlink", return_value=True),
+        ):
             self.assertEqual("", web.addon_links_wsl_distribution(self.addons))
-        with mock.patch.object(web, "platform_id", return_value="windows"), \
-                mock.patch.object(web, "wsl_shell_available", return_value=True), \
-                mock.patch.object(web, "native_symlinks_supported", return_value=False), \
-                mock.patch.object(web, "contains_wsl_symlink", return_value=False):
+        with (
+            mock.patch.object(web, "platform_id", return_value="windows"),
+            mock.patch.object(web, "wsl_shell_available", return_value=True),
+            mock.patch.object(web, "native_symlinks_supported", return_value=False),
+            mock.patch.object(web, "contains_wsl_symlink", return_value=False),
+        ):
             self.assertIsNone(web.addon_links_wsl_distribution(self.addons))
             self.assertEqual("", web.addon_links_wsl_distribution(self.addons, creating=True))
 
@@ -236,7 +266,13 @@ class BackendDecisionTests(unittest.TestCase):
 
     def test_snapshot_counts_legacy_links_for_the_interface(self):
         patches = self.windows_with_legacy_links()
-        patches.append(mock.patch.object(web, "wsl_symlinks", side_effect=lambda parent: [parent / "a", parent / "b"] if parent == self.addons else []))
+        patches.append(
+            mock.patch.object(
+                web,
+                "wsl_symlinks",
+                side_effect=lambda parent: [parent / "a", parent / "b"] if parent == self.addons else [],
+            )
+        )
         for patcher in patches:
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -257,7 +293,9 @@ class BackendDecisionTests(unittest.TestCase):
             patcher.start()
         try:
             job = DummyJob()
-            with mock.patch.object(web, "convert_wsl_symlinks", return_value={"converted": 2, "skipped": [], "failures": []}) as convert:
+            with mock.patch.object(
+                web, "convert_wsl_symlinks", return_value={"converted": 2, "skipped": [], "failures": []}
+            ) as convert:
                 web.convert_wsl_addon_links_job(job, self.project)
             return job, convert
         finally:
