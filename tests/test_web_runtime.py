@@ -665,14 +665,14 @@ class EventWatchCostTests(unittest.TestCase):
     def test_event_database_list_is_cached_but_empty_results_are_retried(self, list_databases):
         list_databases.side_effect = [[], ["demo"], ["demo", "other"], ["demo", "other"]]
 
-        self.assertEqual([], web.overview_databases("DEMO", max_age=30))
-        self.assertEqual(["demo"], web.overview_databases("DEMO", max_age=30))
-        self.assertEqual(["demo"], web.overview_databases("DEMO", max_age=30))
+        self.assertEqual([], web.overview_databases_by_project(["DEMO"], max_age=30)["DEMO"])
+        self.assertEqual(["demo"], web.overview_databases_by_project(["DEMO"], max_age=30)["DEMO"])
+        self.assertEqual(["demo"], web.overview_databases_by_project(["DEMO"], max_age=30)["DEMO"])
         self.assertEqual(2, list_databases.call_count)
 
         web.invalidate_overview_databases("DEMO")
-        self.assertEqual(["demo", "other"], web.overview_databases("DEMO", max_age=30))
-        self.assertEqual(["demo", "other"], web.overview_databases("DEMO"), "sans max_age, lecture directe")
+        self.assertEqual(["demo", "other"], web.overview_databases_by_project(["DEMO"], max_age=30)["DEMO"])
+        self.assertEqual(["demo", "other"], web.overview_databases_by_project(["DEMO"])["DEMO"], "sans max_age, lecture directe")
 
     @patch("odoo_manager_web.list_databases_for")
     def test_overview_probes_running_projects_in_parallel_and_skips_cached_ones(self, list_databases):
@@ -947,8 +947,7 @@ class CommandWorkingDirectoryTests(unittest.TestCase):
 
 
 class WslManagerCommandTests(unittest.TestCase):
-    @patch("odoo_manager_web.execution_path")
-    def test_generic_command_environment_keeps_host_paths(self, execution_path):
+    def test_generic_command_environment_keeps_host_paths(self):
         previous_settings = web.SETTINGS
         previous_workspace = web.WORKSPACE
         try:
@@ -967,7 +966,6 @@ class WslManagerCommandTests(unittest.TestCase):
             web.SETTINGS = previous_settings
             web.WORKSPACE = previous_workspace
 
-        execution_path.assert_not_called()
         self.assertEqual(environment["ODOO_WORKSPACE"], r"C:\Users\Demo\Odoo-projects")
         self.assertEqual(
             environment["TRAEFIK_DIR"],

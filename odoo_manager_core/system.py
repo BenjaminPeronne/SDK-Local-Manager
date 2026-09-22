@@ -11,7 +11,6 @@ from .platform import (
     command_prefix,
     executable_available,
     executable_search_path,
-    execution_path,
     host_executable_available,
     hidden_process_kwargs,
     open_terminal_script,

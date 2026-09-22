@@ -17,7 +17,6 @@ from .platform import (
     host_executable_available,
     platform_id,
     resolve_executable,
-    workspace_execution_path,
     workspace_wsl_context,
     wsl_command_prefix,
     find_wsl_executable_distribution,

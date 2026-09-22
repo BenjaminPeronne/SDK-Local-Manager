@@ -10,7 +10,6 @@ import threading
 import time
 import urllib.parse
 import uuid
-from collections import deque
 from pathlib import Path
 
 from . import jobs
@@ -1162,9 +1161,6 @@ class ProjectService:
         status = self.container_status(container)
         return "unknown" if status == "running" else "absent"
 
-    def odoo_server_running(self, container):
-        return self.odoo_server_state(container) == "running"
-
     def odoo_stopped_error(self, container, state, when, log=None):
         outputs = self.odoo_startup_diagnostics(container, log=log)
         exit_code = state.split(":", 1)[1].strip() if state.startswith("exited:") else ""
@@ -1375,10 +1371,6 @@ class ProjectService:
             return 0, "error"
         finally:
             connection.close()
-
-    @classmethod
-    def http_status(cls, url, timeout=10):
-        return cls.http_probe_result(url, timeout=timeout)[0]
 
     def traefik_route_failure(self, project, status, reason, url=None, problems=None):
         parsed = urllib.parse.urlsplit(url or self.project_url(project))

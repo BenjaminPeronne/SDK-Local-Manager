@@ -35,10 +35,8 @@ RUNTIME_LOG_PATH, _RUNTIME_STREAMS = initialize_runtime_streams()
 from odoo_manager_core import ManagerSettings, ProjectCreator, SettingsStore, ProjectService, docker_status, start_docker
 from odoo_manager_core.platform import (
     command_uses_wsl,
-    command_prefix,
     executable_available,
     executable_search_path,
-    execution_path,
     host_executable_available,
     hidden_process_kwargs,
     open_terminal_command,
@@ -55,7 +53,6 @@ from odoo_manager_core.platform import (
     reset_wsl_executable_cache,
     wsl_execution_path,
     wsl_windows_path,
-    wsl_path_context,
     wsl_unc_path,
 )
 from odoo_manager_core.project_creator import (
@@ -1880,51 +1877,6 @@ def clear_project_module_cache(project):
     WSL_SHELL_AVAILABILITY.clear()
 
 
-def manifest_value(text, key):
-    quoted_key_1 = "'" + key + "'"
-    quoted_key_2 = '"' + key + '"'
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith((quoted_key_1, quoted_key_2)):
-            continue
-        _, _, raw_value = stripped.partition(":")
-        raw_value = raw_value.strip().rstrip(",")
-        if raw_value in ("True", "False"):
-            return raw_value == "True"
-        if len(raw_value) >= 2 and raw_value[0] in ("'", '"'):
-            quote = raw_value[0]
-            end = raw_value.find(quote, 1)
-            if end > 0:
-                return raw_value[1:end]
-        if raw_value.startswith("True"):
-            return True
-        if raw_value.startswith("False"):
-            return False
-    return None
-
-
-def parse_manifest(path):
-    manifest = path / "__manifest__.py"
-    if not manifest.exists():
-        manifest = path / "__openerp__.py"
-    text = ""
-    try:
-        with manifest.open("r", encoding="utf-8", errors="ignore") as handle:
-            text = handle.read(65536)
-    except OSError:
-        pass
-    installable = manifest_value(text, "installable")
-    return {
-        "name": path.name,
-        "title": str(manifest_value(text, "name") or path.name),
-        "summary": str(manifest_value(text, "summary") or "")[:220],
-        "version": str(manifest_value(text, "version") or ""),
-        "category": str(manifest_value(text, "category") or ""),
-        "installable": True if installable is None else bool(installable),
-        "path": str(path),
-    }
-
-
 def safe_resolve(path):
     """Resolve a path without failing on Windows links owned by WSL."""
     path = Path(path)
@@ -2082,17 +2034,6 @@ def basic_module(project, path, layout=None):
         "origin": module_origin(location["source_path"]),
         **location,
     }
-
-
-def should_parse_manifest(path):
-    text_path = str(path)
-    if "/addons-store/" in text_path:
-        return False
-    if "/odoo/odoo/" in text_path:
-        return False
-    if path.is_symlink():
-        return False
-    return True
 
 
 def module_removal_info(project, path, layout=None):
@@ -2501,11 +2442,6 @@ def probe_overview_databases(project, max_age=None):
     return databases
 
 
-def overview_databases(project, max_age=None):
-    cached = cached_overview_databases(project, max_age)
-    return cached if cached is not None else probe_overview_databases(project, max_age)
-
-
 def overview_databases_by_project(projects, max_age=None):
     """Bases de chaque projet démarré ; les sondes que le cache ne sert pas partent en parallèle.
 
@@ -2861,14 +2797,6 @@ class Job:
         if len(self.output) > JOB_OUTPUT_LIMIT * 2:
             self.output = self.output[-JOB_OUTPUT_LIMIT:]
         self._trim_lines()
-
-    def add_text(self, text):
-        with JOBS_LOCK:
-            self._append_output(text)
-            for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-                if line:
-                    self.lines.append(line)
-            self._trim_lines()
 
     def set_progress(self, label, current=None, total=None):
         with JOBS_LOCK:
@@ -4068,11 +3996,6 @@ def move_module_entry(source, destination):
         [wsl_entry_path(source, distribution), wsl_entry_path(destination, distribution)],
         f"Déplacement de {source.name} impossible via WSL",
     )
-
-
-def managed_storage_link(project, module_name, storage_path):
-    link_path = project_addons_link_parent(project) / module_name
-    return addon_link_status(link_path, storage_path)[0] == "matching"
 
 
 def managed_module_copy_ready(project, module_name, storage_path):

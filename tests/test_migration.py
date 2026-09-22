@@ -17,7 +17,6 @@ from odoo_manager_core.migration import (
     container_state_of,
     project_status,
     legacy_engine_states,
-    project_is_stopped,
 )
 
 
@@ -71,7 +70,7 @@ class ProjectMigrationTests(unittest.TestCase):
         # Copier postgresql_data pendant que PostgreSQL écrit donnerait une base incohérente.
         build_project(self.windows, "CLIENT_B", running=True)
         self.assertFalse(migration_candidates(self.windows, self.linux)[0]["stopped"])
-        self.assertFalse(project_is_stopped(self.windows / "CLIENT_B"))
+        self.assertFalse(project_status(self.windows / "CLIENT_B")[0])
 
     def test_an_already_migrated_project_is_flagged(self):
         build_project(self.windows, "CLIENT_C")
@@ -164,21 +163,21 @@ class PrivilegedMigrationTests(unittest.TestCase):
             return completed("running\n")
 
         with mock.patch.object(Path, "exists", side_effect=PermissionError(13, "Permission denied")):
-            self.assertFalse(project_is_stopped("/mnt/c/p/SIMPAC", SUDO, run))
+            self.assertFalse(project_status("/mnt/c/p/SIMPAC", SUDO, run)[0])
         self.assertEqual(SUDO, calls[0][:2])
         self.assertEqual(str(Path("/mnt/c/p/SIMPAC") / "postgresql_data" / "postmaster.pid"), calls[0][-1])
 
     def test_a_stopped_project_is_recognised_through_sudo(self):
         with mock.patch.object(Path, "exists", side_effect=PermissionError(13, "Permission denied")):
-            self.assertTrue(project_is_stopped("/mnt/c/p/DEMO", SUDO, lambda *_a, **_k: completed("stopped\n")))
+            self.assertTrue(project_status("/mnt/c/p/DEMO", SUDO, lambda *_a, **_k: completed("stopped\n"))[0])
 
     def test_an_unreadable_lock_without_sudo_blocks_the_migration(self):
         with mock.patch.object(Path, "exists", side_effect=PermissionError(13, "Permission denied")):
-            self.assertFalse(project_is_stopped("/mnt/c/p/DEMO", [], lambda *_a, **_k: completed("stopped\n")))
+            self.assertFalse(project_status("/mnt/c/p/DEMO", [], lambda *_a, **_k: completed("stopped\n"))[0])
 
     def test_a_failing_sudo_never_reads_as_stopped(self):
         with mock.patch.object(Path, "exists", side_effect=PermissionError(13, "Permission denied")):
-            self.assertFalse(project_is_stopped("/mnt/c/p/DEMO", SUDO, lambda *_a, **_k: completed("", returncode=1)))
+            self.assertFalse(project_status("/mnt/c/p/DEMO", SUDO, lambda *_a, **_k: completed("", returncode=1))[0])
 
     def listing(self):
         return completed(
@@ -283,16 +282,16 @@ class ContainerStateTests(unittest.TestCase):
 
     def test_a_running_container_blocks_the_migration_even_without_a_lock(self):
         build_project(self.windows, "DEMO_01", with_links=False)
-        self.assertFalse(project_is_stopped(self.windows / "DEMO_01", container_state=lambda _name: "running"))
+        self.assertFalse(project_status(self.windows / "DEMO_01", container_state=lambda _name: "running")[0])
 
     def test_a_container_unknown_to_this_engine_leaves_the_lock_in_charge(self):
         # Le projet peut tourner sous Docker Desktop pendant que le backend interroge la distribution.
         build_project(self.windows, "SIMPAC", running=True, with_links=False)
-        self.assertFalse(project_is_stopped(self.windows / "SIMPAC", container_state=lambda _name: "absent"))
+        self.assertFalse(project_status(self.windows / "SIMPAC", container_state=lambda _name: "absent")[0])
 
     def test_an_unreachable_engine_leaves_the_lock_in_charge(self):
         build_project(self.windows, "SIMPAC", running=True, with_links=False)
-        self.assertFalse(project_is_stopped(self.windows / "SIMPAC", container_state=lambda _name: None))
+        self.assertFalse(project_status(self.windows / "SIMPAC", container_state=lambda _name: None)[0])
 
     def test_an_unconfirmed_lock_is_flagged_for_the_interface(self):
         build_project(self.windows, "CARITEL", running=True, with_links=False)

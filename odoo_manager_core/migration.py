@@ -85,11 +85,6 @@ def project_status(path, prefix=None, run=subprocess.run, container_state=None):
     return lock_is_free(path, prefix, run), False
 
 
-def project_is_stopped(path, prefix=None, run=subprocess.run, container_state=None):
-    """Faux tant que PostgreSQL tourne, confirmé ou non. Voir project_status."""
-    return project_status(path, prefix, run, container_state)[0]
-
-
 def lock_is_free(path, prefix=None, run=subprocess.run):
     """Vrai quand `postmaster.pid` est absent : PostgreSQL s'est arrêté proprement."""
     lock = Path(path) / POSTGRES_DATA_DIRECTORY / POSTMASTER_FILE

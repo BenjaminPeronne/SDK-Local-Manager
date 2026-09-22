@@ -228,7 +228,7 @@ class WindowsWslLayoutTests(unittest.TestCase):
             self.assertTrue(web.ensure_relative_module_link(DummyJob(), self.project, "dromcom_mrp", storage))
             job = DummyJob()
             self.assertFalse(web.ensure_relative_module_link(job, self.project, "dromcom_mrp", storage))
-            self.assertTrue(web.managed_storage_link(self.project, "dromcom_mrp", storage))
+            self.assertEqual("matching", web.addon_link_status(link, storage)[0])
 
         self.assertEqual("../addons-store/dromcom_mrp", os.readlink(link))
         self.assertTrue(any("Déjà lié en relatif" in line for line in job.lines))

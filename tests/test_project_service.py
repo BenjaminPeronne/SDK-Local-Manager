@@ -1043,7 +1043,7 @@ class ProjectServiceTests(unittest.TestCase):
         connection = connection_class.return_value
         connection.getresponse.return_value.status = 303
 
-        status = ProjectService.http_status("http://dev.Caritel_v18.localhost/web/login")
+        status = ProjectService.http_probe_result("http://dev.Caritel_v18.localhost/web/login")[0]
 
         self.assertEqual(status, 303)
         connection_class.assert_called_once_with("127.0.0.1", None, timeout=10)
