@@ -21,9 +21,10 @@ function buildIdentity() {
   const tag =
     process.env.ODOO_MANAGER_BUILD_TAG ||
     (process.env.GITHUB_REF_TYPE === "tag" ? process.env.GITHUB_REF_NAME : "") ||
+    process.env.CI_COMMIT_TAG ||
     git("describe", "--tags", "--exact-match", "--match", "app-v*");
   const build = /^app-v\d+\.\d+\.\d+-build(\d+)$/.exec(tag || "")?.[1] ?? "";
-  const commit = (process.env.GITHUB_SHA || git("rev-parse", "HEAD")).slice(0, 7);
+  const commit = (process.env.GITHUB_SHA || process.env.CI_COMMIT_SHA || git("rev-parse", "HEAD")).slice(0, 7);
   return { NEXT_PUBLIC_APP_BUILD: build, NEXT_PUBLIC_APP_COMMIT: commit };
 }
 

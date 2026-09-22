@@ -24,6 +24,12 @@ def default_bundles():
     return {"Darwin": "app,dmg", "Linux": "deb,appimage", "Windows": "nsis"}.get(platform.system(), "")
 
 
+def running_in_ci(environ=None):
+    """Runner de GitHub Actions ou de GitLab CI : une machine de build, pas un poste de développement."""
+    environ = environ if environ is not None else os.environ
+    return bool(environ.get("GITHUB_ACTIONS") or environ.get("GITLAB_CI"))
+
+
 def installer_smoke_test_allowed(system=None, environ=None, forced=False):
     """Le test installe le même appId et ferme l'application ouverte : réservé à un runner jetable.
 
@@ -34,7 +40,7 @@ def installer_smoke_test_allowed(system=None, environ=None, forced=False):
     environ = environ if environ is not None else os.environ
     if system != "Windows":
         return False
-    return forced or bool(environ.get("GITHUB_ACTIONS"))
+    return forced or running_in_ci(environ)
 
 
 def builder_arguments(bundles, system=None):
@@ -83,7 +89,7 @@ def main():
         for directory in ("out", "electron"):
             run(["xattr", "-cr", str(FRONTEND / directory)])
     output = FRONTEND / "release"
-    if platform.system() == "Darwin" and not os.environ.get("GITHUB_ACTIONS"):
+    if platform.system() == "Darwin" and not running_in_ci():
         # File-provider metadata in Documents can reappear during codesign.
         # Sign outside that tree; only the sealed DMG/ZIP is copied back.
         output = Path(tempfile.mkdtemp(prefix="sdk-electron-package-"))

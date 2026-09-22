@@ -4,6 +4,7 @@
 !/.gitignore
 !/.gitattributes
 !/.github/
+!/.gitlab-ci.yml
 !/archive/
 !/docs/
 !/odoo-manager-next/

@@ -147,7 +147,8 @@ flowchart LR
 
 | Technologie | Utilité |
 | --- | --- |
-| **GitHub Actions** | Compile nativement macOS (`macos-15`), Linux (`ubuntu-22.04`) et Windows, construit l'image WSL, lance les tests et des tests de démarrage de l'application installée. Le passage à GitLab CI reste à faire. |
+| **GitHub Actions** | Compile nativement macOS (`macos-15`), Linux (`ubuntu-22.04`) et Windows, construit l'image WSL, lance les tests et des tests de démarrage de l'application installée (`.github/workflows/build-desktop.yml`). |
+| **GitLab CI** | Même chaîne sur les runners du GitLab Sudokeys (`.gitlab-ci.yml`). Les deux coexistent pendant la migration. |
 | **Scripts shell / Python** (`scripts/`) | Build local, numérotation des versions, tag de build, image WSL, tests de fumée et autorisation des builds macOS privés. |
 
 ---
@@ -186,7 +187,8 @@ SDK-Local-Manager/
 ├── docs/                        # API locale et application Electron
 ├── archive/cli/                 # Ancien menu en ligne de commande, plus utilisé par l'application
 ├── odoo_next_gui.sh             # Lanceur de développement (API + Next.js)
-└── .github/workflows/           # Compilation multiplateforme
+├── .github/workflows/           # Compilation multiplateforme (GitHub Actions)
+└── .gitlab-ci.yml               # Compilation multiplateforme (GitLab CI)
 ```
 
 ---
@@ -403,6 +405,24 @@ sh scripts/build_all_platforms.sh
 Le script refuse de partir si le dépôt contient des changements non commités ou si la branche n'est pas synchronisée avec `origin`. Il vérifie le backend, les tests et le build Next.js, calcule le prochain tag `app-v<version>-buildN`, le pousse, attend la fin du workflow GitHub Actions puis télécharge les installateurs dans `dist/all-platforms/<tag>/` (avec GitHub CLI authentifié). Options utiles : `--tag`, `--local`, `--no-wait`, `--no-download`.
 
 Chaque runner reconstruit le backend de sa plateforme, le démarre et contrôle `/api/health` avant de produire l'installateur. Sous Windows, le pipeline installe silencieusement le paquet NSIS, lance l'application installée, contrôle de nouveau l'API, puis relance l'installateur pendant que l'application est ouverte pour vérifier la mise à niveau. Les artefacts sont conservés un jour : télécharger les paquets à archiver avant leur expiration.
+
+### Build des trois plateformes avec GitLab CI
+
+```bash
+GITLAB_TOKEN=<jeton> sh scripts/build_all_platforms_gitlab.sh
+```
+
+Même déroulé que le script GitHub, mais le tag est poussé sur le remote `gitlab` et compilé par `.gitlab-ci.yml`. Les numéros de build sont partagés : un numéro déjà utilisé sur GitHub n'est pas repris. `GITLAB_TOKEN` est un jeton d'accès personnel GitLab avec le droit `read_api` ; il sert à suivre le pipeline et à télécharger les installateurs dans `dist/all-platforms/<tag>/`. Sans lui, le script pousse le tag et donne l'adresse du pipeline.
+
+Le pipeline a besoin de trois types de runners :
+
+| Runner | Jobs | Prérequis |
+| --- | --- | --- |
+| Linux, exécuteur Docker | `wsl-image` (Docker-in-Docker, mode privilégié), `linux-backend`, `build-linux` | Aucun : les images sont téléchargées. |
+| macOS, exécuteur shell, tag `macos` | `build-macos` | Node.js 22, Python 3.12, Git. |
+| Windows, exécuteur shell PowerShell, tag `windows` | `build-windows` | Node.js 22, Python 3.12 (lanceur `py`), Git. Le test de l'installateur installe puis désinstalle l'application : machine de build dédiée. |
+
+Les tags des runners macOS et Windows se changent avec les variables CI/CD `MACOS_RUNNER_TAG` et `WINDOWS_RUNNER_TAG`. Un job sans runner reste « en attente » : le script l'affiche tel quel.
 
 ### Builds macOS privés
 

@@ -56,6 +56,7 @@ class InstallerSmokeTestGuardTests(unittest.TestCase):
 
     def test_runs_on_a_windows_ci_runner(self):
         self.assertTrue(BUILD_MODULE.installer_smoke_test_allowed("Windows", {"GITHUB_ACTIONS": "true"}))
+        self.assertTrue(BUILD_MODULE.installer_smoke_test_allowed("Windows", {"GITLAB_CI": "true"}))
 
     def test_is_skipped_on_a_developer_machine(self):
         self.assertFalse(BUILD_MODULE.installer_smoke_test_allowed("Windows", {}))
