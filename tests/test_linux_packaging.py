@@ -13,7 +13,7 @@ class LinuxPackagingTests(unittest.TestCase):
 
         self.assertEqual(
             package.get("homepage"),
-            "https://github.com/BenjaminPeronne/SDK-Local-Manager",
+            "https://gitlab.sudokeys.com/cdp/sdk-local-manager",
         )
 
     def test_desktop_name_matches_app_id_and_is_synchronized(self):
