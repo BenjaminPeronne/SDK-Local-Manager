@@ -1,41 +1,12 @@
 "use client";
 
-import {
-  type MouseEvent as ReactMouseEvent,
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { DropdownMenu } from "@radix-ui/themes";
-import {
-  AlertTriangle,
-  Boxes,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  CloudDownload,
-  Database,
-  ExternalLink,
-  FileArchive,
-  Languages,
-  Loader2,
-  Logs,
-  MoreHorizontal,
-  PackageX,
-  Play,
-  PlusCircle,
-  RefreshCcw,
-  Rocket,
-  Search,
-  Settings,
-  Sparkles,
-  Square,
-  Trash2,
-  X,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Boxes, Database, Logs, Settings } from "lucide-react";
+import { useHiddenBelowStickyHeader } from "@/hooks/use-hidden-below-sticky-header";
+import { useModuleFilters } from "@/hooks/use-module-filters";
+import { useScheduledTimeouts } from "@/hooks/use-scheduled-timeouts";
+import { useStickyProjectHeader } from "@/hooks/use-sticky-project-header";
+import { useToasts } from "@/hooks/use-toasts";
 import { api, API_BASE, ApiUnavailableError, configureRuntimeApiBase, uploadDatabaseBackup } from "@/lib/api";
 import { databaseToKeep, readRememberedDatabases, writeRememberedDatabases } from "@/lib/database-selection";
 import {
@@ -55,7 +26,6 @@ import {
   requestTaskNotificationPermission,
   sendTaskNotification,
 } from "@/lib/desktop-runtime";
-import { compactWorkspacePath } from "@/lib/format";
 import { type JobOutputCache, mergeIncrementalJobOutput } from "@/lib/job-output";
 import {
   isJobActive,
@@ -64,8 +34,8 @@ import {
   jobsFingerprint,
   PROJECT_ARRIVAL_PREFIXES,
 } from "@/lib/jobs";
-import { moduleOriginLabel, moduleRepositoryUrlError, normalizedModuleOrigin, socleAppInstalled } from "@/lib/modules";
-import { fallbackManagerSettings, firstOdooDatabase, offlineDockerGuide } from "@/lib/projects";
+import { moduleRepositoryUrlError, socleAppInstalled } from "@/lib/modules";
+import { fallbackManagerSettings, firstOdooDatabase } from "@/lib/projects";
 import type {
   AddonLinksStatus,
   BackendDiagnostics,
@@ -88,27 +58,12 @@ import type {
   SocleInstallPlan,
   SshPublicKey,
   SystemStatus,
-  Toast,
 } from "@/lib/types";
 import { cn, delay } from "@/lib/utils";
 import { isWslSetupPending } from "@/lib/wsl-setup";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Notice } from "@/components/common/notice";
-import {
-  REFINED_FOCUS_RING,
-  REFINED_IDENTIFIER,
-  REFINED_LABEL,
-  REFINED_MODULE_COLUMNS,
-  REFINED_ROW_TITLE,
-  RefinedPanel,
-  RefinedSectionHeader,
-} from "@/components/common/refined-layout";
+import { ToastStack } from "@/components/common/toast-stack";
 import { AdminPasswordDialog } from "@/components/databases/admin-password-dialog";
 import { AllTranslationsResetDialog } from "@/components/databases/all-translations-reset-dialog";
 import { CreateDatabaseDialog } from "@/components/databases/create-database-dialog";
@@ -118,32 +73,41 @@ import { NeutralizeDatabaseDialog } from "@/components/databases/neutralize-data
 import { RestoreDatabaseDialog } from "@/components/databases/restore-database-dialog";
 import { ActivityTab } from "@/components/jobs/activity-tab";
 import { CancelJobDialog } from "@/components/jobs/cancel-job-dialog";
+import { RunningJobsBanner } from "@/components/jobs/running-jobs-banner";
 import { DeleteModuleCodeDialog } from "@/components/modules/delete-module-code-dialog";
-import { ModuleStateBadge } from "@/components/modules/module-badges";
+import { ModuleSelectionBar, type ModuleSelectionBarProps } from "@/components/modules/module-selection-bar";
+import { ModulesTab } from "@/components/modules/modules-tab";
 import { RepositoryImportDialog } from "@/components/modules/repository-import-dialog";
 import { SocleDialog } from "@/components/modules/socle-dialog";
 import { TranslationResetDialog } from "@/components/modules/translation-reset-dialog";
 import { UninstallModulesDialog } from "@/components/modules/uninstall-modules-dialog";
 import { UpdateAllModulesDialog } from "@/components/modules/update-all-modules-dialog";
 import { ZipImportDialog } from "@/components/modules/zip-import-dialog";
+import { AddonLinksNotice } from "@/components/notices/addon-links-notice";
+import { ApiUnavailableNotice } from "@/components/notices/api-unavailable-notice";
+import { DegradedBackendNotice } from "@/components/notices/degraded-backend-notice";
+import { DockerNotice } from "@/components/notices/docker-notice";
+import { MigrationNotice } from "@/components/notices/migration-notice";
+import { RefinedInterfaceNotice } from "@/components/notices/refined-interface-notice";
+import { StagingCleanupNotice } from "@/components/notices/staging-cleanup-notice";
+import { TraefikNotice } from "@/components/notices/traefik-notice";
 import { OnboardingDialog } from "@/components/onboarding/onboarding-dialog";
 import { SshKeyDialog } from "@/components/onboarding/ssh-key-dialog";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
 import { DeleteProjectDialog } from "@/components/projects/delete-project-dialog";
-import { MigrationProposal } from "@/components/projects/migration-proposal";
 import { ProjectHeader } from "@/components/projects/project-header";
 import { ProjectSettingsTab } from "@/components/projects/project-settings-tab";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
-import { type SettingsSectionId } from "@/components/settings/settings-section";
+import type { SettingsSectionId } from "@/components/settings/settings-section";
 import { AboutDialog } from "@/components/shell/about-dialog";
 import { AppSidebar } from "@/components/shell/app-sidebar";
+import { LoadingScreen } from "@/components/shell/loading-screen";
 import { WelcomeScreen } from "@/components/welcome/welcome-screen";
 import { WslSetupDialog } from "@/components/wsl-setup";
 import appIcon from "./icon.png";
 import localIcon from "./local-icon.png";
 
 // Distance de défilement sur laquelle le bandeau des onglets collés passe de transparent à opaque.
-const TABS_BACKDROP_FADE_PX = 96;
 
 const BOOTSTRAP_RETRY_DELAYS_MS = [0, 500, 1000, 2000];
 
@@ -194,10 +158,6 @@ export default function Home() {
   const databaseOwner = useRef("");
   const [modules, setModules] = useState<ModuleInfo[]>([]);
   const [loadingModules, setLoadingModules] = useState(false);
-  const [moduleSearch, setModuleSearch] = useState("");
-  const [moduleFilter, setModuleFilter] = useState("all");
-  const [moduleOriginFilter, setModuleOriginFilter] = useState("all");
-  const [modulePage, setModulePage] = useState(1);
   const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
   const [socleDialogOpen, setSocleDialogOpen] = useState(false);
   const [selectedSoclePresets, setSelectedSoclePresets] = useState<Set<string>>(new Set());
@@ -220,7 +180,6 @@ export default function Home() {
   const [error, setError] = useState("");
   const [apiUnavailable, setApiUnavailable] = useState(false);
   const [desktopRuntime, setDesktopRuntime] = useState(false);
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const [repositoryOpen, setRepositoryOpen] = useState(false);
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [repositoryBranch, setRepositoryBranch] = useState("");
@@ -258,7 +217,6 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState("bases");
   const [pendingCreatedProjectName, setPendingCreatedProjectName] = useState("");
   const [pendingCreatedDatabase, setPendingCreatedDatabase] = useState<{ jobId: number; project: string; database: string } | null>(null);
-  const toastId = useRef(1);
   const lastDockerState = useRef<string | null>(null);
   const pendingDockerState = useRef<{ state: string; count: number } | null>(null);
   const consecutiveApiFailures = useRef(0);
@@ -272,7 +230,7 @@ export default function Home() {
   const jobNotificationsInitialized = useRef(false);
   const lastSynchronizedJobCompletion = useRef("");
   const modulesRequestGeneration = useRef(0);
-  const scheduledTimeouts = useRef<Set<number>>(new Set());
+  const schedule = useScheduledTimeouts();
   const onboardingPrompted = useRef(false);
   const wslSetupPrompted = useRef(false);
   const pendingProjectNames = useRef(new Set<string>());
@@ -352,102 +310,11 @@ export default function Home() {
     () => sshKeys.find((key) => key.name === selectedSshKeyName) || sshKeys[0] || null,
     [selectedSshKeyName, sshKeys],
   );
-
-  const deferredModuleSearch = useDeferredValue(moduleSearch);
-  const filteredModules = useMemo(() => {
-    const query = deferredModuleSearch.trim().toLowerCase();
-    return modules
-      .filter((module) => !query || module.name.toLowerCase().includes(query))
-      .filter((module) => (
-        moduleFilter === "all" ||
-        module.state === moduleFilter ||
-        (moduleFilter === "uninstalled" && module.state === "disponible")
-      ))
-      .filter((module) => moduleOriginFilter === "all" || normalizedModuleOrigin(module.origin, module.source_path || module.path) === moduleOriginFilter);
-  }, [deferredModuleSearch, modules, moduleFilter, moduleOriginFilter]);
+  const moduleFilters = useModuleFilters(modules, selectedProject?.name, selectedDb);
   const refinedInterface = settings?.interface_layout === "refined";
   const stickyHeader = settings?.sticky_header ?? false;
-  const projectHeaderRef = useRef<HTMLElement>(null);
-  const [projectHeaderHeight, setProjectHeaderHeight] = useState(0);
-  const projectTabsRef = useRef<HTMLDivElement>(null);
-  const [projectTabsHeight, setProjectTabsHeight] = useState(0);
-  const [projectHeaderCompact, setProjectHeaderCompact] = useState(false);
-
-  useEffect(() => {
-    if (!stickyHeader) {
-      setProjectHeaderCompact(false);
-      return;
-    }
-    const onScroll = () => {
-      // Hystérésis : le passage en mode compact réduit la hauteur de l'en-tête, sans quoi il oscillerait au seuil.
-      setProjectHeaderCompact((compact) => (compact ? window.scrollY > 8 : window.scrollY > 64));
-    };
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [stickyHeader]);
-
-  useEffect(() => {
-    const tabs = projectTabsRef.current;
-    if (!stickyHeader || !tabs) return;
-    let frame = 0;
-    // Variable CSS écrite directement : un état React re-rendrait toute la page à chaque pixel défilé.
-    const update = () => {
-      frame = 0;
-      tabs.style.setProperty("--tabs-backdrop", String(Math.min(1, Math.max(0, window.scrollY / TABS_BACKDROP_FADE_PX))));
-    };
-    const onScroll = () => {
-      if (!frame) frame = window.requestAnimationFrame(update);
-    };
-    update();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      if (frame) window.cancelAnimationFrame(frame);
-    };
-  }, [stickyHeader, selectedProject?.name]);
-
-  const [moduleSelectionBanner, setModuleSelectionBanner] = useState<HTMLDivElement | null>(null);
-  const [moduleSelectionBannerVisible, setModuleSelectionBannerVisible] = useState(true);
-
-  useEffect(() => {
-    if (!moduleSelectionBanner) {
-      setModuleSelectionBannerVisible(true);
-      return;
-    }
-    // Avec l'en-tête fixe, le bandeau passé sous l'en-tête et les onglets est considéré comme masqué.
-    const hiddenTop = stickyHeader && window.matchMedia("(min-width: 1024px)").matches ? projectHeaderHeight + (projectTabsHeight || 72) : 0;
-    const observer = new IntersectionObserver(
-      ([entry]) => setModuleSelectionBannerVisible(entry.isIntersecting),
-      { rootMargin: `-${hiddenTop}px 0px 0px 0px` },
-    );
-    observer.observe(moduleSelectionBanner);
-    return () => observer.disconnect();
-  }, [moduleSelectionBanner, stickyHeader, projectHeaderHeight, projectTabsHeight]);
-
-  // L'en-tête et les onglets n'existent qu'avec un projet ouvert : l'application démarre sur
-  // l'accueil. Mesurés une seule fois au lancement, ils restaient à 0 px, et onglets comme
-  // en-tête du tableau des modules se collaient en haut de l'écran, sous l'en-tête fixe.
-  useEffect(() => {
-    const header = projectHeaderRef.current;
-    const tabs = projectTabsRef.current;
-    if (!stickyHeader || !projectViewOpen || !header) return;
-    const measure = () => {
-      setProjectHeaderHeight(header.offsetHeight);
-      setProjectTabsHeight(tabs?.offsetHeight ?? 0);
-    };
-    const observer = new ResizeObserver(measure);
-    observer.observe(header);
-    if (tabs) observer.observe(tabs);
-    measure();
-    return () => observer.disconnect();
-  }, [stickyHeader, projectViewOpen]);
-  const modulesPerPage = 50;
-  const modulePageCount = Math.max(1, Math.ceil(filteredModules.length / modulesPerPage));
-  const visibleModules = useMemo(() => {
-    const start = (modulePage - 1) * modulesPerPage;
-    return filteredModules.slice(start, start + modulesPerPage);
-  }, [filteredModules, modulePage, modulesPerPage]);
+  const { projectHeaderRef, projectHeaderHeight, projectTabsRef, projectTabsHeight, projectHeaderCompact } = useStickyProjectHeader(stickyHeader, projectViewOpen, selectedProject?.name);
+  const [setModuleSelectionBanner, moduleSelectionBannerHidden] = useHiddenBelowStickyHeader(stickyHeader, projectHeaderHeight, projectTabsHeight);
 
   const moduleByName = useMemo(() => new Map(modules.map((module) => [module.name, module])), [modules]);
   const installedSoclePresetIds = useMemo<Set<string>>(
@@ -468,38 +335,13 @@ export default function Home() {
     }
     return [];
   }, [jobs, selectedProject?.name]);
-  const filteredModuleNames = useMemo(() => filteredModules.map((module) => module.name), [filteredModules]);
+  const filteredModuleNames = useMemo(() => moduleFilters.filtered.map((module) => module.name), [moduleFilters.filtered]);
   const selectedFilteredModuleCount = useMemo(
     () => filteredModuleNames.filter((name) => selectedModules.has(name)).length,
     [filteredModuleNames, selectedModules],
   );
   const allFilteredModulesSelected = filteredModuleNames.length > 0 && selectedFilteredModuleCount === filteredModuleNames.length;
-  const fallbackDockerGuide = useMemo(() => offlineDockerGuide(), []);
-  const showModuleLocations = settings?.show_technical_details ?? false;
-  const moduleTableGridColumns = showModuleLocations
-    ? "xl:grid-cols-[minmax(210px,1.35fr)_100px_110px_150px_minmax(220px,1.15fr)_200px]"
-    : "xl:grid-cols-[minmax(210px,1.35fr)_100px_110px_150px_200px]";
-
-  const schedule = useCallback((callback: () => void | Promise<void>, delay: number) => {
-    const timeout = window.setTimeout(() => {
-      scheduledTimeouts.current.delete(timeout);
-      void callback();
-    }, delay);
-    scheduledTimeouts.current.add(timeout);
-  }, []);
-
-  const pushToast = useCallback((kind: Toast["kind"], message: string) => {
-    const id = toastId.current++;
-    setToasts((current) => [...current, { id, kind, message }]);
-    schedule(() => setToasts((current) => current.filter((toast) => toast.id !== id)), kind === "error" ? 8000 : 4200);
-    if (kind === "error") {
-      void fetch(`${API_BASE}/api/errors/report`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
-      }).catch(() => undefined);
-    }
-  }, [schedule]);
+  const { toasts, pushToast } = useToasts(schedule);
 
   const notifyJobCompletion = useCallback((job: Job) => {
     const successful = job.status === "done";
@@ -823,11 +665,6 @@ export default function Home() {
     void Promise.all([refreshOverview(), refreshModules(), refreshAddonLinks()]);
   }, [jobs, refreshAddonLinks, refreshModules, refreshOverview, selectedProject?.name]);
 
-  useEffect(() => () => {
-    for (const timeout of scheduledTimeouts.current) window.clearTimeout(timeout);
-    scheduledTimeouts.current.clear();
-  }, []);
-
   useEffect(() => {
     setDesktopRuntime(isDesktopRuntime());
     void applicationVersion().then(setAppVersion);
@@ -1041,6 +878,14 @@ export default function Home() {
     setSoclePlan(null);
     setSocleDialogOpen(true);
     void loadSocleCatalog();
+  }
+
+  function openRepositoryImport() {
+    setRepositoryOpen(true);
+  }
+
+  function openZipImport() {
+    setZipDialogOpen(true);
   }
 
   async function convertWslAddonLinks() {
@@ -1317,6 +1162,16 @@ export default function Home() {
     await Promise.all([refreshOverview(), refreshSystemStatus(), refreshJobs()]);
   }
 
+  /** Ouvre le suivi d'une action : son projet, puis l'onglet Activité sur cette action. */
+  function followJob(job: Job) {
+    if (job.project) {
+      setSelectedProjectName(job.project);
+      setSelectedDb((currentDb) => currentDb || "postgres");
+    }
+    selectJob(job.id);
+    setActiveTab("logs");
+  }
+
   function selectJob(jobId: number) {
     stopLiveLogStream();
     setExternalLogView(null);
@@ -1556,14 +1411,6 @@ export default function Home() {
     }
   }, [activeTab, selectedProjectOnline]);
 
-  useEffect(() => {
-    setModulePage(1);
-  }, [deferredModuleSearch, moduleFilter, moduleOriginFilter, selectedDb, selectedProject?.name, modulesPerPage]);
-
-  useEffect(() => {
-    if (modulePage > modulePageCount) setModulePage(modulePageCount);
-  }, [modulePage, modulePageCount]);
-
   const hasModuleSelection = selectedModules.size > 0;
   useEffect(() => {
     if (activeTab !== "modules" || !hasModuleSelection) return;
@@ -1578,28 +1425,6 @@ export default function Home() {
     window.addEventListener("keydown", clearSelectionOnEscape);
     return () => window.removeEventListener("keydown", clearSelectionOnEscape);
   }, [activeTab, hasModuleSelection]);
-
-  const toggleModuleSelection = useCallback((name: string, checked: boolean) => {
-    setSelectedModules((current) => {
-      const next = new Set(current);
-      if (checked) next.add(name);
-      else next.delete(name);
-      return next;
-    });
-  }, []);
-
-  const toggleModuleFromRow = useCallback((event: ReactMouseEvent<HTMLElement>, name: string) => {
-    const target = event.target as HTMLElement;
-    // Les contrôles gardent leur action, y compris les menus rendus en portail dont les clics remontent jusqu'ici.
-    if (target.closest("button, a, input, select, textarea, label, [role=menu], [role=menuitem], [role=dialog]")) return;
-    // Sélectionner un nom ou un chemin pour le copier ne coche pas la ligne.
-    if (window.getSelection()?.toString()) return;
-    setSelectedModules((current) => {
-      const next = new Set(current);
-      if (!next.delete(name)) next.add(name);
-      return next;
-    });
-  }, []);
 
   const toggleFilteredModules = useCallback(
     (checked: boolean) => {
@@ -1617,267 +1442,42 @@ export default function Home() {
 
   if (initializing) {
     return (
-      <main className="sdk-shell grid min-h-screen place-items-center bg-background px-6">
-        <div className="w-full max-w-md rounded-lg border bg-card p-6 text-center shadow-sm">
-          <img
-            src={selectedAppIcon.src}
-            alt="SDK Local Manager"
-            className={cn(
-              "mx-auto h-16 w-16 object-cover",
-              settings?.interface_icon === "local" ? "rounded-full" : "rounded-[15px]",
-            )}
-          />
-          <div className="mt-3 flex justify-center">
-            {initializationError ? (
-              <AlertTriangle className="h-6 w-6 text-amber-600" />
-            ) : (
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            )}
-          </div>
-          <h1 className="mt-4 text-lg font-semibold">Chargement du gestionnaire</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {initializationMessage}
-          </p>
-          {initializationError && (
-            <div className="mt-4 space-y-3">
-              <p className="break-words rounded-md border border-amber-200 bg-amber-50 p-3 text-left text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-                {initializationError}
-              </p>
-              {backendDiagnostics && (
-                <details className="rounded-md border bg-muted/40 p-3 text-left text-xs">
-                  <summary className="cursor-pointer font-medium">Détails techniques</summary>
-                  <div className="mt-2 break-all text-muted-foreground">Journal : {backendDiagnostics.log_path}</div>
-                  <pre className="log-terminal mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-2 text-[11px] text-slate-100">
-                    {backendDiagnostics.details}
-                  </pre>
-                </details>
-              )}
-              <Button className="w-full" onClick={initializeApplication}>
-                <RefreshCcw className="h-4 w-4" />
-                Réessayer
-              </Button>
-            </div>
-          )}
-        </div>
-      </main>
+      <LoadingScreen
+        appIcon={selectedAppIcon}
+        roundIcon={settings?.interface_icon === "local"}
+        message={initializationMessage}
+        error={initializationError}
+        diagnostics={backendDiagnostics}
+        onRetry={initializeApplication}
+      />
     );
   }
 
-  // Filtres et sélection des modules : identiques en affichage classique et affiné.
-  const moduleFiltersBlock = (
-    <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_180px_210px_220px]">
-      <div className="relative">
-        <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input className="pl-9" placeholder="Rechercher par nom de module" value={moduleSearch} onChange={(event) => setModuleSearch(event.target.value)} />
-      </div>
-      <Select value={moduleFilter} onValueChange={setModuleFilter}>
-        <SelectTrigger placeholder="État">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Tous les états</SelectItem>
-          <SelectItem value="installed">Installés</SelectItem>
-          <SelectItem value="uninstalled">Disponibles</SelectItem>
-          <SelectItem value="to upgrade">À mettre à jour</SelectItem>
-        </SelectContent>
-      </Select>
-      <Select value={moduleOriginFilter} onValueChange={setModuleOriginFilter}>
-        <SelectTrigger placeholder="Origine">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Toutes les origines</SelectItem>
-          <SelectItem value="enterprise">Odoo Enterprise</SelectItem>
-          <SelectItem value="other">Autre</SelectItem>
-        </SelectContent>
-      </Select>
-      <Select value={selectedDb} onValueChange={(db) => chooseDatabase(db)}>
-        <SelectTrigger placeholder="Base Odoo">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {odooDatabases.map((db) => (
-            <SelectItem key={db} value={db}>
-              {db}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
 
-  function moduleSelectionBar(floating = false) {
-    const count = selectedModuleList.length;
-    const installable = selectedInstallableModuleList.length;
-    const installed = selectedInstalledModuleList.length;
-    const removable = selectedRemovableModuleList.length;
-    const busy = !canUseDb || loading;
-    const clearSelection = () => setSelectedModules(new Set());
-    const details = [installable && `${installable} disponible(s)`, installed && `${installed} installé(s)`].filter(Boolean).join(", ");
-    const selectAllFiltered = !allFilteredModulesSelected && filteredModuleNames.length > 0 && (
-      <button
-        type="button"
-        className={cn("shrink-0 rounded-sm text-sm font-medium text-primary underline-offset-2 hover:underline", REFINED_FOCUS_RING)}
-        onClick={() => toggleFilteredModules(true)}
-      >
-        Tout sélectionner ({filteredModuleNames.length})
-      </button>
-    );
+  const moduleSelectionBarProps = {
+    selectedCount: selectedModuleList.length,
+    installableModules: selectedInstallableModuleList,
+    installedModules: selectedInstalledModuleList,
+    removableModules: selectedRemovableModuleList,
+    filteredCount: filteredModuleNames.length,
+    allFilteredSelected: allFilteredModulesSelected,
+    busy: !canUseDb || loading,
+    loading,
+    onSelectAllFiltered: () => toggleFilteredModules(true),
+    onClearSelection: () => setSelectedModules(new Set()),
+    onInstall: (names: string[]) => void createJob("install_module", { project: selectedProject?.name, db: selectedDb, modules: names.join(",") }),
+    onUpdate: (names: string[]) => void createJob("update_module", { project: selectedProject?.name, db: selectedDb, modules: names.join(",") }),
+    onUninstall: requestUninstall,
+    onResetTranslations: requestTranslationReset,
+    onDeleteCode: requestDeleteCode,
+  } satisfies ModuleSelectionBarProps;
 
-    if (!count) {
-      return (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/45 px-3 py-2.5 text-sm">
-          <Checkbox
-            checked={false}
-            disabled={!filteredModuleNames.length}
-            onCheckedChange={() => toggleFilteredModules(true)}
-            aria-label={`Sélectionner les ${filteredModuleNames.length} modules affichés par la recherche`}
-          />
-          <span className="min-w-0 flex-1 text-muted-foreground">Coche des modules pour agir dessus.</span>
-          {selectAllFiltered}
-        </div>
-      );
-    }
-
-    // Seules les actions applicables sont proposées ; l'action la plus probable est pleine.
-    return (
-      <div
-        className={cn(
-          "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm",
-          floating
-            ? "floating-selection-bar pointer-events-auto max-w-full justify-center rounded-xl border border-primary/45 p-2 shadow-[0_18px_40px_-12px_rgb(0_0_0/0.45)] ring-1 ring-black/5 dark:ring-white/10"
-            : "rounded-md border border-primary/35 bg-primary/[0.06] px-3 py-2 dark:bg-primary/[0.12]",
-        )}
-      >
-        {/* Deux groupes : en largeur réduite, les actions passent ensemble à la ligne, jamais bouton par bouton. */}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <Checkbox
-            checked={allFilteredModulesSelected && count === filteredModuleNames.length ? true : "indeterminate"}
-            onCheckedChange={clearSelection}
-            aria-label="Désélectionner tous les modules"
-            title="Désélectionner tous les modules"
-          />
-          <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 pr-1">
-            <span className="font-semibold">{count} sélectionné(s)</span>
-            {details && <span className="text-muted-foreground">· {details}</span>}
-          </span>
-          {!floating && selectAllFiltered}
-        </div>
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          {installable > 0 && (
-            <Button
-              size="sm"
-              variant="success"
-              disabled={busy}
-              onClick={() => createJob("install_module", { project: selectedProject?.name, db: selectedDb, modules: selectedInstallableModuleList.join(",") })}
-            >
-              <PlusCircle className="h-4 w-4" />
-              Installer ({installable})
-            </Button>
-          )}
-          {installed > 0 && (
-            <Button
-              size="sm"
-              variant={installable > 0 ? "outline" : "default"}
-              disabled={busy}
-              onClick={() => createJob("update_module", { project: selectedProject?.name, db: selectedDb, modules: selectedInstalledModuleList.join(",") })}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              Mettre à jour ({installed})
-            </Button>
-          )}
-          {installed > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-red-300 text-red-700 hover:border-red-400 hover:bg-red-50 hover:text-red-800 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/60"
-              disabled={busy}
-              onClick={() => requestUninstall(selectedInstalledModuleList)}
-            >
-              <PackageX className="h-4 w-4" />
-              Désinstaller ({installed})
-            </Button>
-          )}
-          {(installed > 0 || removable > 0) && (
-            <DropdownMenu.Root modal={false}>
-              <DropdownMenu.Trigger>
-                <Button size="sm" variant="outline" disabled={loading} aria-label="Autres actions sur la sélection">
-                  <MoreHorizontal className="h-4 w-4" />
-                  Plus
-                </Button>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Content align="end" className="min-w-60">
-                <DropdownMenu.Item disabled={!installed || busy} onSelect={() => requestTranslationReset(selectedInstalledModuleList)}>
-                  <Languages className="h-4 w-4" />
-                  Réinitialiser les traductions ({installed})
-                </DropdownMenu.Item>
-                <DropdownMenu.Separator />
-                <DropdownMenu.Item color="red" disabled={!removable} onSelect={() => requestDeleteCode(selectedRemovableModuleList)}>
-                  <Trash2 className="h-4 w-4" />
-                  Supprimer le code du projet ({removable})
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Root>
-          )}
-          <span className="mx-0.5 hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
-          <Button size="sm" variant="ghost" onClick={clearSelection} title="Désélectionner tous les modules (Échap)">
-            <X className="h-4 w-4" />
-            Désélectionner
-            <kbd className="ml-0.5 rounded border px-1 font-mono text-[10px] font-normal text-muted-foreground">Échap</kbd>
-          </Button>
-        </div>
-      </div>
-    );
-  }
 
   const showFloatingModuleActions =
-    activeTab === "modules" && selectedModuleList.length > 0 && Boolean(moduleSelectionBanner) && !moduleSelectionBannerVisible;
+    activeTab === "modules" && selectedModuleList.length > 0 && moduleSelectionBannerHidden;
 
   // Le ref suit la barre en place : quand elle sort de l'écran, sa copie flottante prend le relais.
-  const moduleSelectionBlock = <div ref={setModuleSelectionBanner}>{moduleSelectionBar()}</div>;
-
-  const modulePaginationBlock = filteredModules.length > 0 && (
-    <div className="flex flex-col gap-3 border-t bg-muted/30 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
-      <span className="text-muted-foreground">
-        {Math.min((modulePage - 1) * modulesPerPage + 1, filteredModules.length)}–{Math.min(modulePage * modulesPerPage, filteredModules.length)} sur {filteredModules.length} module(s)
-      </span>
-      <div className="flex items-center gap-2">
-        <Button size="icon" variant="outline" disabled={modulePage <= 1} onClick={() => setModulePage((page) => Math.max(1, page - 1))} aria-label="Page précédente" title="Page précédente">
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <span className="min-w-20 text-center tabular-nums">Page {modulePage}/{modulePageCount}</span>
-        <Button size="icon" variant="outline" disabled={modulePage >= modulePageCount} onClick={() => setModulePage((page) => Math.min(modulePageCount, page + 1))} aria-label="Page suivante" title="Page suivante">
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
-  );
-
-  const moduleEmptyState = (
-    <div className="grid justify-items-center gap-3 p-6 text-center text-sm text-muted-foreground">
-      <span>
-        {loadingModules
-          ? "Lecture des modules du projet…"
-          : modules.length
-            ? "Aucun module ne correspond aux filtres actuels."
-            : "Aucun module Odoo n’a été détecté dans les dossiers addons du projet."}
-      </span>
-      {!loadingModules && (moduleSearch || moduleFilter !== "all" || moduleOriginFilter !== "all") && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setModuleSearch("");
-            setModuleFilter("all");
-            setModuleOriginFilter("all");
-          }}
-        >
-          Réinitialiser les filtres
-        </Button>
-      )}
-    </div>
-  );
+  const moduleSelectionBlock = <div ref={setModuleSelectionBanner}><ModuleSelectionBar {...moduleSelectionBarProps} /></div>;
 
   return (
     <main className="sdk-shell min-h-screen overflow-x-clip">
@@ -1929,226 +1529,62 @@ export default function Home() {
 
           <div className={cn("mx-auto max-w-[1500px] px-4 py-4", showFloatingModuleActions && "pb-32 xl:pb-24")}>
             {apiUnavailable && (
-              <Notice
-                tone="danger"
-                icon={AlertTriangle}
-                title="Service local indisponible"
-                actions={
-                  <>
-                    <Button className="w-full sm:w-auto" size="sm" onClick={() => Promise.all([refreshOverview(), refreshSystemStatus(), loadSettings()])}>
-                      <RefreshCcw className="h-4 w-4" />
-                      Réessayer
-                    </Button>
-                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl(fallbackDockerGuide.download_url)}>
-                      <CloudDownload className="h-4 w-4" />
-                      Télécharger Docker
-                    </Button>
-                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl(fallbackDockerGuide.install_url)}>
-                      <ExternalLink className="h-4 w-4" />
-                      Guide Docker
-                    </Button>
-                    <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={!desktopRuntime} onClick={requestDockerStart}>
-                      <Play className="h-4 w-4" />
-                      Ouvrir Docker
-                    </Button>
-                  </>
-                }
-              >
-                L'application n'arrive pas à joindre son API locale. Attends quelques secondes puis actualise. Si Docker n'est pas encore installé,
-                installe Docker Desktop avant de lancer les projets Odoo.
-                <div className="mt-3 rounded-md border border-red-200 bg-white/70 p-3 text-red-950 dark:border-red-800 dark:bg-red-950/55 dark:text-red-50">
-                  <div className="font-medium">{fallbackDockerGuide.title}</div>
-                  <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-5">
-                    {fallbackDockerGuide.steps.map((step) => (
-                      <li key={step}>{step}</li>
-                    ))}
-                  </ol>
-                </div>
-              </Notice>
+              <ApiUnavailableNotice
+                desktopRuntime={desktopRuntime}
+                loadSettings={loadSettings}
+                openUrl={openUrl}
+                refreshOverview={refreshOverview}
+                refreshSystemStatus={refreshSystemStatus}
+                requestDockerStart={requestDockerStart}
+              />
             )}
             {degradedBackendReason && (
-              <Notice
-                tone="warning"
-                icon={AlertTriangle}
-                title="Mode Windows, plus lent"
-                actions={
-                  <>
-                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl("https://aka.ms/enablevirtualization")}>
-                      <ExternalLink className="h-4 w-4" />
-                      Guide Microsoft
-                    </Button>
-                    <Button className="w-full sm:w-auto" size="sm" disabled={!desktopBridge()?.relaunch} onClick={() => desktopBridge()?.relaunch?.()}>
-                      <RefreshCcw className="h-4 w-4" />
-                      Relancer
-                    </Button>
-                  </>
-                }
-              >
-                {degradedBackendReason} Les projets restent utilisables depuis Windows, mais Odoo y démarre en une minute environ, contre quelques secondes dans l’environnement Linux.
-              </Notice>
+              <DegradedBackendNotice degradedBackendReason={degradedBackendReason} openUrl={openUrl} />
             )}
             {systemStatus && !systemStatus.docker.running && (
-              <Notice
-                tone="warning"
-                icon={AlertTriangle}
-                title="Docker n’est pas disponible"
-                actions={
-                  <>
-                    {systemStatus.docker.state === "missing" && systemStatus.docker.install_guide?.download_url && (
-                      <Button className="w-full sm:w-auto" size="sm" onClick={() => openUrl(systemStatus.docker.install_guide?.download_url)}>
-                        <CloudDownload className="h-4 w-4" />
-                        Télécharger Docker
-                      </Button>
-                    )}
-                    {systemStatus.docker.can_start && (
-                      <Button className="w-full sm:w-auto" size="sm" disabled={loading} onClick={requestDockerStart}>
-                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                        Ouvrir Docker
-                      </Button>
-                    )}
-                    {systemStatus.docker.install_guide?.install_url && (
-                      <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl(systemStatus.docker.install_guide?.install_url)}>
-                        <ExternalLink className="h-4 w-4" />
-                        Guide Docker
-                      </Button>
-                    )}
-                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={openSettingsDialog}>
-                      <Settings className="h-4 w-4" />
-                      Paramètres
-                    </Button>
-                  </>
-                }
-              >
-                {systemStatus.docker.message}
-                {systemStatus.docker.state === "missing" && systemStatus.docker.install_guide && (
-                  <div className="mt-3 rounded-md border border-amber-200 bg-white/70 p-3 text-amber-950 dark:border-amber-800 dark:bg-amber-950/55 dark:text-amber-50">
-                    <div className="font-medium">{systemStatus.docker.install_guide.title}</div>
-                    <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-5">
-                      {systemStatus.docker.install_guide.steps.map((step) => (
-                        <li key={step}>{step}</li>
-                      ))}
-                    </ol>
-                  </div>
-                )}
-              </Notice>
+              <DockerNotice
+                loading={loading}
+                openSettingsDialog={openSettingsDialog}
+                openUrl={openUrl}
+                requestDockerStart={requestDockerStart}
+                docker={systemStatus.docker}
+              />
             )}
             {systemStatus?.traefik && !systemStatus.traefik.running && (
-              <Notice
-                tone="info"
-                icon={AlertTriangle}
-                title="Traefik n’est pas prêt"
-                actions={
-                  <>
-                    {systemStatus.traefik.state === "port_busy" && desktopBridge()?.stopLegacyTraefik ? (
-                      <Button
-                        className="w-full sm:w-auto"
-                        size="sm"
-                        disabled={loading}
-                        title="Les projets restés sous Docker Desktop ne seront plus accessibles par leur adresse tant qu’il est arrêté."
-                        onClick={requestLegacyTraefikStop}
-                      >
-                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
-                        Arrêter l’ancien Traefik
-                      </Button>
-                    ) : (
-                      <Button
-                        className="w-full sm:w-auto"
-                        size="sm"
-                        disabled={!systemStatus.docker.running || loading}
-                        onClick={requestTraefikInstall}
-                      >
-                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                        {systemStatus.traefik.installed ? "Démarrer Traefik" : "Installer Traefik"}
-                      </Button>
-                    )}
-                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={openSettingsDialog}>
-                      <Settings className="h-4 w-4" />
-                      Paramètres
-                    </Button>
-                  </>
-                }
-              >
-                {systemStatus.traefik.message}
-                {systemStatus.traefik.requires_docker ? " Docker doit être installé et démarré avant cette étape." : ""}
-                <div className="mt-1 break-all text-xs opacity-80">Dossier attendu : {systemStatus.traefik.path}</div>
-              </Notice>
+              <TraefikNotice
+                loading={loading}
+                openSettingsDialog={openSettingsDialog}
+                requestLegacyTraefikStop={requestLegacyTraefikStop}
+                requestTraefikInstall={requestTraefikInstall}
+                traefik={systemStatus.traefik}
+                dockerRunning={systemStatus.docker.running}
+              />
             )}
             {migrationBannerVisible && (
-              <Notice
-                tone="success"
-                icon={Rocket}
-                title="Ces projets peuvent démarrer bien plus vite"
-                onDismiss={() => setMigrationBannerClosed(true)}
-                dismissLabel="Masquer jusqu’au prochain démarrage"
-              >
-                <span title={migration?.source}>
-                  Ils sont encore rangés sur ton disque Windows, où Odoo met près d’une minute à démarrer ; ici, quelques secondes.
-                  Le gestionnaire en fait une copie et ne touche pas au dossier d’origine.
-                </span>
-                <div className="mt-3 flex flex-col gap-3">
-                  <MigrationProposal candidates={migrationCandidates} loading={loading} onMigrate={requestProjectMigration} />
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                    <button
-                      type="button"
-                      className="underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => void dismissMigrationProposal()}
-                    >
-                      Ne plus proposer
-                    </button>
-                    <span>Les projets resteront copiables depuis Paramètres, section Général.</span>
-                  </div>
-                </div>
-              </Notice>
+              <MigrationNotice
+                dismissMigrationProposal={dismissMigrationProposal}
+                loading={loading}
+                migration={migration}
+                migrationCandidates={migrationCandidates}
+                requestProjectMigration={requestProjectMigration}
+                setMigrationBannerClosed={setMigrationBannerClosed}
+              />
             )}
             {(systemStatus?.abandoned_staging?.count ?? 0) > 0 && (
-              <Notice
-                tone="neutral"
-                icon={Trash2}
-                title="Créations de projet interrompues"
-                actions={
-                  <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={loading} onClick={requestStagingCleanup}>
-                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                    Nettoyer
-                  </Button>
-                }
-              >
-                {systemStatus!.abandoned_staging!.count} dossier(s) de préparation occupent de l’espace disque sans servir à aucun projet. Les supprimer ne touche à aucun projet ni à aucune base.
-              </Notice>
+              <StagingCleanupNotice
+                loading={loading}
+                requestStagingCleanup={requestStagingCleanup}
+                count={systemStatus!.abandoned_staging!.count}
+              />
             )}
             {selectedProject && addonLinks?.supported && (addonLinks.wsl_links > 0 || addonLinks.interrupted) && (
-              <Notice
-                tone="warning"
-                icon={AlertTriangle}
-                title={addonLinks.interrupted ? "Conversion des liens d’addons interrompue" : "Liens d’addons créés par une ancienne version"}
-                actions={
-                  <>
-                    <Button
-                      className="w-full sm:w-auto"
-                      size="sm"
-                      disabled={loading || !addonLinks.native_symlinks || selectedProjectOnline}
-                      onClick={convertWslAddonLinks}
-                    >
-                      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-                      {addonLinks.interrupted ? "Reprendre la conversion" : "Convertir les liens"}
-                    </Button>
-                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => void refreshAddonLinks()}>
-                      Vérifier à nouveau
-                    </Button>
-                  </>
-                }
-              >
-                {addonLinks.interrupted
-                  ? "Relance la conversion pour la terminer : certains modules peuvent être absents tant qu’elle n’est pas achevée."
-                  : `${addonLinks.wsl_links} lien(s) de ce projet ont été créés par WSL. Windows ne peut pas les lire, ce qui ralentit fortement la liste des modules. La conversion les remplace par des liens Windows identiques, lus par Windows et par Docker.`}
-                {!addonLinks.native_symlinks && (
-                  <div className="mt-1 text-xs opacity-80">
-                    Active d’abord le mode développeur Windows : Paramètres &gt; Système &gt; Espace développeurs.
-                  </div>
-                )}
-                {addonLinks.native_symlinks && selectedProjectOnline && (
-                  <div className="mt-1 text-xs opacity-80">Arrête le projet avant la conversion.</div>
-                )}
-              </Notice>
+              <AddonLinksNotice
+                addonLinks={addonLinks}
+                convertWslAddonLinks={convertWslAddonLinks}
+                loading={loading}
+                refreshAddonLinks={refreshAddonLinks}
+                selectedProjectOnline={selectedProjectOnline}
+              />
             )}
             {error && (
               <Notice tone="danger" icon={AlertTriangle} title="L’action a échoué">
@@ -2156,58 +1592,13 @@ export default function Home() {
               </Notice>
             )}
             {settings?.interface_layout === "classic" && !settings.beta_interface_banner_dismissed && (
-              <Notice
-                tone="accent"
-                icon={Sparkles}
-                title="Essaie la nouvelle interface (bêta)"
-                onDismiss={() => void dismissRefinedInterfaceProposal()}
-                dismissLabel="Ne plus proposer"
-                actions={
-                  <Button className="w-full sm:w-auto" size="sm" onClick={() => void switchToRefinedInterface()}>
-                    <Sparkles className="h-4 w-4" />
-                    Passer à la nouvelle interface
-                  </Button>
-                }
-              >
-                Présentation affinée et en-tête fixe : le nom du projet et ses actions restent visibles pendant le défilement. Retour à l’interface classique possible à tout moment dans Paramètres, section Apparence.
-              </Notice>
+              <RefinedInterfaceNotice
+                dismissRefinedInterfaceProposal={dismissRefinedInterfaceProposal}
+                switchToRefinedInterface={switchToRefinedInterface}
+              />
             )}
             {runningJobs.length > 0 && (
-              <div className="mb-4 rounded-md border border-primary/35 bg-primary/[0.08] p-3 text-sm shadow-sm dark:bg-primary/[0.14]">
-                <div className="flex items-start gap-3">
-                  <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-primary" aria-hidden="true" />
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold">
-                      {runningJobs.length === 1 ? "Un traitement est en cours" : `${runningJobs.length} traitements sont en cours`}
-                    </p>
-                    <p className="mt-0.5 text-muted-foreground">
-                      Les paramètres sont temporairement verrouillés. Ouvre le suivi pour savoir ce qui est exécuté.
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {runningJobs.map((job) => (
-                        <Button
-                          key={job.id}
-                          size="sm"
-                          variant="outline"
-                          className="max-w-full bg-background/70"
-                          title={`Suivre : ${job.title}`}
-                          onClick={() => {
-                            if (job.project) {
-                              setSelectedProjectName(job.project);
-                              setSelectedDb((currentDb) => currentDb || "postgres");
-                            }
-                            selectJob(job.id);
-                            setActiveTab("logs");
-                          }}
-                        >
-                          <Logs className="h-4 w-4" />
-                          <span className="max-w-72 truncate">Suivre : {job.title}</span>
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <RunningJobsBanner onFollowJob={followJob} runningJobs={runningJobs} />
             )}
 
             {showWelcome ? (
@@ -2316,415 +1707,37 @@ export default function Home() {
                 )}
 
                 {selectedProjectOnline && (
-                  <TabsContent value="modules">
-                    {refinedInterface ? (
-                      <div className="space-y-4">
-                        <RefinedSectionHeader
-                          title="Modules"
-                          count={filteredModules.length}
-                          description="Les actions s’appliquent à la base de travail sélectionnée."
-                          actions={
-                            <>
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => void refreshModules()}
-                                disabled={loadingModules}
-                                aria-label="Actualiser la liste des modules"
-                                title="Actualiser la liste des modules"
-                              >
-                                <RefreshCcw className={cn("h-4 w-4", loadingModules && "animate-spin")} />
-                              </Button>
-                              {/* Les imports de code sont regroupés : ils mènent tous à « ajouter des modules au projet ».
-                                  Menus non modaux : le verrou de défilement de Radix détache l'en-tête et la barre latérale collés. */}
-                              <DropdownMenu.Root modal={false}>
-                                <DropdownMenu.Trigger>
-                                  <Button variant="outline" disabled={!selectedProjectReady}>
-                                    <PlusCircle className="h-4 w-4" />
-                                    Ajouter des modules
-                                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                                  </Button>
-                                </DropdownMenu.Trigger>
-                                <DropdownMenu.Content align="end" className="min-w-64">
-                                  <DropdownMenu.Item disabled={loading} onSelect={() => setRepositoryOpen(true)}>
-                                    <CloudDownload className="h-4 w-4" />
-                                    Depuis un dépôt Git (SSH)
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Item onSelect={() => setZipDialogOpen(true)}>
-                                    <FileArchive className="h-4 w-4" />
-                                    Depuis un pauvre zip
-                                  </DropdownMenu.Item>
-                                </DropdownMenu.Content>
-                              </DropdownMenu.Root>
-                              <Button variant="outline" onClick={openSocleDialog} disabled={!selectedProjectReady || loading}>
-                                <Boxes className="h-4 w-4" />
-                                Installer un socle
-                              </Button>
-                              <Button
-                                disabled={!selectedProjectReady || loading || checkingUpdatePrerequisites}
-                                onClick={requestUpdateAllOdooModules}
-                              >
-                                {checkingUpdatePrerequisites ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-                                MAJ complète Odoo
-                              </Button>
-                            </>
-                          }
-                        />
-                        {moduleFiltersBlock}
-                        {moduleSelectionBlock}
-                        {/* overflow-clip arrondit les coins sans créer de conteneur de défilement, contrairement à
-                            overflow-hidden qui empêcherait l'en-tête de rester collé. L'en-tête reste donc un bandeau droit :
-                            des coins arrondis collés en haut laisseraient voir les lignes qui défilent derrière. */}
-                        <RefinedPanel className="overflow-clip">
-                          <div
-                            className="z-10 hidden border-b bg-card xl:sticky xl:block"
-                            style={{ top: stickyHeader ? projectHeaderHeight + projectTabsHeight : 0 }}
-                          >
-                            <div className={cn("grid items-center gap-3 bg-muted/60 px-3 py-2", REFINED_LABEL, REFINED_MODULE_COLUMNS)}>
-                              <div>Module</div>
-                              <div>État</div>
-                              <div>Version</div>
-                              <div>Origine</div>
-                              <div className="text-right">Actions</div>
-                            </div>
-                          </div>
-                          <div className="min-w-0">
-                            {visibleModules.length ? (
-                              visibleModules.map((module) => {
-                                const sourcePath = module.source_path || module.path;
-                                const linkPath = module.link_path || (module.path_kind?.startsWith("lien") ? module.path : "");
-                                const displaySourcePath = compactWorkspacePath(sourcePath, overview?.workspace);
-                                const displayLinkPath = compactWorkspacePath(linkPath, overview?.workspace);
-                                const samePaths = Boolean(linkPath && sourcePath && linkPath === sourcePath);
-                                const origin = normalizedModuleOrigin(module.origin, sourcePath);
-                                const moduleTitle = module.title || module.name;
-                                const showTechnicalName = moduleTitle !== module.name;
-                                const moduleSelected = selectedModules.has(module.name);
-                                return (
-                                  <div
-                                    key={module.name}
-                                    className={cn(
-                                      "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 xl:items-center",
-                                      REFINED_MODULE_COLUMNS,
-                                      moduleSelected
-                                        ? "bg-selected"
-                                        : "hover:bg-hover",
-                                    )}
-                                    onClick={(event) => toggleModuleFromRow(event, module.name)}
-                                  >
-                                    <label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
-                                      <Checkbox
-                                        className="mt-1"
-                                        aria-label={`Sélectionner ${module.name}`}
-                                        checked={moduleSelected}
-                                        onCheckedChange={(checked) => toggleModuleSelection(module.name, checked === true)}
-                                      />
-                                      <span className="min-w-0">
-                                        <span
-                                          className={cn(
-                                            "block",
-                                            showTechnicalName ? cn("break-words", REFINED_ROW_TITLE) : cn("break-all", REFINED_IDENTIFIER),
-                                          )}
-                                        >
-                                          {moduleTitle}
-                                        </span>
-                                        {showTechnicalName && (
-                                          <span className="mt-0.5 block break-all font-mono text-xs text-muted-foreground">{module.name}</span>
-                                        )}
-                                        {showModuleLocations && (
-                                          <span className="mt-1.5 block space-y-0.5 text-xs">
-                                            {module.path_kind && <span className="block text-muted-foreground">{module.path_kind}</span>}
-                                            <span className="block truncate font-mono text-teal-700 dark:text-teal-300" title={sourcePath}>
-                                              {displaySourcePath || "-"}
-                                            </span>
-                                            {displayLinkPath && !samePaths && (
-                                              <span className="block truncate font-mono text-blue-700 dark:text-blue-300" title={linkPath}>
-                                                {displayLinkPath}
-                                              </span>
-                                            )}
-                                          </span>
-                                        )}
-                                      </span>
-                                    </label>
-                                    <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                                      <span className="text-xs font-medium text-muted-foreground xl:hidden">État</span>
-                                      <ModuleStateBadge state={module.state} />
-                                    </div>
-                                    <div className="flex min-w-0 items-start justify-between gap-3 xl:block">
-                                      <span className="text-xs font-medium text-muted-foreground xl:hidden">Version</span>
-                                      <span className="min-w-0 break-all font-mono text-xs tabular-nums">
-                                        {module.installed_version || module.version || "-"}
-                                      </span>
-                                    </div>
-                                    <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                                      <span className="text-xs font-medium text-muted-foreground xl:hidden">Origine</span>
-                                      <Badge className="shrink-0" variant="outline">{moduleOriginLabel(origin)}</Badge>
-                                    </div>
-                                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                                      {module.state === "installed" ? (
-                                        <Button
-                                          className="w-full"
-                                          size="sm"
-                                          variant="accent"
-                                          disabled={!canUseDb}
-                                          onClick={() => createJob("update_module", { project: selectedProject?.name, db: selectedDb, modules: module.name })}
-                                        >
-                                          <RefreshCcw className="h-4 w-4" />
-                                          Mettre à jour
-                                        </Button>
-                                      ) : (
-                                        <Button
-                                          className="w-full"
-                                          size="sm"
-                                          variant="success"
-                                          disabled={!canUseDb}
-                                          onClick={() => createJob("install_module", { project: selectedProject?.name, db: selectedDb, modules: module.name })}
-                                        >
-                                          <PlusCircle className="h-4 w-4" />
-                                          Installer
-                                        </Button>
-                                      )}
-                                      <DropdownMenu.Root modal={false}>
-                                        <DropdownMenu.Trigger>
-                                          <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" title={`Autres actions pour ${module.name}`} aria-label={`Autres actions pour ${module.name}`}>
-                                            <MoreHorizontal className="h-4 w-4" />
-                                          </Button>
-                                        </DropdownMenu.Trigger>
-                                        <DropdownMenu.Content align="end" className="min-w-52">
-                                          <DropdownMenu.Label>Actions sur {module.name}</DropdownMenu.Label>
-                                          {module.state === "installed" && (
-                                            <DropdownMenu.Item disabled={!canUseDb} onSelect={() => requestTranslationReset([module.name])}>
-                                              <Languages className="h-4 w-4" />
-                                              Réinitialiser les traductions
-                                            </DropdownMenu.Item>
-                                          )}
-                                          {module.state === "installed" && (
-                                            <DropdownMenu.Item color="red" disabled={!canUseDb} onSelect={() => requestUninstall([module.name])}>
-                                              <PackageX className="h-4 w-4" />
-                                              Désinstaller de la base
-                                            </DropdownMenu.Item>
-                                          )}
-                                          {module.removal_mode !== "link_only" && (
-                                            <DropdownMenu.Item color="red" disabled={!module.removable} onSelect={() => requestDeleteCode([module.name])}>
-                                              <Trash2 className="h-4 w-4" />
-                                              Supprimer du projet
-                                            </DropdownMenu.Item>
-                                          )}
-                                          {module.state !== "installed" && module.removal_mode === "link_only" && (
-                                            <DropdownMenu.Item disabled>Module protégé</DropdownMenu.Item>
-                                          )}
-                                        </DropdownMenu.Content>
-                                      </DropdownMenu.Root>
-                                    </div>
-                                  </div>
-                                );
-                              })
-                            ) : (
-                              moduleEmptyState
-                            )}
-                          </div>
-                          {modulePaginationBlock}
-                        </RefinedPanel>
-                      </div>
-                    ) : (
-                    <Card>
-                      <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <CardTitle>Modules</CardTitle>
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="ghost"
-                              onClick={() => void refreshModules()}
-                              disabled={loadingModules}
-                              aria-label="Actualiser la liste des modules"
-                              title="Actualiser la liste des modules"
-                            >
-                              <RefreshCcw className={cn("h-4 w-4", loadingModules && "animate-spin")} />
-                            </Button>
-                          </div>
-                          <CardDescription>Recherche, sélection et mise à jour des modules de la base Odoo choisie.</CardDescription>
-                        </div>
-                        <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
-                          <Button
-                            className="w-full"
-                            variant="outline"
-                            onClick={openSocleDialog}
-                            disabled={!selectedProjectReady || loading}
-                          >
-                            <Boxes className="h-4 w-4" />
-                            Installer un socle
-                          </Button>
-                          <Button
-                            className="w-full"
-                            disabled={!selectedProjectReady || loading || checkingUpdatePrerequisites}
-                            onClick={requestUpdateAllOdooModules}
-                          >
-                            {checkingUpdatePrerequisites ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-                            MAJ complète Odoo
-                          </Button>
-                          <Button className="w-full" variant="outline" onClick={() => setRepositoryOpen(true)} disabled={!selectedProjectReady || loading}>
-                            <CloudDownload className="h-4 w-4" />
-                            Dépôt SSH · Ajout / MAJ
-                          </Button>
-                          <Button className="w-full" variant="outline" onClick={() => setZipDialogOpen(true)} disabled={!selectedProjectReady}>
-                            <FileArchive className="h-4 w-4" />
-                            Ajouter un pauvre zip
-                          </Button>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="mb-4">{moduleFiltersBlock}</div>
-                        <div className="mb-3 space-y-3">{moduleSelectionBlock}</div>
-                        <div className="overflow-hidden rounded-md border">
-                          <div className={cn("hidden border-b bg-muted px-3 py-2 text-xs font-medium uppercase text-muted-foreground xl:grid xl:items-center xl:gap-3", moduleTableGridColumns)}>
-                            <div>Module</div>
-                            <div>État</div>
-                            <div>Version</div>
-                            <div>Origine</div>
-                            {showModuleLocations && <div>Emplacements</div>}
-                            <div className="text-right">Actions</div>
-                          </div>
-                          <div className="max-h-[min(62vh,720px)] min-w-0 overflow-y-auto">
-                            {visibleModules.length ? (
-                              visibleModules.map((module) => {
-                                const sourcePath = module.source_path || module.path;
-                                const linkPath = module.link_path || (module.path_kind?.startsWith("lien") ? module.path : "");
-                                const displaySourcePath = compactWorkspacePath(sourcePath, overview?.workspace);
-                                const displayLinkPath = compactWorkspacePath(linkPath, overview?.workspace);
-                                const samePaths = Boolean(linkPath && sourcePath && linkPath === sourcePath);
-                                const origin = normalizedModuleOrigin(module.origin, sourcePath);
-                                return (
-                                  <div
-                                    key={module.name}
-                                    className={cn(
-                                      "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 hover:bg-hover xl:items-center",
-                                      moduleTableGridColumns,
-                                      selectedModules.has(module.name) && "bg-selected",
-                                    )}
-                                    onClick={(event) => toggleModuleFromRow(event, module.name)}
-                                  >
-                                    <label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
-                                      <Checkbox
-                                        className="mt-1"
-                                        aria-label={`Sélectionner ${module.name}`}
-                                        checked={selectedModules.has(module.name)}
-                                        onCheckedChange={(checked) => toggleModuleSelection(module.name, checked === true)}
-                                      />
-                                      <span className="min-w-0">
-                                        <div className="break-words font-medium">{module.name}</div>
-                                        <div className="mt-0.5 break-words text-xs text-muted-foreground">{module.title || module.name}</div>
-                                      </span>
-                                    </label>
-                                    <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                                      <span className="text-xs font-medium text-muted-foreground xl:hidden">État</span>
-                                      <ModuleStateBadge state={module.state} />
-                                    </div>
-                                    <div className="flex min-w-0 items-start justify-between gap-3 text-sm xl:block">
-                                      <span className="text-xs font-medium text-muted-foreground xl:hidden">Version</span>
-                                      <span className="min-w-0 break-words">{module.installed_version || module.version || "-"}</span>
-                                    </div>
-                                    <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                                      <span className="text-xs font-medium text-muted-foreground xl:hidden">Origine</span>
-                                      <Badge className="shrink-0" variant="outline">{moduleOriginLabel(origin)}</Badge>
-                                    </div>
-                                    {showModuleLocations && (
-                                      <div className="min-w-0">
-                                        <div className="mb-1 text-xs font-medium text-muted-foreground xl:hidden">Emplacements</div>
-                                        <div className="space-y-1">
-                                          {module.path_kind && (
-                                            <Badge className="w-fit max-w-full truncate" variant="outline" title={module.path_kind}>
-                                              {module.path_kind}
-                                            </Badge>
-                                          )}
-                                          <div className="min-w-0 text-xs">
-                                            <span className="font-medium text-teal-700 dark:text-teal-300">Source</span>
-                                            <div className="truncate font-mono text-teal-800 dark:text-teal-200" title={sourcePath}>
-                                              {displaySourcePath || "-"}
-                                            </div>
-                                          </div>
-                                          {displayLinkPath && !samePaths && (
-                                            <div className="min-w-0 text-xs">
-                                              <span className="font-medium text-blue-700 dark:text-blue-300">Lien Odoo</span>
-                                              <div className="truncate font-mono text-blue-800 dark:text-blue-200" title={linkPath}>
-                                                {displayLinkPath}
-                                              </div>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    )}
-                                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_40px] gap-2">
-                                      {module.state === "installed" ? (
-                                        <Button
-                                          className="w-full"
-                                          size="sm"
-                                          variant="accent"
-                                          disabled={!canUseDb}
-                                          onClick={() => createJob("update_module", { project: selectedProject?.name, db: selectedDb, modules: module.name })}
-                                        >
-                                          <RefreshCcw className="h-4 w-4" />
-                                          Mettre à jour
-                                        </Button>
-                                      ) : (
-                                        <Button
-                                          className="w-full"
-                                          size="sm"
-                                          variant="success"
-                                          disabled={!canUseDb}
-                                          onClick={() => createJob("install_module", { project: selectedProject?.name, db: selectedDb, modules: module.name })}
-                                        >
-                                          <PlusCircle className="h-4 w-4" />
-                                          Installer
-                                        </Button>
-                                      )}
-                                      <DropdownMenu.Root modal={false}>
-                                        <DropdownMenu.Trigger>
-                                          <Button size="icon" variant="outline" title={`Autres actions pour ${module.name}`} aria-label={`Autres actions pour ${module.name}`}>
-                                            <MoreHorizontal className="h-4 w-4" />
-                                          </Button>
-                                        </DropdownMenu.Trigger>
-                                        <DropdownMenu.Content align="end" className="min-w-52">
-                                          <DropdownMenu.Label>Actions sur {module.name}</DropdownMenu.Label>
-                                          {module.state === "installed" && (
-                                            <DropdownMenu.Item disabled={!canUseDb} onSelect={() => requestTranslationReset([module.name])}>
-                                              <Languages className="h-4 w-4" />
-                                              Réinitialiser les traductions
-                                            </DropdownMenu.Item>
-                                          )}
-                                          {module.state === "installed" && (
-                                            <DropdownMenu.Item color="red" disabled={!canUseDb} onSelect={() => requestUninstall([module.name])}>
-                                              <PackageX className="h-4 w-4" />
-                                              Désinstaller de la base
-                                            </DropdownMenu.Item>
-                                          )}
-                                          {module.removal_mode !== "link_only" && (
-                                            <DropdownMenu.Item color="red" disabled={!module.removable} onSelect={() => requestDeleteCode([module.name])}>
-                                              <Trash2 className="h-4 w-4" />
-                                              Supprimer du projet
-                                            </DropdownMenu.Item>
-                                          )}
-                                          {module.state !== "installed" && module.removal_mode === "link_only" && (
-                                            <DropdownMenu.Item disabled>Module protégé</DropdownMenu.Item>
-                                          )}
-                                        </DropdownMenu.Content>
-                                      </DropdownMenu.Root>
-                                    </div>
-                                  </div>
-                                );
-                              })
-                            ) : (
-                              moduleEmptyState
-                            )}
-                          </div>
-                          {modulePaginationBlock}
-                        </div>
-                      </CardContent>
-                    </Card>
-                    )}
-                  </TabsContent>
+                  <ModulesTab
+                    canUseDb={canUseDb}
+                    checkingUpdatePrerequisites={checkingUpdatePrerequisites}
+                    chooseDatabase={chooseDatabase}
+                    createJob={createJob}
+                    loading={loading}
+                    loadingModules={loadingModules}
+                    moduleFilters={moduleFilters}
+                    modules={modules}
+                    moduleSelectionBlock={moduleSelectionBlock}
+                    odooDatabases={odooDatabases}
+                    openRepositoryImport={openRepositoryImport}
+                    openSocleDialog={openSocleDialog}
+                    openZipImport={openZipImport}
+                    overview={overview}
+                    projectHeaderHeight={projectHeaderHeight}
+                    projectTabsHeight={projectTabsHeight}
+                    refinedInterface={refinedInterface}
+                    refreshModules={refreshModules}
+                    requestDeleteCode={requestDeleteCode}
+                    requestTranslationReset={requestTranslationReset}
+                    requestUninstall={requestUninstall}
+                    requestUpdateAllOdooModules={requestUpdateAllOdooModules}
+                    selectedDb={selectedDb}
+                    selectedModules={selectedModules}
+                    selectedProject={selectedProject}
+                    selectedProjectReady={selectedProjectReady}
+                    setSelectedModules={setSelectedModules}
+                    settings={settings}
+                    stickyHeader={stickyHeader}
+                  />
                 )}
 
                 <ActivityTab
@@ -3121,24 +2134,11 @@ export default function Home() {
           aria-label="Actions sur les modules sélectionnés"
         >
           {/* Le dégradé estompe les lignes qui passent sous la barre ; la surface teintée la distingue du tableau. */}
-          {moduleSelectionBar(true)}
+          <ModuleSelectionBar {...moduleSelectionBarProps} floating />
         </div>
       )}
 
-      <div className={cn("fixed bottom-4 left-4 right-4 z-50 grid gap-2 sm:left-auto sm:w-96", showFloatingModuleActions && "bottom-28 xl:bottom-20")}>
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={cn(
-              "w-full whitespace-pre-line break-words rounded-md border bg-card p-3 text-sm shadow-lg",
-              toast.kind === "error" && "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200",
-              toast.kind === "success" && "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
-            )}
-          >
-            {toast.message}
-          </div>
-        ))}
-      </div>
+      <ToastStack toasts={toasts} raised={showFloatingModuleActions} />
     </main>
   );
 }

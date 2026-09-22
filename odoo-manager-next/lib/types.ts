@@ -18,7 +18,7 @@ export type Overview = {
   projects: Project[];
 };
 
-type DockerStatus = {
+export type DockerStatus = {
   state: "missing" | "starting" | "stopped" | "ready" | string;
   installed: boolean;
   running: boolean;
@@ -37,7 +37,7 @@ export type InstallGuide = {
   steps: string[];
 };
 
-type TraefikStatus = {
+export type TraefikStatus = {
   state: "missing" | "invalid" | "stopped" | "running" | "conflict" | string;
   path: string;
   installed: boolean;
