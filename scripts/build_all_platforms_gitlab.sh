@@ -290,7 +290,7 @@ if [ "$WAIT_FOR_CI" -eq 1 ]; then
   last=""
   while :; do
     jobs=$(gitlab_api "pipelines/$pipeline_id/jobs?per_page=50" \
-      | json_field '"  ".join(f"{j[\"name\"]}={j[\"status\"]}" for j in sorted(d, key=lambda j: j["name"]))')
+      | json_field "\"  \".join(f\"{j['name']}={j['status']}\" for j in sorted(d, key=lambda j: j['name']))")
     if [ "$jobs" != "$last" ]; then
       printf '%s  %s\n' "$(date +%H:%M:%S)" "$jobs"
       last=$jobs
@@ -312,7 +312,7 @@ if [ "$DOWNLOAD_ARTIFACTS" -eq 1 ]; then
 
   log "Téléchargement des installateurs"
   gitlab_api "pipelines/$pipeline_id/jobs?per_page=50" \
-    | json_field '"\n".join(f"{j[\"id\"]} {j[\"name\"]}" for j in d if j["name"].startswith("build-") and j["status"] == "success")' \
+    | json_field "\"\\n\".join(f\"{j['id']} {j['name']}\" for j in d if j['name'].startswith('build-') and j['status'] == 'success')" \
     | while read -r job_id job_name; do
       [ -n "$job_id" ] || continue
       archive="$output_dir/$job_name.zip"
