@@ -1413,6 +1413,22 @@ class ModuleFailureHintTests(unittest.TestCase):
         self.assertEqual("", hint)
         installed_modules.assert_not_called()
 
+    def test_missing_external_dependency_names_the_python_package(self):
+        message = (
+            'La commande Odoo a échoué avec le code 255. Dernière erreur Odoo : odoo.exceptions.UserError: '
+            'Impossible d\'installer le module "sodial_stock" à cause d\'une dépendance externe non trouvée : svglib'
+        )
+
+        hint = web.external_dependency_failure_hint(message)
+
+        self.assertIn("svglib", hint)
+        self.assertIn("requirements_pip.txt", hint)
+
+    def test_unrelated_errors_produce_no_external_dependency_hint(self):
+        hint = web.external_dependency_failure_hint("SyntaxError: invalid syntax")
+
+        self.assertEqual("", hint)
+
 
 class TraefikInstallationTests(unittest.TestCase):
     class LogJob:

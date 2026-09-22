@@ -4732,7 +4732,7 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
             overwrite_translations=overwrite_translations,
         )
     except RuntimeError as exc:
-        hint = missing_code_failure_hint(project, db_name, str(exc))
+        hint = missing_code_failure_hint(project, db_name, str(exc)) or external_dependency_failure_hint(str(exc))
         if hint:
             job.add(hint)
             raise RuntimeError(f"{exc} {hint}") from exc
@@ -4765,6 +4765,27 @@ def missing_code_failure_hint(project, db_name, message):
     return (
         f"Cause probable : la base {db_name} référence des modules installés dont le code est absent du projet "
         f"({shown}). Restaure leur code dans le projet (liste complète dans l'onglet Diagnostic), puis relance."
+    )
+
+
+# Message Odoo quand un module déclare une dépendance Python (external_dependencies) absente du conteneur.
+EXTERNAL_DEPENDENCY_ERROR_RE = re.compile(
+    r"d[ée]pendance externe non trouv[ée]e\s*:\s*(?P<package_fr>[\w.\-]+)"
+    r"|external dependenc\w* (?:is |are )?not (?:met|found)\s*:\s*(?P<package_en>[\w.\-]+)",
+    re.IGNORECASE,
+)
+
+
+def external_dependency_failure_hint(message):
+    """Signale qu'un paquet Python manque dans requirements_pip.txt, pas dans le module lui-même."""
+    match = EXTERNAL_DEPENDENCY_ERROR_RE.search(message)
+    if not match:
+        return ""
+    package = match.group("package_fr") or match.group("package_en")
+    return (
+        f"Cause probable : le paquet Python « {package} » (dépendance externe du module) n'est pas installé "
+        "dans le conteneur Odoo de ce projet. Ajoute-le à init/requirements_pip.txt à la racine du projet "
+        "(une ligne par paquet), puis relance : il sera installé automatiquement avant la commande Odoo."
     )
 
 
