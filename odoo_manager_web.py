@@ -5769,9 +5769,8 @@ INDEX_HTML = """<!doctype html>
 <body>
   <main>
     <h1>Odoo Manager API</h1>
-    <p>La vue Bootstrap historique a été archivée et n'est plus exposée par le backend.</p>
+    <p>L'ancienne vue Bootstrap a été retirée et n'est plus exposée par le backend.</p>
     <p>L'interface active est maintenant l'application Next/Tauri. En développement, lance <code>./odoo_next_gui.sh</code>.</p>
-    <p>Archive locale : <code>archive/bootstrap/odoo_manager_bootstrap_legacy.html</code></p>
   </main>
 </body>
 </html>

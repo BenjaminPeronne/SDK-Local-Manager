@@ -169,7 +169,6 @@ SDK-Local-Manager/
 ├── docs/                        # Notes techniques (migration Electron, performances…)
 ├── odoo_manager.sh              # Ancien menu en ligne de commande (POSIX sh)
 ├── odoo_next_gui.sh             # Lanceur de développement (API + Next.js)
-├── archive/                     # Ancienne interface Bootstrap (référence)
 └── .github/workflows/           # Compilation multiplateforme
 ```
 

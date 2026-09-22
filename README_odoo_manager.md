@@ -34,9 +34,8 @@ L'ancien lanceur Bootstrap est conserve comme alias de compatibilite :
 ./odoo_gui.sh
 ```
 
-Il lance maintenant l'interface Next active. La vue Bootstrap historique n'est
-plus exposee par le backend ; son HTML est archive dans
-`archive/bootstrap/odoo_manager_bootstrap_legacy.html`.
+Il lance maintenant l'interface Next active. L'ancienne vue Bootstrap a ete
+retiree.
 
 La creation d'un nouveau projet se fait directement dans l'application. Le
 formulaire permet de choisir la version Odoo et un environnement standard ou

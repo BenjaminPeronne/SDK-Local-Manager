@@ -6,9 +6,8 @@ Cette interface est l'UI active du gestionnaire Odoo local.
 - Interface Next.js en developpement : `./odoo_next_gui.sh`, puis http://127.0.0.1:3000/
 
 La nouvelle interface consomme l'API Python existante servie par `odoo_manager_web.py`.
-Le backend Python reste le sidecar API local. La vue Bootstrap historique est
-archivee dans `archive/bootstrap/odoo_manager_bootstrap_legacy.html` et n'est
-plus exposee comme interface de secours.
+Le backend Python reste le sidecar API local. L'ancienne vue Bootstrap a ete
+retiree et n'est plus exposee comme interface de secours.
 
 L'interface utilise la configuration persistante du backend. Le dossier de
 projets peut etre change depuis `Parametres` sans deplacer le gestionnaire.

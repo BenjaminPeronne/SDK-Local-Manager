@@ -5,7 +5,7 @@
 1. `odoo_manager_core/` porte la configuration et les adaptations système.
 2. `odoo_manager_web.py` reste temporairement l'API locale et le sidecar Python.
 3. `odoo-manager-next/` est l'interface principale React.
-4. L'ancienne interface Bootstrap est archivee dans `archive/bootstrap/`.
+4. L'ancienne interface Bootstrap a été retirée.
 5. `odoo-manager-next/src-tauri/` prépare l'application de bureau Tauri 2.
 6. `scripts/build_desktop.py` fournit une commande de construction native commune.
 
