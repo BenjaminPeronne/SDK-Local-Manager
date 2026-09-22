@@ -1,6 +1,6 @@
 # Distribution WSL « SDK-Manager »
 
-Environnement Linux que l'application installe elle-même sous Windows. Les projets Odoo, Docker et le backend y tournent sur un système de fichiers Linux : Odoo démarre en 4 à 6 s au lieu de 48 à 95 s, et `-u base` prend 234 s au lieu de 504 s ([mesures](../docs/audit-performances-windows-2026-09-17.md)).
+Environnement Linux que l'application installe elle-même sous Windows. Les projets Odoo, Docker et le backend y tournent sur un système de fichiers Linux : Odoo démarre en 4 à 6 s au lieu de 48 à 95 s, et `-u base` prend 234 s au lieu de 504 s.
 
 L'utilisateur n'ouvre jamais de terminal : l'application importe l'image, la démarre et la maintient à jour.
 

@@ -14,8 +14,6 @@
 !/tests/
 !/wsl/
 !/README.md
-!/README_next_odoo_manager.md
-!/README_odoo_manager.md
 !/odoo_manager_runtime.py
 !/odoo_manager_web.py
 !/odoo_next_gui.sh
