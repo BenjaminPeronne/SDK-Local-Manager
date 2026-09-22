@@ -21,10 +21,7 @@ export function LoadingScreen({ appIcon, roundIcon, message, error, diagnostics,
         <img
           src={appIcon.src}
           alt="SDK Local Manager"
-          className={cn(
-            "mx-auto h-16 w-16 object-cover",
-            roundIcon ? "rounded-full" : "rounded-[15px]",
-          )}
+          className={cn("mx-auto h-16 w-16 object-cover", roundIcon ? "rounded-full" : "rounded-[15px]")}
         />
         <div className="mt-3 flex justify-center">
           {error ? (
@@ -34,9 +31,7 @@ export function LoadingScreen({ appIcon, roundIcon, message, error, diagnostics,
           )}
         </div>
         <h1 className="mt-4 text-lg font-semibold">Chargement du gestionnaire</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {message}
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">{message}</p>
         {error && (
           <div className="mt-4 space-y-3">
             <p className="break-words rounded-md border border-amber-200 bg-amber-50 p-3 text-left text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">

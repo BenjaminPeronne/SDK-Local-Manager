@@ -5,7 +5,11 @@ import { useEffect, useRef, useState } from "react";
 const TABS_BACKDROP_FADE_PX = 96;
 
 /** En-tête de projet collant : mode compact au défilement, fondu des onglets et hauteurs mesurées. */
-export function useStickyProjectHeader(stickyHeader: boolean, projectViewOpen: boolean, projectName: string | undefined) {
+export function useStickyProjectHeader(
+  stickyHeader: boolean,
+  projectViewOpen: boolean,
+  projectName: string | undefined,
+) {
   const projectHeaderRef = useRef<HTMLElement>(null);
   const [projectHeaderHeight, setProjectHeaderHeight] = useState(0);
   const projectTabsRef = useRef<HTMLDivElement>(null);
@@ -33,7 +37,10 @@ export function useStickyProjectHeader(stickyHeader: boolean, projectViewOpen: b
     // Variable CSS écrite directement : un état React re-rendrait toute la page à chaque pixel défilé.
     const update = () => {
       frame = 0;
-      tabs.style.setProperty("--tabs-backdrop", String(Math.min(1, Math.max(0, window.scrollY / TABS_BACKDROP_FADE_PX))));
+      tabs.style.setProperty(
+        "--tabs-backdrop",
+        String(Math.min(1, Math.max(0, window.scrollY / TABS_BACKDROP_FADE_PX))),
+      );
     };
     const onScroll = () => {
       if (!frame) frame = window.requestAnimationFrame(update);

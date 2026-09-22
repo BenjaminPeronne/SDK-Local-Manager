@@ -44,7 +44,31 @@ type ActivityTabProps = {
   stopLiveLogStream: () => void;
 };
 
-export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOutputRef, onLogOutputScroll, onShowLogs, outputContent, projectJobs, pushToast, rawOutputVisible, refinedInterface, refreshJobs, scopedExternalLogView, selectJob, selectedJob, selectedJobId, selectedProject, selectedProjectReady, setExternalLogView, setJobToCancelId, setLogDescriptionExpanded, setRawOutputVisible, setSelectedJobId, stopLiveLogStream }: ActivityTabProps) {
+export function ActivityTab({
+  enableLogAutoFollow,
+  logDescriptionExpanded,
+  logOutputRef,
+  onLogOutputScroll,
+  onShowLogs,
+  outputContent,
+  projectJobs,
+  pushToast,
+  rawOutputVisible,
+  refinedInterface,
+  refreshJobs,
+  scopedExternalLogView,
+  selectJob,
+  selectedJob,
+  selectedJobId,
+  selectedProject,
+  selectedProjectReady,
+  setExternalLogView,
+  setJobToCancelId,
+  setLogDescriptionExpanded,
+  setRawOutputVisible,
+  setSelectedJobId,
+  stopLiveLogStream,
+}: ActivityTabProps) {
   async function copyOutput() {
     try {
       await navigator.clipboard.writeText(outputContent);
@@ -57,7 +81,9 @@ export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOu
     if (!selectedProject) return;
     stopLiveLogStream();
     try {
-      const payload = await api<ProjectDiagnostics>(`/api/projects/${encodeURIComponent(selectedProject.name)}/diagnostics`);
+      const payload = await api<ProjectDiagnostics>(
+        `/api/projects/${encodeURIComponent(selectedProject.name)}/diagnostics`,
+      );
       setExternalLogView({
         title: `Diagnostic - ${selectedProject.name}`,
         content: formatDiagnostics(payload),
@@ -94,15 +120,20 @@ export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOu
     }
   }
   const outputTitle = scopedExternalLogView?.title || selectedJob?.title || "Aucune action sélectionnée";
-  const outputProgress = !scopedExternalLogView && selectedJob && isJobActive(selectedJob) ? selectedJob.progress : null;
+  const outputProgress =
+    !scopedExternalLogView && selectedJob && isJobActive(selectedJob) ? selectedJob.progress : null;
   const outputProgressPercent =
-    outputProgress && typeof outputProgress.current === "number" && typeof outputProgress.total === "number" && outputProgress.total > 0
+    outputProgress &&
+    typeof outputProgress.current === "number" &&
+    typeof outputProgress.total === "number" &&
+    outputProgress.total > 0
       ? Math.max(0, Math.min(100, Math.round((outputProgress.current / outputProgress.total) * 100)))
       : null;
   const outputTitleIsLong = outputTitle.length > LOG_DESCRIPTION_MAX_LENGTH;
-  const displayedOutputTitle = outputTitleIsLong && !logDescriptionExpanded
-    ? `${outputTitle.slice(0, LOG_DESCRIPTION_MAX_LENGTH).trimEnd()}…`
-    : outputTitle;
+  const displayedOutputTitle =
+    outputTitleIsLong && !logDescriptionExpanded
+      ? `${outputTitle.slice(0, LOG_DESCRIPTION_MAX_LENGTH).trimEnd()}…`
+      : outputTitle;
   // En mode affiné, un job terminé affiche d'abord son résultat ; la sortie brute se déplie à la demande.
   const finishedJobSummary =
     refinedInterface && !scopedExternalLogView && selectedJob && !isJobUnfinished(selectedJob) ? selectedJob : null;
@@ -152,10 +183,16 @@ export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOu
                           onClick={() => selectJob(job.id)}
                         >
                           <Badge variant={statusVariant(job.status)}>{statusLabel(job.status)}</Badge>
-                          <span className="mt-2 line-clamp-2 break-words text-sm font-medium leading-5">{job.title}</span>
-                          <span className="mt-1 block text-xs tabular-nums text-muted-foreground">{job.started_at}</span>
+                          <span className="mt-2 line-clamp-2 break-words text-sm font-medium leading-5">
+                            {job.title}
+                          </span>
+                          <span className="mt-1 block text-xs tabular-nums text-muted-foreground">
+                            {job.started_at}
+                          </span>
                           {job.status === "queued" && job.waiting_for && (
-                            <span className="mt-1 block break-words text-xs text-muted-foreground">{job.waiting_for}</span>
+                            <span className="mt-1 block break-words text-xs text-muted-foreground">
+                              {job.waiting_for}
+                            </span>
                           )}
                         </button>
                         {!isJobUnfinished(job) && (
@@ -175,7 +212,9 @@ export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOu
                         <div className="px-3 pb-3">
                           <JobStopButton job={job} className="w-full" onRequest={setJobToCancelId} />
                           {job.status !== "cancelling" && jobStopUnavailableReason(job) && (
-                            <p className="mt-1.5 break-words text-xs text-muted-foreground">{jobStopUnavailableReason(job)}</p>
+                            <p className="mt-1.5 break-words text-xs text-muted-foreground">
+                              {jobStopUnavailableReason(job)}
+                            </p>
                           )}
                         </div>
                       )}
@@ -187,7 +226,9 @@ export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOu
               <RefinedPanel className="border-dashed p-6 text-center">
                 <Logs className="mx-auto h-6 w-6 text-muted-foreground" />
                 <p className="mt-3 font-medium">Aucune action enregistrée</p>
-                <p className="mt-1 text-sm text-muted-foreground">Les prochaines opérations apparaîtront ici avec leur statut.</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Les prochaines opérations apparaîtront ici avec leur statut.
+                </p>
               </RefinedPanel>
             )}
           </div>
@@ -199,7 +240,10 @@ export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOu
                 {outputTitleIsLong && (
                   <button
                     type="button"
-                    className={cn("mt-1 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline", REFINED_FOCUS_RING)}
+                    className={cn(
+                      "mt-1 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline",
+                      REFINED_FOCUS_RING,
+                    )}
                     aria-expanded={logDescriptionExpanded}
                     onClick={() => setLogDescriptionExpanded((expanded) => !expanded)}
                   >
@@ -226,7 +270,9 @@ export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOu
               {!scopedExternalLogView && selectedJob && <JobCancelState job={selectedJob} action={selectedJobStop} />}
               {!scopedExternalLogView && selectedJob && isJobActive(selectedJob) && (
                 <JobProgressPanel
-                  label={outputProgress?.label || selectedJob.last_line || selectedJob.lines.at(-1) || "Traitement en cours"}
+                  label={
+                    outputProgress?.label || selectedJob.last_line || selectedJob.lines.at(-1) || "Traitement en cours"
+                  }
                   percent={outputProgressPercent}
                   action={selectedJobStop}
                 />
@@ -260,7 +306,10 @@ export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOu
                     {finishedJobSummary.error_message || (
                       <>
                         Terminée le{" "}
-                        <span className="tabular-nums">{finishedJobSummary.finished_at || finishedJobSummary.started_at}</span>.
+                        <span className="tabular-nums">
+                          {finishedJobSummary.finished_at || finishedJobSummary.started_at}
+                        </span>
+                        .
                       </>
                     )}
                   </p>
@@ -275,7 +324,11 @@ export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOu
                   </Button>
                 </div>
               )}
-              <OdooLogsModeBar view={scopedExternalLogView} onShowFull={() => onShowLogs(true)} onShowSummary={() => onShowLogs()} />
+              <OdooLogsModeBar
+                view={scopedExternalLogView}
+                onShowFull={() => onShowLogs(true)}
+                onShowSummary={() => onShowLogs()}
+              />
               <JobOutputPre
                 outputRef={logOutputRef}
                 content={outputContent}
@@ -299,51 +352,57 @@ export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOu
               </Button>
             </CardHeader>
             <CardContent className="max-h-[min(62vh,680px)] min-w-0 space-y-3 overflow-y-auto">
-              {projectJobs.length ? projectJobs.map((job) => (
-                <div
-                  key={job.id}
-                  className={cn(
-                    "group grid h-[172px] min-w-0 grid-rows-[minmax(0,1fr)_36px] gap-2 rounded-md border bg-card p-3 shadow-sm transition-[background-color,border-color,box-shadow] hover:border-primary/40 hover:shadow-md",
-                    !scopedExternalLogView && selectedJob?.id === job.id && "border-primary bg-selected ring-1 ring-primary/25",
-                  )}
-                >
-                  <button
-                    type="button"
-                    className="grid min-h-0 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md p-2 text-left transition-colors hover:bg-hover/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-primary/[0.12]"
-                    aria-pressed={!scopedExternalLogView && selectedJob?.id === job.id}
-                    title={job.title}
-                    onClick={() => selectJob(job.id)}
+              {projectJobs.length ? (
+                projectJobs.map((job) => (
+                  <div
+                    key={job.id}
+                    className={cn(
+                      "group grid h-[172px] min-w-0 grid-rows-[minmax(0,1fr)_36px] gap-2 rounded-md border bg-card p-3 shadow-sm transition-[background-color,border-color,box-shadow] hover:border-primary/40 hover:shadow-md",
+                      !scopedExternalLogView &&
+                        selectedJob?.id === job.id &&
+                        "border-primary bg-selected ring-1 ring-primary/25",
+                    )}
                   >
-                    <span className="flex h-full min-w-0 flex-col justify-between gap-2">
-                      <span className="line-clamp-3 break-words text-sm font-semibold leading-5">{job.title}</span>
-                      <span className="block text-xs tabular-nums text-muted-foreground">
-                        {job.status === "queued" && job.waiting_for ? job.waiting_for : job.started_at}
-                      </span>
-                    </span>
-                    <Badge className="min-w-[74px] shrink-0 justify-self-end" variant={statusVariant(job.status)}>
-                      {statusLabel(job.status)}
-                    </Badge>
-                  </button>
-                  {isJobUnfinished(job) ? (
-                    <JobStopButton job={job} className="w-full" onRequest={setJobToCancelId} />
-                  ) : (
-                    <Button
-                      className="w-full border-red-300 text-red-700 hover:border-red-400 hover:bg-red-50 hover:text-red-800 active:bg-red-100 focus-visible:ring-red-500 dark:border-red-800 dark:text-red-300 dark:hover:border-red-700 dark:hover:bg-red-950/60 dark:hover:text-red-200 dark:active:bg-red-950"
-                      variant="outline"
-                      size="sm"
-                      title={`Supprimer l'historique ${job.title}`}
-                      aria-label={`Supprimer l'historique ${job.title}`}
-                      onClick={() => deleteJob(job.id)}
+                    <button
+                      type="button"
+                      className="grid min-h-0 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md p-2 text-left transition-colors hover:bg-hover/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-primary/[0.12]"
+                      aria-pressed={!scopedExternalLogView && selectedJob?.id === job.id}
+                      title={job.title}
+                      onClick={() => selectJob(job.id)}
                     >
-                      Supprimer
-                    </Button>
-                  )}
-                </div>
-              )) : (
+                      <span className="flex h-full min-w-0 flex-col justify-between gap-2">
+                        <span className="line-clamp-3 break-words text-sm font-semibold leading-5">{job.title}</span>
+                        <span className="block text-xs tabular-nums text-muted-foreground">
+                          {job.status === "queued" && job.waiting_for ? job.waiting_for : job.started_at}
+                        </span>
+                      </span>
+                      <Badge className="min-w-[74px] shrink-0 justify-self-end" variant={statusVariant(job.status)}>
+                        {statusLabel(job.status)}
+                      </Badge>
+                    </button>
+                    {isJobUnfinished(job) ? (
+                      <JobStopButton job={job} className="w-full" onRequest={setJobToCancelId} />
+                    ) : (
+                      <Button
+                        className="w-full border-red-300 text-red-700 hover:border-red-400 hover:bg-red-50 hover:text-red-800 active:bg-red-100 focus-visible:ring-red-500 dark:border-red-800 dark:text-red-300 dark:hover:border-red-700 dark:hover:bg-red-950/60 dark:hover:text-red-200 dark:active:bg-red-950"
+                        variant="outline"
+                        size="sm"
+                        title={`Supprimer l'historique ${job.title}`}
+                        aria-label={`Supprimer l'historique ${job.title}`}
+                        onClick={() => deleteJob(job.id)}
+                      >
+                        Supprimer
+                      </Button>
+                    )}
+                  </div>
+                ))
+              ) : (
                 <div className="rounded-md border border-dashed p-6 text-center">
                   <Logs className="mx-auto h-6 w-6 text-muted-foreground" />
                   <p className="mt-3 font-medium">Aucune action enregistrée</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Les prochaines opérations apparaîtront ici avec leur statut.</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Les prochaines opérations apparaîtront ici avec leur statut.
+                  </p>
                 </div>
               )}
             </CardContent>
@@ -365,11 +424,23 @@ export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOu
                 )}
               </div>
               <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-3 min-[1900px]:w-auto min-[1900px]:shrink-0">
-                <Button className="w-full justify-start sm:justify-center" variant="outline" size="sm" onClick={showDiagnostics} disabled={!selectedProjectReady}>
+                <Button
+                  className="w-full justify-start sm:justify-center"
+                  variant="outline"
+                  size="sm"
+                  onClick={showDiagnostics}
+                  disabled={!selectedProjectReady}
+                >
                   <Activity className="h-4 w-4" />
                   Diagnostic
                 </Button>
-                <Button className="w-full justify-start sm:justify-center" variant="outline" size="sm" onClick={() => onShowLogs()} disabled={!selectedProjectReady}>
+                <Button
+                  className="w-full justify-start sm:justify-center"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onShowLogs()}
+                  disabled={!selectedProjectReady}
+                >
                   <Logs className="h-4 w-4" />
                   Logs Odoo
                 </Button>
@@ -388,12 +459,18 @@ export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOu
               {!scopedExternalLogView && selectedJob && <JobCancelState job={selectedJob} action={selectedJobStop} />}
               {!scopedExternalLogView && selectedJob && isJobActive(selectedJob) && (
                 <JobProgressPanel
-                  label={outputProgress?.label || selectedJob.last_line || selectedJob.lines.at(-1) || "Traitement en cours"}
+                  label={
+                    outputProgress?.label || selectedJob.last_line || selectedJob.lines.at(-1) || "Traitement en cours"
+                  }
                   percent={outputProgressPercent}
                   action={selectedJobStop}
                 />
               )}
-              <OdooLogsModeBar view={scopedExternalLogView} onShowFull={() => onShowLogs(true)} onShowSummary={() => onShowLogs()} />
+              <OdooLogsModeBar
+                view={scopedExternalLogView}
+                onShowFull={() => onShowLogs(true)}
+                onShowSummary={() => onShowLogs()}
+              />
               <JobOutputPre outputRef={logOutputRef} content={outputContent} onScroll={onLogOutputScroll} />
             </CardContent>
           </Card>

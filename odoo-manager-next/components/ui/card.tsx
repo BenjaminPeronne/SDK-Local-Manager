@@ -3,12 +3,23 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 export function Card({ className, ...props }: React.ComponentPropsWithoutRef<typeof RadixCard>) {
-  return <RadixCard size="1" variant="surface" className={cn("min-w-0 overflow-hidden bg-card shadow-sm", className)} {...props} />;
+  return (
+    <RadixCard
+      size="1"
+      variant="surface"
+      className={cn("min-w-0 overflow-hidden bg-card shadow-sm", className)}
+      {...props}
+    />
+  );
 }
 
 // Survol : fond `hover` et anneau orangé. La bordure seule ne suffisait pas, Radix la dessine
 // autrement ; une carte déjà sélectionnée (`bg-selected`) garde sa teinte sous le pointeur.
-export function InteractiveCard({ className, type = "button", ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+export function InteractiveCard({
+  className,
+  type = "button",
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <RadixCard asChild size="1" variant="surface">
       <button

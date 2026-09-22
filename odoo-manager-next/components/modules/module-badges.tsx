@@ -2,7 +2,12 @@ import type { PlanModule, RepositoryModule } from "@/lib/types";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 
 export function RepositoryModuleVersion({ module }: { module: RepositoryModule }) {
-  if (module.action === "update" && module.current_version && module.version && module.current_version !== module.version) {
+  if (
+    module.action === "update" &&
+    module.current_version &&
+    module.version &&
+    module.current_version !== module.version
+  ) {
     return (
       <span className="font-mono text-xs tabular-nums">
         <span className="text-muted-foreground">{module.current_version}</span>
@@ -15,10 +20,24 @@ export function RepositoryModuleVersion({ module }: { module: RepositoryModule }
 }
 
 export function RepositoryModuleStatus({ module }: { module: RepositoryModule }) {
-  if (module.action === "blocked") return <Badge variant="outline" className="shrink-0">Bloqué</Badge>;
-  if (module.action === "add") return <Badge variant="success" className="shrink-0">Nouveau</Badge>;
+  if (module.action === "blocked")
+    return (
+      <Badge variant="outline" className="shrink-0">
+        Bloqué
+      </Badge>
+    );
+  if (module.action === "add")
+    return (
+      <Badge variant="success" className="shrink-0">
+        Nouveau
+      </Badge>
+    );
   const same = Boolean(module.current_version && module.current_version === module.version);
-  return <Badge variant="default" className="shrink-0">{same ? "Réimport" : "Mise à jour"}</Badge>;
+  return (
+    <Badge variant="default" className="shrink-0">
+      {same ? "Réimport" : "Mise à jour"}
+    </Badge>
+  );
 }
 
 export function PlanModuleChips({ items }: { items: PlanModule[] }) {

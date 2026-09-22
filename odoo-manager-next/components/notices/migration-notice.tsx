@@ -15,7 +15,14 @@ type MigrationNoticeProps = {
   setMigrationBannerClosed: Dispatch<SetStateAction<boolean>>;
 };
 
-export function MigrationNotice({ dismissMigrationProposal, loading, migration, migrationCandidates, requestProjectMigration, setMigrationBannerClosed }: MigrationNoticeProps) {
+export function MigrationNotice({
+  dismissMigrationProposal,
+  loading,
+  migration,
+  migrationCandidates,
+  requestProjectMigration,
+  setMigrationBannerClosed,
+}: MigrationNoticeProps) {
   return (
     <Notice
       tone="success"
@@ -25,8 +32,8 @@ export function MigrationNotice({ dismissMigrationProposal, loading, migration, 
       dismissLabel="Masquer jusqu’au prochain démarrage"
     >
       <span title={migration?.source}>
-        Ils sont encore rangés sur ton disque Windows, où Odoo met près d’une minute à démarrer ; ici, quelques secondes.
-        Le gestionnaire en fait une copie et ne touche pas au dossier d’origine.
+        Ils sont encore rangés sur ton disque Windows, où Odoo met près d’une minute à démarrer ; ici, quelques
+        secondes. Le gestionnaire en fait une copie et ne touche pas au dossier d’origine.
       </span>
       <div className="mt-3 flex flex-col gap-3">
         <MigrationProposal candidates={migrationCandidates} loading={loading} onMigrate={requestProjectMigration} />

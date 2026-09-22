@@ -18,7 +18,16 @@ type AdminPasswordDialogProps = {
   selectedProject: Project | undefined;
 };
 
-export function AdminPasswordDialog({ canUseDb, createJob, loading, onOpenChange, open, selectedDatabaseOrNotify, selectedDb, selectedProject }: AdminPasswordDialogProps) {
+export function AdminPasswordDialog({
+  canUseDb,
+  createJob,
+  loading,
+  onOpenChange,
+  open,
+  selectedDatabaseOrNotify,
+  selectedDb,
+  selectedProject,
+}: AdminPasswordDialogProps) {
   const [adminPassword, setAdminPassword] = useState("admin");
   async function confirmAdminPasswordReset() {
     const db = selectedDatabaseOrNotify("la réinitialisation du mot de passe admin");
@@ -33,8 +42,8 @@ export function AdminPasswordDialog({ canUseDb, createJob, loading, onOpenChange
         <DialogHeader>
           <DialogTitle>Mot de passe administrateur · {selectedDb || "base"}</DialogTitle>
           <DialogDescription>
-            Remplace le mot de passe de l’utilisateur <code className="text-xs">base.user_admin</code> et le réactive si besoin.
-            Odoo sera arrêté brièvement. L’identifiant de connexion est affiché dans les logs de la tâche.
+            Remplace le mot de passe de l’utilisateur <code className="text-xs">base.user_admin</code> et le réactive si
+            besoin. Odoo sera arrêté brièvement. L’identifiant de connexion est affiché dans les logs de la tâche.
           </DialogDescription>
         </DialogHeader>
         <label className="block space-y-2 text-sm">
@@ -50,7 +59,9 @@ export function AdminPasswordDialog({ canUseDb, createJob, loading, onOpenChange
           À utiliser uniquement sur une copie locale ou une base de test.
         </div>
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Annuler</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Annuler
+          </Button>
           <Button disabled={!canUseDb || loading || !adminPassword.trim()} onClick={confirmAdminPasswordReset}>
             <KeyRound className="h-4 w-4" />
             Réinitialiser

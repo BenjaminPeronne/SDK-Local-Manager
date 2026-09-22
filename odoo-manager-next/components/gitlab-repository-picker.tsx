@@ -28,8 +28,17 @@ export function RepositorySourceToggle({
 }) {
   if (!status?.available && !status?.unreadable) return null;
   return (
-    <div className="grid grid-cols-2 gap-1 rounded-md border bg-muted p-1" role="radiogroup" aria-label="Source du dépôt">
-      {([["gitlab", "Rechercher dans GitLab"], ["ssh", "Lien SSH"]] as const).map(([option, label]) => (
+    <div
+      className="grid grid-cols-2 gap-1 rounded-md border bg-muted p-1"
+      role="radiogroup"
+      aria-label="Source du dépôt"
+    >
+      {(
+        [
+          ["gitlab", "Rechercher dans GitLab"],
+          ["ssh", "Lien SSH"],
+        ] as const
+      ).map(([option, label]) => (
         <button
           key={option}
           type="button"
@@ -110,7 +119,8 @@ export function GitLabRepositoryPicker({
     let cancelled = false;
     setProjects(null);
     const timer = window.setTimeout(() => {
-      bridge.gitlabProjects(search)
+      bridge
+        .gitlabProjects(search)
         .then((found) => {
           if (cancelled) return;
           setProjects(found);
@@ -134,7 +144,8 @@ export function GitLabRepositoryPicker({
     let cancelled = false;
     setRefs(null);
     const timer = window.setTimeout(() => {
-      bridge.gitlabRefs(project.id, refSearch)
+      bridge
+        .gitlabRefs(project.id, refSearch)
         .then((found) => {
           if (cancelled) return;
           setRefs(found);
@@ -190,39 +201,44 @@ export function GitLabRepositoryPicker({
     onChange({ url: "", branch: "" });
   }
 
-  const retained = !project && url ? (
-    <div className="flex min-w-0 items-center justify-between gap-3 rounded-md border bg-muted/35 p-3 text-sm">
-      <span className="min-w-0">
-        <span className="block truncate font-medium">Dépôt retenu</span>
-        <span className="block truncate font-mono text-xs text-muted-foreground">{url}</span>
-        <span className="mt-1 flex items-center gap-1.5 text-xs">
-          <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          {branch ? <span className="font-mono font-medium">{branch}</span> : <span className="text-muted-foreground">Aucune branche choisie</span>}
+  const retained =
+    !project && url ? (
+      <div className="flex min-w-0 items-center justify-between gap-3 rounded-md border bg-muted/35 p-3 text-sm">
+        <span className="min-w-0">
+          <span className="block truncate font-medium">Dépôt retenu</span>
+          <span className="block truncate font-mono text-xs text-muted-foreground">{url}</span>
+          <span className="mt-1 flex items-center gap-1.5 text-xs">
+            <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            {branch ? (
+              <span className="font-mono font-medium">{branch}</span>
+            ) : (
+              <span className="text-muted-foreground">Aucune branche choisie</span>
+            )}
+          </span>
         </span>
-      </span>
-      <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={changeProject}>
-        Changer
-      </Button>
-    </div>
-  ) : null;
+        <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={changeProject}>
+          Changer
+        </Button>
+      </div>
+    ) : null;
 
   if (!connected) {
     return (
       <div className="space-y-2">
         {retained}
-      <div className="flex flex-col gap-3 rounded-md border border-dashed p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
-        <p className="flex items-start gap-2 text-muted-foreground">
-          <KeyRound className="mt-0.5 h-4 w-4 shrink-0" />
-          {status?.unreadable
-            ? status.reason
-            : "Connecte ton compte GitLab pour retrouver tes dépôts et leurs branches sans copier d’URL."}
-        </p>
-        {onManageAccount && (
-          <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={onManageAccount}>
-            {status?.unreadable ? "Reconnecter GitLab" : "Connecter GitLab"}
-          </Button>
-        )}
-      </div>
+        <div className="flex flex-col gap-3 rounded-md border border-dashed p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <p className="flex items-start gap-2 text-muted-foreground">
+            <KeyRound className="mt-0.5 h-4 w-4 shrink-0" />
+            {status?.unreadable
+              ? status.reason
+              : "Connecte ton compte GitLab pour retrouver tes dépôts et leurs branches sans copier d’URL."}
+          </p>
+          {onManageAccount && (
+            <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={onManageAccount}>
+              {status?.unreadable ? "Reconnecter GitLab" : "Connecter GitLab"}
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
@@ -257,7 +273,10 @@ export function GitLabRepositoryPicker({
           </div>
           <div className="max-h-64 overflow-y-auto rounded-md border">
             {projects === null ? (
-              <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Recherche dans GitLab…</p>
+              <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Recherche dans GitLab…
+              </p>
             ) : projects.length ? (
               <div className="divide-y" role="listbox" id="gitlab-projects" aria-label="Dépôts GitLab">
                 {projects.map((found, index) => (
@@ -279,12 +298,18 @@ export function GitLabRepositoryPicker({
                       <span className="block truncate font-medium">{found.name}</span>
                       <span className="block truncate text-xs text-muted-foreground">{found.path}</span>
                     </span>
-                    {found.defaultBranch && <Badge variant="outline" className="shrink-0">{found.defaultBranch}</Badge>}
+                    {found.defaultBranch && (
+                      <Badge variant="outline" className="shrink-0">
+                        {found.defaultBranch}
+                      </Badge>
+                    )}
                   </button>
                 ))}
               </div>
             ) : (
-              <p className="p-3 text-sm text-muted-foreground">Aucun dépôt accessible ne correspond à cette recherche.</p>
+              <p className="p-3 text-sm text-muted-foreground">
+                Aucun dépôt accessible ne correspond à cette recherche.
+              </p>
             )}
           </div>
         </div>
@@ -296,7 +321,11 @@ export function GitLabRepositoryPicker({
               <span className="block truncate font-mono text-xs text-muted-foreground">{project.sshUrl}</span>
               <span className="mt-1 flex items-center gap-1.5 text-xs">
                 <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                {branch ? <span className="font-mono font-medium">{branch}</span> : <span className="text-muted-foreground">Choisis une branche ou un tag ci-dessous</span>}
+                {branch ? (
+                  <span className="font-mono font-medium">{branch}</span>
+                ) : (
+                  <span className="text-muted-foreground">Choisis une branche ou un tag ci-dessous</span>
+                )}
               </span>
             </span>
             <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={changeProject}>
@@ -324,9 +353,17 @@ export function GitLabRepositoryPicker({
               autoFocus
             />
           </div>
-          <div className="max-h-56 overflow-y-auto rounded-md border" role="listbox" id="gitlab-refs" aria-label="Branches et tags">
+          <div
+            className="max-h-56 overflow-y-auto rounded-md border"
+            role="listbox"
+            id="gitlab-refs"
+            aria-label="Branches et tags"
+          >
             {refs === null ? (
-              <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Lecture des branches…</p>
+              <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Lecture des branches…
+              </p>
             ) : refOptions.length ? (
               <div className="divide-y">
                 {refOptions.map((ref, index) => (
@@ -346,7 +383,11 @@ export function GitLabRepositoryPicker({
                     onClick={() => onChange({ url: project.sshUrl, branch: ref.name })}
                   >
                     <span className="flex min-w-0 items-center gap-2">
-                      {branch === ref.name ? <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" /> : <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                      {branch === ref.name ? (
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />
+                      ) : (
+                        <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      )}
                       <span className="truncate font-mono text-[13px]">{ref.name}</span>
                     </span>
                     <span className="shrink-0 text-xs text-muted-foreground">{ref.kind}</span>

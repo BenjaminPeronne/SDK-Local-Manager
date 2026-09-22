@@ -98,7 +98,9 @@ export function WslSetupDialog({
           <SetupRow
             ready={Boolean(status?.wslInstalled)}
             title="WSL"
-            detail={status?.wslInstalled ? `Version ${status.wslVersion}` : "Sera activé par Windows, avec une autorisation."}
+            detail={
+              status?.wslInstalled ? `Version ${status.wslVersion}` : "Sera activé par Windows, avec une autorisation."
+            }
           />
           <SetupRow
             ready={Boolean(status?.distributionInstalled)}
@@ -181,11 +183,15 @@ function PrepareProgress({ progress, elapsed }: { progress: WslPrepareStep | nul
         aria-valuemax={total || undefined}
         aria-valuenow={total ? done : undefined}
       >
-        <div className="h-full bg-emerald-500 transition-[width] duration-500 ease-out" style={{ width: `${completed}%` }} />
+        <div
+          className="h-full bg-emerald-500 transition-[width] duration-500 ease-out"
+          style={{ width: `${completed}%` }}
+        />
         {running > 0 && <div className="h-full animate-pulse bg-emerald-500/50" style={{ width: `${running}%` }} />}
       </div>
       <p className="text-xs text-muted-foreground">
-        Temps écoulé {formatElapsed(elapsed)}. Cette étape peut durer plusieurs minutes ; l’application reste utilisable ensuite sans rien réinstaller.
+        Temps écoulé {formatElapsed(elapsed)}. Cette étape peut durer plusieurs minutes ; l’application reste utilisable
+        ensuite sans rien réinstaller.
       </p>
     </div>
   );

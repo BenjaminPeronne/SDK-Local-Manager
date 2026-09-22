@@ -5,7 +5,10 @@ export function formatNameList(names: string[]) {
 }
 
 export function normalizeSearchText(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 }
 
 export function statusVariant(status: string): "success" | "warning" | "outline" | "destructive" | "secondary" {

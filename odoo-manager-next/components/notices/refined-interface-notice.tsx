@@ -9,7 +9,10 @@ type RefinedInterfaceNoticeProps = {
   switchToRefinedInterface: () => Promise<void>;
 };
 
-export function RefinedInterfaceNotice({ dismissRefinedInterfaceProposal, switchToRefinedInterface }: RefinedInterfaceNoticeProps) {
+export function RefinedInterfaceNotice({
+  dismissRefinedInterfaceProposal,
+  switchToRefinedInterface,
+}: RefinedInterfaceNoticeProps) {
   return (
     <Notice
       tone="accent"
@@ -24,7 +27,8 @@ export function RefinedInterfaceNotice({ dismissRefinedInterfaceProposal, switch
         </Button>
       }
     >
-      Présentation affinée et en-tête fixe : le nom du projet et ses actions restent visibles pendant le défilement. Retour à l’interface classique possible à tout moment dans Paramètres, section Apparence.
+      Présentation affinée et en-tête fixe : le nom du projet et ses actions restent visibles pendant le défilement.
+      Retour à l’interface classique possible à tout moment dans Paramètres, section Apparence.
     </Notice>
   );
 }

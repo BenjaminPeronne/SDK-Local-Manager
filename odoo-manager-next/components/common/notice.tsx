@@ -14,7 +14,10 @@ import { Button } from "@/components/ui/button";
  */
 type NoticeTone = "danger" | "warning" | "info" | "success" | "neutral" | "accent";
 
-const NOTICE_TONES: Record<NoticeTone, { container: string; bar: string; icon: string; body: string; dismiss: string }> = {
+const NOTICE_TONES: Record<
+  NoticeTone,
+  { container: string; bar: string; icon: string; body: string; dismiss: string }
+> = {
   danger: {
     container: "border-red-200 bg-red-50/80 text-red-950 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-50",
     bar: "bg-red-500",
@@ -23,7 +26,8 @@ const NOTICE_TONES: Record<NoticeTone, { container: string; bar: string; icon: s
     dismiss: "text-red-800 hover:bg-red-100 dark:text-red-200 dark:hover:bg-red-900/60",
   },
   warning: {
-    container: "border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-50",
+    container:
+      "border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-50",
     bar: "bg-amber-500",
     icon: "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300",
     body: "text-amber-800 dark:text-amber-200",
@@ -37,14 +41,16 @@ const NOTICE_TONES: Record<NoticeTone, { container: string; bar: string; icon: s
     dismiss: "text-sky-800 hover:bg-sky-100 dark:text-sky-200 dark:hover:bg-sky-900/60",
   },
   success: {
-    container: "border-emerald-200 bg-emerald-50/80 text-emerald-950 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-50",
+    container:
+      "border-emerald-200 bg-emerald-50/80 text-emerald-950 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-50",
     bar: "bg-emerald-500",
     icon: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300",
     body: "text-emerald-800 dark:text-emerald-200",
     dismiss: "text-emerald-800 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-900/60",
   },
   neutral: {
-    container: "border-slate-200 bg-slate-50/80 text-slate-900 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-100",
+    container:
+      "border-slate-200 bg-slate-50/80 text-slate-900 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-100",
     bar: "bg-slate-400",
     icon: "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
     body: "text-slate-700 dark:text-slate-300",

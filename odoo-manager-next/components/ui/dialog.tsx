@@ -17,7 +17,10 @@ export const DialogContent = React.forwardRef<
     // Rythme vertical par défaut : sans lui, chaque fenêtre recollait son en-tête, son contenu et
     // ses boutons, et chaque nouvelle fenêtre naissait avec des blocs collés. Une fenêtre à mise
     // en page propre le remplace par sa classe `gap-*`.
-    className={cn("relative flex max-h-[calc(100dvh-2rem-max(2rem,6dvh))] w-[calc(100vw-2rem)] max-w-lg flex-col gap-5 overflow-y-auto", className)}
+    className={cn(
+      "relative flex max-h-[calc(100dvh-2rem-max(2rem,6dvh))] w-[calc(100vw-2rem)] max-w-lg flex-col gap-5 overflow-y-auto",
+      className,
+    )}
     {...props}
   >
     {children}

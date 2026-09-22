@@ -18,9 +18,10 @@ function git(...args: string[]) {
 // Numéro de build figé dans l'interface : tag app-v<version>-build<N> du build (CI, script
 // build_all_platforms.sh) ou tag posé sur le commit courant, et commit court pour le support.
 function buildIdentity() {
-  const tag = process.env.ODOO_MANAGER_BUILD_TAG
-    || (process.env.GITHUB_REF_TYPE === "tag" ? process.env.GITHUB_REF_NAME : "")
-    || git("describe", "--tags", "--exact-match", "--match", "app-v*");
+  const tag =
+    process.env.ODOO_MANAGER_BUILD_TAG ||
+    (process.env.GITHUB_REF_TYPE === "tag" ? process.env.GITHUB_REF_NAME : "") ||
+    git("describe", "--tags", "--exact-match", "--match", "app-v*");
   const build = /^app-v\d+\.\d+\.\d+-build(\d+)$/.exec(tag || "")?.[1] ?? "";
   const commit = (process.env.GITHUB_SHA || git("rev-parse", "HEAD")).slice(0, 7);
   return { NEXT_PUBLIC_APP_BUILD: build, NEXT_PUBLIC_APP_COMMIT: commit };

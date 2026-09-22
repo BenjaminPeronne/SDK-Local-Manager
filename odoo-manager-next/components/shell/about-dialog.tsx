@@ -21,7 +21,14 @@ type AboutDialogProps = {
   settings: ManagerSettings | null;
 };
 
-export function AboutDialog({ appVersion, onOpenChange, open, pushToast, selectedAppIcon, settings }: AboutDialogProps) {
+export function AboutDialog({
+  appVersion,
+  onOpenChange,
+  open,
+  pushToast,
+  selectedAppIcon,
+  settings,
+}: AboutDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
@@ -55,7 +62,9 @@ export function AboutDialog({ appVersion, onOpenChange, open, pushToast, selecte
                 title="Copier les informations de version"
                 aria-label="Copier les informations de version"
                 onClick={async () => {
-                  const details = [`Build ${APP_BUILD || "local"}`, APP_COMMIT && `commit ${APP_COMMIT}`].filter(Boolean).join(", ");
+                  const details = [`Build ${APP_BUILD || "local"}`, APP_COMMIT && `commit ${APP_COMMIT}`]
+                    .filter(Boolean)
+                    .join(", ");
                   try {
                     await navigator.clipboard.writeText(`SDK Local Manager ${appVersion} (${details})`);
                     pushToast("success", "Informations de version copiées.");
@@ -81,7 +90,9 @@ export function AboutDialog({ appVersion, onOpenChange, open, pushToast, selecte
               {APP_COMMIT && (
                 <div className="min-w-0 px-4 py-3">
                   <dt className={REFINED_LABEL}>Commit</dt>
-                  <dd className="mt-1 truncate font-mono text-[13px]" title={APP_COMMIT}>{APP_COMMIT}</dd>
+                  <dd className="mt-1 truncate font-mono text-[13px]" title={APP_COMMIT}>
+                    {APP_COMMIT}
+                  </dd>
                 </div>
               )}
             </dl>

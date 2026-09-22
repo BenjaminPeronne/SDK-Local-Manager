@@ -75,7 +75,9 @@ export interface StoredRikaCredentials {
 }
 
 declare global {
-  interface Window { sdkDesktop?: DesktopBridge }
+  interface Window {
+    sdkDesktop?: DesktopBridge;
+  }
 }
 
 /** Message d'une erreur du pont natif, sans l'enveloppe technique ajoutée par Electron. */
@@ -85,5 +87,5 @@ export function desktopErrorMessage(error: unknown, fallback: string) {
 }
 
 export function desktopBridge() {
-  return typeof window === 'undefined' ? undefined : window.sdkDesktop;
+  return typeof window === "undefined" ? undefined : window.sdkDesktop;
 }

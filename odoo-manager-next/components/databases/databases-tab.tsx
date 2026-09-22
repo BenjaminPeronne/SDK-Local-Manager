@@ -58,7 +58,30 @@ type DatabasesTabProps = {
   setRestoreDbOpen: Dispatch<SetStateAction<boolean>>;
 };
 
-export function DatabasesTab({ canUseDb, chooseDatabase, executeDatabaseAction, loading, odooDatabases, openAllTranslationsReset, openingPostgresql, openPostgresqlConsole, openUrl, postgresDetailsOpen, refinedInterface, regenerateOdooAssets, selectedDb, selectedProject, selectedProjectReady, setAdminPasswordOpen, setCreateDbOpen, setDropDbOpen, setNeutralizeDbOpen, setPendingDatabaseAction, setPostgresDetailsOpen, setRestoreDbOpen }: DatabasesTabProps) {
+export function DatabasesTab({
+  canUseDb,
+  chooseDatabase,
+  executeDatabaseAction,
+  loading,
+  odooDatabases,
+  openAllTranslationsReset,
+  openingPostgresql,
+  openPostgresqlConsole,
+  openUrl,
+  postgresDetailsOpen,
+  refinedInterface,
+  regenerateOdooAssets,
+  selectedDb,
+  selectedProject,
+  selectedProjectReady,
+  setAdminPasswordOpen,
+  setCreateDbOpen,
+  setDropDbOpen,
+  setNeutralizeDbOpen,
+  setPendingDatabaseAction,
+  setPostgresDetailsOpen,
+  setRestoreDbOpen,
+}: DatabasesTabProps) {
   function runDatabaseAction(db: string, action: DatabaseMenuAction) {
     if (db !== selectedDb) {
       // Les actions lisent la base sélectionnée : on attend que la sélection soit appliquée.
@@ -125,9 +148,7 @@ export function DatabasesTab({ canUseDb, chooseDatabase, executeDatabaseAction, 
                         db === selectedDb ? "font-medium text-primary" : "text-muted-foreground",
                       )}
                     >
-                      {db === selectedDb
-                        ? "Base de travail"
-                        : selectedProject?.database_versions?.[db] || "Base Odoo"}
+                      {db === selectedDb ? "Base de travail" : selectedProject?.database_versions?.[db] || "Base Odoo"}
                     </div>
                   </InteractiveCard>
                   <DropdownMenu.Root modal={false}>
@@ -204,7 +225,9 @@ export function DatabasesTab({ canUseDb, chooseDatabase, executeDatabaseAction, 
               onClick={() => setPostgresDetailsOpen((open) => !open)}
             >
               <span className="flex min-w-0 items-center gap-2">
-                <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", postgresDetailsOpen && "rotate-90")} />
+                <ChevronRight
+                  className={cn("h-4 w-4 shrink-0 transition-transform", postgresDetailsOpen && "rotate-90")}
+                />
                 <span className={cn("min-w-0", REFINED_ROW_TITLE)}>Infrastructure · PostgreSQL</span>
               </span>
               <Badge variant={statusVariant(selectedProject?.postgres_status || "absent")} className="shrink-0">
@@ -222,10 +245,7 @@ export function DatabasesTab({ canUseDb, chooseDatabase, executeDatabaseAction, 
                 <div className="min-w-0 rounded-md bg-muted/55 p-3">
                   <div className="text-xs text-muted-foreground">Base Odoo ciblée</div>
                   <div
-                    className={cn(
-                      "mt-1 break-all",
-                      selectedDb ? REFINED_IDENTIFIER : "text-sm text-muted-foreground",
-                    )}
+                    className={cn("mt-1 break-all", selectedDb ? REFINED_IDENTIFIER : "text-sm text-muted-foreground")}
                   >
                     {selectedDb || "Aucune base sélectionnée"}
                   </div>
@@ -242,7 +262,9 @@ export function DatabasesTab({ canUseDb, chooseDatabase, executeDatabaseAction, 
           <Card>
             <CardHeader>
               <CardTitle>Bases Odoo</CardTitle>
-              <CardDescription>Sélectionne l’environnement Odoo utilisé pour les modules et les actions.</CardDescription>
+              <CardDescription>
+                Sélectionne l’environnement Odoo utilisé pour les modules et les actions.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {odooDatabases.length ? (
@@ -296,7 +318,11 @@ export function DatabasesTab({ canUseDb, chooseDatabase, executeDatabaseAction, 
                   Restaurer une sauvegarde ZIP
                 </Button>
                 {selectedProject && (
-                  <Button className="w-full" variant="ghost" onClick={() => openUrl(selectedProject.database_manager_url)}>
+                  <Button
+                    className="w-full"
+                    variant="ghost"
+                    onClick={() => openUrl(selectedProject.database_manager_url)}
+                  >
                     <ExternalLink className="h-4 w-4" />
                     Gestionnaire de bases Odoo
                   </Button>
@@ -335,11 +361,21 @@ export function DatabasesTab({ canUseDb, chooseDatabase, executeDatabaseAction, 
                   <Paintbrush className="h-4 w-4" />
                   Régénérer les assets
                 </Button>
-                <Button className="w-full" variant="outline" disabled={!canUseDb || loading} onClick={openAllTranslationsReset}>
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  disabled={!canUseDb || loading}
+                  onClick={openAllTranslationsReset}
+                >
                   <Languages className="h-4 w-4" />
                   Réinitialiser les traductions
                 </Button>
-                <Button className="w-full" variant="outline" disabled={!canUseDb || loading} onClick={() => setAdminPasswordOpen(true)}>
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  disabled={!canUseDb || loading}
+                  onClick={() => setAdminPasswordOpen(true)}
+                >
                   <KeyRound className="h-4 w-4" />
                   Réinitialiser le mot de passe admin
                 </Button>
@@ -372,7 +408,9 @@ export function DatabasesTab({ canUseDb, chooseDatabase, executeDatabaseAction, 
               <CardContent className="space-y-4">
                 <div className="min-w-0 rounded-md bg-muted/55 p-3 text-sm">
                   <div className="text-muted-foreground">Conteneur</div>
-                  <div className="mt-1 break-all font-medium">{selectedProject ? `postgresql-${selectedProject.name}` : "-"}</div>
+                  <div className="mt-1 break-all font-medium">
+                    {selectedProject ? `postgresql-${selectedProject.name}` : "-"}
+                  </div>
                   <div className="mt-3 text-muted-foreground">Base Odoo ciblée</div>
                   <div className="mt-1 break-words font-medium">{selectedDb || "Aucune base sélectionnée"}</div>
                 </div>
@@ -385,7 +423,9 @@ export function DatabasesTab({ canUseDb, chooseDatabase, executeDatabaseAction, 
                   {openingPostgresql ? <Loader2 className="h-4 w-4 animate-spin" /> : <Terminal className="h-4 w-4" />}
                   Ouvrir psql
                 </Button>
-                <p className="text-xs text-muted-foreground">La console s’ouvre dans le terminal du système avec la base Odoo sélectionnée.</p>
+                <p className="text-xs text-muted-foreground">
+                  La console s’ouvre dans le terminal du système avec la base Odoo sélectionnée.
+                </p>
               </CardContent>
             </Card>
           </div>

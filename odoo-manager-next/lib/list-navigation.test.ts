@@ -5,11 +5,20 @@ import { handleListKeys } from "./list-navigation.ts";
 function press(key: string, count: number, active: number) {
   const calls: { active?: number; chosen?: number; prevented: boolean } = { prevented: false };
   handleListKeys(
-    { key, preventDefault: () => { calls.prevented = true; } },
+    {
+      key,
+      preventDefault: () => {
+        calls.prevented = true;
+      },
+    },
     count,
     active,
-    (index) => { calls.active = index; },
-    (index) => { calls.chosen = index; },
+    (index) => {
+      calls.active = index;
+    },
+    (index) => {
+      calls.chosen = index;
+    },
   );
   return calls;
 }

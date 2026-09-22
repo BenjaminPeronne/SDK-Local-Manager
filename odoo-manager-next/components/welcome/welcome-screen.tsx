@@ -29,7 +29,12 @@ export function WelcomeScreen({
 }) {
   return (
     <div className="mx-auto flex max-w-[1500px] flex-col items-center px-4 py-12 text-center sm:py-16">
-      <img src={icon.src} alt="" aria-hidden="true" className="h-16 w-16 rounded-2xl object-cover shadow-sm sm:h-[72px] sm:w-[72px]" />
+      <img
+        src={icon.src}
+        alt=""
+        aria-hidden="true"
+        className="h-16 w-16 rounded-2xl object-cover shadow-sm sm:h-[72px] sm:w-[72px]"
+      />
       <h2 className="mt-5 text-2xl font-semibold sm:text-3xl">SDK Local Manager</h2>
       <p className="mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
         {hasProjects
@@ -62,9 +67,7 @@ export function WelcomeScreen({
       </div>
 
       {hasProjects && (
-        <p className="mt-6 text-xs text-muted-foreground">
-          Échap ramène à cet écran depuis un projet éteint.
-        </p>
+        <p className="mt-6 text-xs text-muted-foreground">Échap ramène à cet écran depuis un projet éteint.</p>
       )}
     </div>
   );

@@ -47,13 +47,22 @@ test("a machine without the bridge is reported as unsupported, not broken", () =
 });
 
 test("a system without a Linux environment is never asked to install WSL", () => {
-  const macOs = status({ supported: false, wslInstalled: false, wslVersion: "", distributionInstalled: false, release: "" });
+  const macOs = status({
+    supported: false,
+    wslInstalled: false,
+    wslVersion: "",
+    distributionInstalled: false,
+    release: "",
+  });
   assert.equal(wslSetupState(macOs, "0.5.0").step, "unsupported");
   assert.equal(isWslSetupPending(macOs, "0.5.0"), false);
 });
 
 test("failures are explained in terms the user can act on", () => {
-  assert.match(wslSetupError(new Error("L'image ne correspond pas à son empreinte : installation refusée.")), /Retélécharge/);
+  assert.match(
+    wslSetupError(new Error("L'image ne correspond pas à son empreinte : installation refusée.")),
+    /Retélécharge/,
+  );
   assert.match(wslSetupError(new Error("ENOENT: no such file or directory")), /absente/);
   assert.match(wslSetupError(new Error("Erreur 0x80370102")), /virtualisation/i);
   assert.equal(wslSetupError(new Error("Échec inattendu")), "Échec inattendu");

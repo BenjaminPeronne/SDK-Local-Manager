@@ -20,7 +20,9 @@ function apiTimeoutFor(path: string) {
 }
 
 export class ApiUnavailableError extends Error {
-  constructor(message = `Service local SDK Local Manager indisponible. L'application n'arrive pas à joindre l'API locale ${API_BASE || "http://127.0.0.1:18765"}.`) {
+  constructor(
+    message = `Service local SDK Local Manager indisponible. L'application n'arrive pas à joindre l'API locale ${API_BASE || "http://127.0.0.1:18765"}.`,
+  ) {
     super(message);
     this.name = "ApiUnavailableError";
   }
@@ -42,7 +44,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
         response = await fetch(`${API_BASE}${path}`, {
           ...init,
           cache: "no-store",
-          headers: init?.body instanceof FormData ? init.headers : { "Content-Type": "application/json", ...init?.headers },
+          headers:
+            init?.body instanceof FormData ? init.headers : { "Content-Type": "application/json", ...init?.headers },
           signal: controller.signal,
         });
         break;
@@ -74,10 +77,7 @@ export function uploadDatabaseBackup(
 ): Promise<{ job: Job }> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open(
-      "POST",
-      `${API_BASE}/api/projects/${encodeURIComponent(payload.project)}/database-restore`,
-    );
+    request.open("POST", `${API_BASE}/api/projects/${encodeURIComponent(payload.project)}/database-restore`);
     request.setRequestHeader("Content-Type", "application/zip");
     request.setRequestHeader("X-Odoo-Database-Name", encodeURIComponent(payload.db));
     request.setRequestHeader("X-Odoo-Master-Password", encodeURIComponent(payload.masterPwd));

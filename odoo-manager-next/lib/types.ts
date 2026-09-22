@@ -69,12 +69,22 @@ export type SystemStatus = {
   abandoned_staging?: { count: number; names: string[]; oldest_modified_at: number };
 };
 
-export type MigrationCandidate = { name: string; source: string; already_migrated: boolean; stopped: boolean;
+export type MigrationCandidate = {
+  name: string;
+  source: string;
+  already_migrated: boolean;
+  stopped: boolean;
   // Faux quand le verrou PostgreSQL est le seul indice : aucun moteur Docker joignable ne
   // connaît les conteneurs du projet, et un verrou survit à un conteneur tué.
-  engine_confirmed: boolean };
+  engine_confirmed: boolean;
+};
 
-export type MigrationSnapshot = { available: boolean; source: string; projects: MigrationCandidate[]; dismissed: boolean };
+export type MigrationSnapshot = {
+  available: boolean;
+  source: string;
+  projects: MigrationCandidate[];
+  dismissed: boolean;
+};
 
 export type BootstrapSnapshot = {
   overview: Overview;
@@ -86,7 +96,8 @@ export type BootstrapSnapshot = {
 /** Action de menu d'une base, en attente de confirmation. */
 export type PendingDatabaseAction = { db: string; action: DatabaseMenuAction };
 
-export type DatabaseMenuAction = "regenerate_assets" | "reset_translations" | "neutralize" | "admin_password" | "psql" | "drop";
+export type DatabaseMenuAction =
+  "regenerate_assets" | "reset_translations" | "neutralize" | "admin_password" | "psql" | "drop";
 
 export type ManagerSettings = {
   version: number;
@@ -238,7 +249,14 @@ export type RepositoryModule = {
 export type RepositoryInspection =
   | { status: "idle" }
   | { status: "loading"; key: string }
-  | { status: "ready"; key: string; modules: RepositoryModule[]; commit: string; odooVersion: string; manifestsRead: boolean }
+  | {
+      status: "ready";
+      key: string;
+      modules: RepositoryModule[];
+      commit: string;
+      odooVersion: string;
+      manifestsRead: boolean;
+    }
   | { status: "error"; key: string; error: string };
 
 /** Journal affiché hors d'une action : sortie d'un import ZIP, logs bruts d'un projet. */

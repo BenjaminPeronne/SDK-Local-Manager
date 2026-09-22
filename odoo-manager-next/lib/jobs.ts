@@ -2,7 +2,10 @@ import type { Job } from "@/lib/types";
 
 export function jobsFingerprint(items: Job[]) {
   return items
-    .map((job) => `${job.id}:${job.status}:${job.finished_at || ""}:${job.error_message || ""}:${job.lines.length}:${job.last_line ?? job.lines.at(-1) ?? ""}:${job.output_total ?? job.output?.length ?? 0}:${job.progress?.label || ""}:${job.progress?.current ?? ""}:${job.progress?.total ?? ""}`)
+    .map(
+      (job) =>
+        `${job.id}:${job.status}:${job.finished_at || ""}:${job.error_message || ""}:${job.lines.length}:${job.last_line ?? job.lines.at(-1) ?? ""}:${job.output_total ?? job.output?.length ?? 0}:${job.progress?.label || ""}:${job.progress?.current ?? ""}:${job.progress?.total ?? ""}`,
+    )
     .join("|");
 }
 
@@ -25,7 +28,8 @@ export function jobCompletionTitle(job: Job) {
 export function jobStopUnavailableReason(job: Job) {
   if (job.status === "cancelling") return "Arrêt en cours : retour arrière des modifications de l'action.";
   if (job.cancel_blocked_step) return `Arrêt impossible pendant une étape irréversible : ${job.cancel_blocked_step}.`;
-  if (!job.cancellable) return `Cette action ne peut pas être arrêtée : ${job.cancel_hint || "opération non interruptible."}`;
+  if (!job.cancellable)
+    return `Cette action ne peut pas être arrêtée : ${job.cancel_hint || "opération non interruptible."}`;
   return "";
 }
 

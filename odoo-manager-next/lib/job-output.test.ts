@@ -21,17 +21,23 @@ test("a delta that does not match the cache forces a full reload next time", () 
 
 test("jobs without detail keep their compact payload and the cache follows the detailed job", () => {
   const cache: JobOutputCache = new Map([[7, { output: "old", total: 3 }]]);
-  const jobs = mergeIncrementalJobOutput([
-    { id: 8, output: "new", output_from: 0, output_total: 3 },
-    { id: 7, output: "" },
-  ], cache);
+  const jobs = mergeIncrementalJobOutput(
+    [
+      { id: 8, output: "new", output_from: 0, output_total: 3 },
+      { id: 7, output: "" },
+    ],
+    cache,
+  );
   assert.equal(jobs[1].output, "");
   assert.deepEqual([...cache.keys()], [8]);
 });
 
 test("merged output stays bounded", () => {
   const cache: JobOutputCache = new Map([[1, { output: "x".repeat(JOB_OUTPUT_LIMIT), total: JOB_OUTPUT_LIMIT }]]);
-  const [job] = mergeIncrementalJobOutput([{ id: 1, output: "fin", output_from: JOB_OUTPUT_LIMIT, output_total: JOB_OUTPUT_LIMIT + 3 }], cache);
+  const [job] = mergeIncrementalJobOutput(
+    [{ id: 1, output: "fin", output_from: JOB_OUTPUT_LIMIT, output_total: JOB_OUTPUT_LIMIT + 3 }],
+    cache,
+  );
   assert.equal(job.output?.length, JOB_OUTPUT_LIMIT);
   assert.ok(job.output?.endsWith("fin"));
 });

@@ -16,7 +16,9 @@ export function RunningJobsBanner({ onFollowJob, runningJobs }: RunningJobsBanne
         <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-primary" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <p className="font-semibold">
-            {runningJobs.length === 1 ? "Un traitement est en cours" : `${runningJobs.length} traitements sont en cours`}
+            {runningJobs.length === 1
+              ? "Un traitement est en cours"
+              : `${runningJobs.length} traitements sont en cours`}
           </p>
           <p className="mt-0.5 text-muted-foreground">
             Les paramètres sont temporairement verrouillés. Ouvre le suivi pour savoir ce qui est exécuté.

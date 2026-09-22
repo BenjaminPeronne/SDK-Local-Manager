@@ -23,7 +23,19 @@ type ZipImportDialogProps = {
   setSelectedJobId: Dispatch<SetStateAction<number | null>>;
 };
 
-export function ZipImportDialog({ loading, onOpenChange, open, pushToast, refreshJobs, refreshModules, schedule, selectedProject, setExternalLogView, setLoading, setSelectedJobId }: ZipImportDialogProps) {
+export function ZipImportDialog({
+  loading,
+  onOpenChange,
+  open,
+  pushToast,
+  refreshJobs,
+  refreshModules,
+  schedule,
+  selectedProject,
+  setExternalLogView,
+  setLoading,
+  setSelectedJobId,
+}: ZipImportDialogProps) {
   const [replaceZipModules, setReplaceZipModules] = useState(true);
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [zipModuleCandidates, setZipModuleCandidates] = useState<string[]>([]);

@@ -17,13 +17,20 @@ export function StagingCleanupNotice({ loading, requestStagingCleanup, count }: 
       icon={Trash2}
       title="Créations de projet interrompues"
       actions={
-        <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={loading} onClick={requestStagingCleanup}>
+        <Button
+          className="w-full sm:w-auto"
+          size="sm"
+          variant="outline"
+          disabled={loading}
+          onClick={requestStagingCleanup}
+        >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
           Nettoyer
         </Button>
       }
     >
-      {count} dossier(s) de préparation occupent de l’espace disque sans servir à aucun projet. Les supprimer ne touche à aucun projet ni à aucune base.
+      {count} dossier(s) de préparation occupent de l’espace disque sans servir à aucun projet. Les supprimer ne touche
+      à aucun projet ni à aucune base.
     </Notice>
   );
 }

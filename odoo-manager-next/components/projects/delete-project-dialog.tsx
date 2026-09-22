@@ -22,9 +22,15 @@ export function DeleteProjectDialog({ createJob, onOpenChange, open, selectedPro
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Supprimer {selectedProject?.name}</DialogTitle>
-          <DialogDescription>Le projet sera déplacé dans `.odoo_manager_deleted`. Saisis le nom du projet pour confirmer.</DialogDescription>
+          <DialogDescription>
+            Le projet sera déplacé dans `.odoo_manager_deleted`. Saisis le nom du projet pour confirmer.
+          </DialogDescription>
         </DialogHeader>
-        <Input value={deleteConfirm} onChange={(event) => setDeleteConfirm(event.target.value)} placeholder={selectedProject?.name} />
+        <Input
+          value={deleteConfirm}
+          onChange={(event) => setDeleteConfirm(event.target.value)}
+          placeholder={selectedProject?.name}
+        />
         <Button
           variant="destructive"
           disabled={!selectedProject || deleteConfirm !== selectedProject.name}

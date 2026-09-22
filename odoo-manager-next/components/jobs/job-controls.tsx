@@ -7,7 +7,15 @@ import type { Job } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
-export function JobProgressPanel({ label, percent, action }: { label: string; percent: number | null; action?: ReactNode }) {
+export function JobProgressPanel({
+  label,
+  percent,
+  action,
+}: {
+  label: string;
+  percent: number | null;
+  action?: ReactNode;
+}) {
   return (
     <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
       <div className="min-w-0 flex-1 rounded-md border border-emerald-400/20 bg-slate-950 px-3 py-2.5 text-emerald-100">
@@ -25,7 +33,10 @@ export function JobProgressPanel({ label, percent, action }: { label: string; pe
           aria-valuenow={percent ?? undefined}
         >
           {percent !== null ? (
-            <div className="h-full rounded-full bg-emerald-400 transition-[width] duration-500 ease-out" style={{ width: `${percent}%` }} />
+            <div
+              className="h-full rounded-full bg-emerald-400 transition-[width] duration-500 ease-out"
+              style={{ width: `${percent}%` }}
+            />
           ) : (
             <div className="h-full w-1/3 animate-pulse rounded-full bg-emerald-400" />
           )}
@@ -41,7 +52,15 @@ export function JobProgressPanel({ label, percent, action }: { label: string; pe
 const STOP_BUTTON_CLASS =
   "border-red-300 text-red-700 hover:border-red-400 hover:bg-red-50 hover:text-red-800 active:bg-red-100 focus-visible:ring-red-500 dark:border-red-800 dark:text-red-300 dark:hover:border-red-700 dark:hover:bg-red-950/60 dark:hover:text-red-200 dark:active:bg-red-950";
 
-export function JobStopButton({ job, className, onRequest }: { job: Job; className?: string; onRequest: (jobId: number) => void }) {
+export function JobStopButton({
+  job,
+  className,
+  onRequest,
+}: {
+  job: Job;
+  className?: string;
+  onRequest: (jobId: number) => void;
+}) {
   const queued = job.status === "queued";
   const cancelling = job.status === "cancelling";
   const unavailable = jobStopUnavailableReason(job);

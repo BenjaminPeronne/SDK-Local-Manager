@@ -34,7 +34,12 @@ export function DockerNotice({ loading, openSettingsDialog, openUrl, requestDock
             </Button>
           )}
           {docker.install_guide?.install_url && (
-            <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl(docker.install_guide?.install_url)}>
+            <Button
+              className="w-full sm:w-auto"
+              size="sm"
+              variant="outline"
+              onClick={() => openUrl(docker.install_guide?.install_url)}
+            >
               <ExternalLink className="h-4 w-4" />
               Guide Docker
             </Button>

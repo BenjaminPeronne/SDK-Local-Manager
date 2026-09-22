@@ -20,7 +20,19 @@ type UninstallModulesDialogProps = {
   setSelectedModules: Dispatch<SetStateAction<Set<string>>>;
 };
 
-export function UninstallModulesDialog({ createJob, loading, onOpenChange, open, pendingUninstallModules, refreshModules, schedule, selectedDb, selectedProject, setPendingUninstallModules, setSelectedModules }: UninstallModulesDialogProps) {
+export function UninstallModulesDialog({
+  createJob,
+  loading,
+  onOpenChange,
+  open,
+  pendingUninstallModules,
+  refreshModules,
+  schedule,
+  selectedDb,
+  selectedProject,
+  setPendingUninstallModules,
+  setSelectedModules,
+}: UninstallModulesDialogProps) {
   async function confirmUninstall() {
     if (!selectedProject || !selectedDb || !pendingUninstallModules.length) return;
     const job = await createJob("uninstall_module", {
@@ -42,8 +54,8 @@ export function UninstallModulesDialog({ createJob, loading, onOpenChange, open,
         <DialogHeader>
           <DialogTitle>Désinstaller les modules</DialogTitle>
           <DialogDescription>
-            Cette action désinstalle les modules de la base {selectedDb || "sélectionnée"}. Les dossiers addons et les liens symboliques ne seront pas
-            supprimés.
+            Cette action désinstalle les modules de la base {selectedDb || "sélectionnée"}. Les dossiers addons et les
+            liens symboliques ne seront pas supprimés.
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-52 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs">

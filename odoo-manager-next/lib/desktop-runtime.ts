@@ -12,11 +12,16 @@ export async function invokeDesktop<T>(command: string, args?: Record<string, un
   const bridge = window.sdkDesktop;
   if (!bridge) throw new Error("L’intégration native Electron est indisponible.");
   switch (command) {
-    case "backend_endpoint": return await bridge.backendEndpoint() as T;
-    case "backend_diagnostics": return await bridge.backendDiagnostics() as T;
-    case "open_external_url": return await bridge.openExternalUrl(String(args?.url || "")) as T;
-    case "open_docker_desktop": return await bridge.openDockerDesktop() as T;
-    default: throw new Error("Commande native inconnue.");
+    case "backend_endpoint":
+      return (await bridge.backendEndpoint()) as T;
+    case "backend_diagnostics":
+      return (await bridge.backendDiagnostics()) as T;
+    case "open_external_url":
+      return (await bridge.openExternalUrl(String(args?.url || ""))) as T;
+    case "open_docker_desktop":
+      return (await bridge.openDockerDesktop()) as T;
+    default:
+      throw new Error("Commande native inconnue.");
   }
 }
 

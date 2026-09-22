@@ -45,7 +45,26 @@ type RepositoryImportDialogProps = {
   setRepositoryUrl: Dispatch<SetStateAction<string>>;
 };
 
-export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOpenChange, open, openAccountSettings, openSshAssistant, repositoryBranch, repositoryInspectionKey, repositoryUrl, repositoryUrlError, selectedDb, selectedProject, selectedProjectReady, setActiveTab, setGitlabStatus, setRepositoryBranch, setRepositoryUrl }: RepositoryImportDialogProps) {
+export function RepositoryImportDialog({
+  canUseDb,
+  createJob,
+  gitlabStatus,
+  onOpenChange,
+  open,
+  openAccountSettings,
+  openSshAssistant,
+  repositoryBranch,
+  repositoryInspectionKey,
+  repositoryUrl,
+  repositoryUrlError,
+  selectedDb,
+  selectedProject,
+  selectedProjectReady,
+  setActiveTab,
+  setGitlabStatus,
+  setRepositoryBranch,
+  setRepositoryUrl,
+}: RepositoryImportDialogProps) {
   const [repositorySubmitting, setRepositorySubmitting] = useState(false);
   const [repositoryInspection, setRepositoryInspection] = useState<RepositoryInspection>({ status: "idle" });
   const [repositorySelection, setRepositorySelection] = useState<Set<string>>(new Set());
@@ -75,13 +94,17 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
     () =>
       repositoryInspection.status === "ready"
         ? [...repositoryInspection.modules].sort(
-            (left, right) => REPOSITORY_ACTION_ORDER[left.action] - REPOSITORY_ACTION_ORDER[right.action] || left.name.localeCompare(right.name),
+            (left, right) =>
+              REPOSITORY_ACTION_ORDER[left.action] - REPOSITORY_ACTION_ORDER[right.action] ||
+              left.name.localeCompare(right.name),
           )
         : [],
     [repositoryInspection],
   );
   const repositorySelectableModules = repositoryReadyModules.filter((module) => module.action !== "blocked");
-  const repositorySelectedModules = repositorySelectableModules.filter((module) => repositorySelection.has(module.name));
+  const repositorySelectedModules = repositorySelectableModules.filter((module) =>
+    repositorySelection.has(module.name),
+  );
   const repositorySelectedAdds = repositorySelectedModules.filter((module) => module.action === "add").length;
   const repositorySelectedUpdates = repositorySelectedModules.length - repositorySelectedAdds;
   const repositoryUpdatableModules = repositorySelectableModules.filter((module) => module.action === "update");
@@ -89,7 +112,9 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
     const blocked = module.action === "blocked";
     const selected = !blocked && repositorySelection.has(module.name);
     const note = module.reason || module.warning;
-    const detail = [module.title, module.path !== module.name && module.path !== "." ? module.path : ""].filter(Boolean).join(" · ");
+    const detail = [module.title, module.path !== module.name && module.path !== "." ? module.path : ""]
+      .filter(Boolean)
+      .join(" · ");
     return (
       <label
         key={`${module.path}:${module.name}`}
@@ -114,10 +139,17 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
           }
         />
         <span className="min-w-0">
-          <span className={cn("block truncate font-mono text-[13px] font-medium", blocked && "text-muted-foreground")}>{module.name}</span>
+          <span className={cn("block truncate font-mono text-[13px] font-medium", blocked && "text-muted-foreground")}>
+            {module.name}
+          </span>
           {detail && <span className="block truncate text-xs text-muted-foreground">{detail}</span>}
           {note && (
-            <span className={cn("mt-0.5 block text-xs", module.reason ? "text-muted-foreground" : "text-amber-700 dark:text-amber-300")}>
+            <span
+              className={cn(
+                "mt-0.5 block text-xs",
+                module.reason ? "text-muted-foreground" : "text-amber-700 dark:text-amber-300",
+              )}
+            >
               {note}
             </span>
           )}
@@ -134,7 +166,9 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
   const repositoryVisibleModules = useMemo(() => {
     const query = normalizeSearchText(repositoryFilter.trim());
     return query
-      ? repositoryReadyModules.filter((module) => normalizeSearchText(`${module.name} ${module.title} ${module.path}`).includes(query))
+      ? repositoryReadyModules.filter((module) =>
+          normalizeSearchText(`${module.name} ${module.title} ${module.path}`).includes(query),
+        )
       : repositoryReadyModules;
   }, [repositoryFilter, repositoryReadyModules]);
   const repositoryVisibleSelectable = repositoryVisibleModules.filter((module) => module.action !== "blocked");
@@ -145,7 +179,8 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
     // Proposition par défaut : la branche qui porte le nom de la version Odoo du projet.
     setRepositoryBranch((current) => current || selectedProject?.odoo_version || "");
     // Compte GitLab connecté : la recherche remplace la saisie d'une URL.
-    window.sdkDesktop?.gitlabStatus()
+    window.sdkDesktop
+      ?.gitlabStatus()
       .then((status) => {
         setGitlabStatus(status);
         setRepositorySource(defaultRepositorySource(status));
@@ -170,7 +205,11 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
         `/api/projects/${encodeURIComponent(selectedProject.name)}/repository/inspect`,
         {
           method: "POST",
-          body: JSON.stringify({ url: repositoryUrl.trim(), branch: repositoryBranch.trim(), db: canUseDb ? selectedDb : "" }),
+          body: JSON.stringify({
+            url: repositoryUrl.trim(),
+            branch: repositoryBranch.trim(),
+            db: canUseDb ? selectedDb : "",
+          }),
         },
       )
         .then((result) => {
@@ -207,14 +246,17 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
         <DialogHeader className="border-b px-6 pb-4 pt-6">
           <DialogTitle>Importer des modules depuis Git</DialogTitle>
           <DialogDescription>
-            Le code est copié dans {selectedProject?.name}. Un module absent est ajouté, une copie déjà gérée est mise à jour.
+            Le code est copié dans {selectedProject?.name}. Un module absent est ajouté, une copie déjà gérée est mise à
+            jour.
           </DialogDescription>
         </DialogHeader>
 
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
           <section className="space-y-3" aria-labelledby="repository-source-title">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 id="repository-source-title" className="text-sm font-semibold">Dépôt et branche</h3>
+              <h3 id="repository-source-title" className="text-sm font-semibold">
+                Dépôt et branche
+              </h3>
               <RepositorySourceToggle value={repositorySource} onChange={setRepositorySource} status={gitlabStatus} />
             </div>
             {repositorySource === "gitlab" && (gitlabStatus?.available || gitlabStatus?.unreadable) ? (
@@ -243,7 +285,11 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
                     aria-invalid={Boolean(repositoryUrlError)}
                     aria-describedby={repositoryUrlError ? "repository-url-error" : undefined}
                   />
-                  {repositoryUrlError && <span id="repository-url-error" className="text-xs font-normal text-destructive">{repositoryUrlError}</span>}
+                  {repositoryUrlError && (
+                    <span id="repository-url-error" className="text-xs font-normal text-destructive">
+                      {repositoryUrlError}
+                    </span>
+                  )}
                 </label>
                 <label className="grid content-start gap-1.5 text-sm font-medium">
                   Branche ou tag
@@ -259,7 +305,11 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
               <KeyRound className="h-3.5 w-3.5" />
               Accès par la clé SSH de cet ordinateur, sans jeton stocké.
-              <button type="button" className="font-medium text-primary underline-offset-2 hover:underline" onClick={() => openSshAssistant()}>
+              <button
+                type="button"
+                className="font-medium text-primary underline-offset-2 hover:underline"
+                onClick={() => openSshAssistant()}
+              >
                 Gérer la clé SSH
               </button>
             </p>
@@ -267,7 +317,9 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
 
           <section className="space-y-3 border-t pt-5" aria-labelledby="repository-modules-title">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h3 id="repository-modules-title" className="text-sm font-semibold">Modules</h3>
+              <h3 id="repository-modules-title" className="text-sm font-semibold">
+                Modules
+              </h3>
               {repositoryInspection.status === "ready" && (
                 <span className="font-mono text-xs text-muted-foreground" title={repositoryInspection.commit}>
                   {repositoryBranch.trim()} · {repositoryInspection.commit.slice(0, 10)}
@@ -290,7 +342,12 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
             {repositoryInspection.status === "error" && (
               <div className="flex flex-col gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-destructive">{repositoryInspection.error}</span>
-                <Button type="button" size="sm" variant="outline" onClick={() => setRepositoryInspectionAttempt((attempt) => attempt + 1)}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setRepositoryInspectionAttempt((attempt) => attempt + 1)}
+                >
                   <RefreshCcw className="h-4 w-4" />
                   Réessayer
                 </Button>
@@ -319,7 +376,9 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
                     size="sm"
                     variant="outline"
                     disabled={!repositorySelectableModules.length}
-                    onClick={() => setRepositorySelection(new Set(repositorySelectableModules.map((module) => module.name)))}
+                    onClick={() =>
+                      setRepositorySelection(new Set(repositorySelectableModules.map((module) => module.name)))
+                    }
                   >
                     Tout sélectionner ({repositorySelectableModules.length})
                   </Button>
@@ -328,7 +387,9 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
                       type="button"
                       size="sm"
                       variant="outline"
-                      onClick={() => setRepositorySelection(new Set(repositoryUpdatableModules.map((module) => module.name)))}
+                      onClick={() =>
+                        setRepositorySelection(new Set(repositoryUpdatableModules.map((module) => module.name)))
+                      }
                     >
                       Seulement les mises à jour ({repositoryUpdatableModules.length})
                     </Button>
@@ -345,10 +406,13 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
                   <>
                     {repositoryVisibleSelectable.length > 0 && (
                       <div className="divide-y rounded-md border">
-                        {repositoryVisibleSelectable.slice(0, REPOSITORY_PICKER_MAX_ROWS).map((module) => repositoryModuleRow(module))}
+                        {repositoryVisibleSelectable
+                          .slice(0, REPOSITORY_PICKER_MAX_ROWS)
+                          .map((module) => repositoryModuleRow(module))}
                         {repositoryVisibleSelectable.length > REPOSITORY_PICKER_MAX_ROWS && (
                           <p className="px-3 py-2 text-xs text-muted-foreground">
-                            {REPOSITORY_PICKER_MAX_ROWS} modules affichés sur {repositoryVisibleSelectable.length} : affine le filtre pour voir les autres.
+                            {REPOSITORY_PICKER_MAX_ROWS} modules affichés sur {repositoryVisibleSelectable.length} :
+                            affine le filtre pour voir les autres.
                           </p>
                         )}
                       </div>
@@ -364,14 +428,18 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
                           </span>
                         </summary>
                         <div className="divide-y border-t">
-                          {repositoryVisibleBlocked.slice(0, REPOSITORY_PICKER_MAX_ROWS).map((module) => repositoryModuleRow(module))}
+                          {repositoryVisibleBlocked
+                            .slice(0, REPOSITORY_PICKER_MAX_ROWS)
+                            .map((module) => repositoryModuleRow(module))}
                         </div>
                       </details>
                     )}
                   </>
                 ) : (
                   <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-                    {repositoryReadyModules.length ? "Aucun module ne correspond au filtre." : "Aucun module Odoo trouvé dans ce dépôt."}
+                    {repositoryReadyModules.length
+                      ? "Aucun module ne correspond au filtre."
+                      : "Aucun module Odoo trouvé dans ce dépôt."}
                   </p>
                 )}
               </>
@@ -386,19 +454,34 @@ export function RepositoryImportDialog({ canUseDb, createJob, gitlabStatus, onOp
                 {[
                   repositorySelectedAdds && `${repositorySelectedAdds} ajout(s)`,
                   repositorySelectedUpdates && `${repositorySelectedUpdates} mise(s) à jour`,
-                ].filter(Boolean).join(" · ")}
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </span>
             )}
             {repositorySelectedUpdates > 0 ? "Les versions remplacées sont sauvegardées ; " : ""}
-            {repositorySelectedUpdates > 0 ? "tout est annulé si un module échoue." : "Tout est annulé si un module échoue."}
+            {repositorySelectedUpdates > 0
+              ? "tout est annulé si un module échoue."
+              : "Tout est annulé si un module échoue."}
           </p>
           <div className="flex shrink-0 justify-end gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>Annuler</Button>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Annuler
+            </Button>
             <Button
-              disabled={repositorySubmitting || !selectedProjectReady || repositoryInspection.status !== "ready" || !repositorySelectedModules.length}
+              disabled={
+                repositorySubmitting ||
+                !selectedProjectReady ||
+                repositoryInspection.status !== "ready" ||
+                !repositorySelectedModules.length
+              }
               onClick={submitRepositoryModules}
             >
-              {repositorySubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+              {repositorySubmitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CloudDownload className="h-4 w-4" />
+              )}
               {repositorySubmitting
                 ? "Lancement…"
                 : repositorySelectedModules.length

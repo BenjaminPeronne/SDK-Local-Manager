@@ -26,7 +26,15 @@ export const SETTINGS_SAVED_KEYS = [
   "beta_interface_banner_dismissed",
 ] as const;
 
-export function SettingsSection({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+export function SettingsSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
   return (
     <section className="grid gap-4">
       <div>

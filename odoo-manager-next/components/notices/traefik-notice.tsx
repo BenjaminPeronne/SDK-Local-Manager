@@ -15,7 +15,14 @@ type TraefikNoticeProps = {
   dockerRunning: boolean;
 };
 
-export function TraefikNotice({ loading, openSettingsDialog, requestLegacyTraefikStop, requestTraefikInstall, traefik, dockerRunning }: TraefikNoticeProps) {
+export function TraefikNotice({
+  loading,
+  openSettingsDialog,
+  requestLegacyTraefikStop,
+  requestTraefikInstall,
+  traefik,
+  dockerRunning,
+}: TraefikNoticeProps) {
   return (
     <Notice
       tone="info"

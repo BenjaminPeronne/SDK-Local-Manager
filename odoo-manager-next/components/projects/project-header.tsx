@@ -31,11 +31,34 @@ type ProjectHeaderProps = {
   stickyHeader: boolean;
 };
 
-export function ProjectHeader({ createJob, jobs, loading, openingOdoo, pendingSelectedProjectArrival, projectHeaderCompact, projectHeaderRef, pushToast, refreshAllViews, refreshOverview, refreshSystemStatus, schedule, selectedDb, selectedProject, selectedProjectOnline, selectedProjectReady, setOpeningOdoo, stickyHeader }: ProjectHeaderProps) {
-  const pendingSelectedArrivalIsMigration = Boolean(pendingSelectedProjectArrival?.title.startsWith(MIGRATION_JOB_PREFIX));
+export function ProjectHeader({
+  createJob,
+  jobs,
+  loading,
+  openingOdoo,
+  pendingSelectedProjectArrival,
+  projectHeaderCompact,
+  projectHeaderRef,
+  pushToast,
+  refreshAllViews,
+  refreshOverview,
+  refreshSystemStatus,
+  schedule,
+  selectedDb,
+  selectedProject,
+  selectedProjectOnline,
+  selectedProjectReady,
+  setOpeningOdoo,
+  stickyHeader,
+}: ProjectHeaderProps) {
+  const pendingSelectedArrivalIsMigration = Boolean(
+    pendingSelectedProjectArrival?.title.startsWith(MIGRATION_JOB_PREFIX),
+  );
   const selectedProjectHasContainers = Boolean(
     selectedProject &&
-    [selectedProject.odoo_status, selectedProject.postgres_status].some((status) => status && status !== "absent" && status !== "docker off"),
+    [selectedProject.odoo_status, selectedProject.postgres_status].some(
+      (status) => status && status !== "absent" && status !== "docker off",
+    ),
   );
   const selectedProjectLifecycleJob = useMemo(
     () =>
@@ -84,10 +107,7 @@ export function ProjectHeader({ createJob, jobs, loading, openingOdoo, pendingSe
   return (
     <header
       ref={projectHeaderRef}
-      className={cn(
-        "sdk-project-header border-b bg-card",
-        stickyHeader && "lg:sticky lg:top-0 lg:z-30 lg:shadow-sm",
-      )}
+      className={cn("sdk-project-header border-b bg-card", stickyHeader && "lg:sticky lg:top-0 lg:z-30 lg:shadow-sm")}
     >
       <div
         className={cn(
@@ -110,13 +130,20 @@ export function ProjectHeader({ createJob, jobs, loading, openingOdoo, pendingSe
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 {pendingSelectedArrivalIsMigration ? "Copie en cours" : "Création en cours"}
               </Badge>
-            ) : selectedProject?.odoo_version && (
-              <Badge className="mt-0.5 shrink-0" variant="outline">
-                Odoo {selectedProject.odoo_version}
-              </Badge>
+            ) : (
+              selectedProject?.odoo_version && (
+                <Badge className="mt-0.5 shrink-0" variant="outline">
+                  Odoo {selectedProject.odoo_version}
+                </Badge>
+              )
             )}
           </div>
-          <p className={cn("mt-1 max-w-full break-all text-sm text-muted-foreground", projectHeaderCompact && "lg:hidden")}>
+          <p
+            className={cn(
+              "mt-1 max-w-full break-all text-sm text-muted-foreground",
+              projectHeaderCompact && "lg:hidden",
+            )}
+          >
             {pendingSelectedProjectArrival
               ? pendingSelectedArrivalIsMigration
                 ? "Copie du projet vers son nouvel emplacement. Le journal détaille les étapes en cours."
@@ -134,7 +161,12 @@ export function ProjectHeader({ createJob, jobs, loading, openingOdoo, pendingSe
               key="stop-project"
               className="w-full"
               variant="destructive"
-              disabled={!selectedProjectReady || !selectedProjectHasContainers || loading || Boolean(selectedProjectLifecycleJob)}
+              disabled={
+                !selectedProjectReady ||
+                !selectedProjectHasContainers ||
+                loading ||
+                Boolean(selectedProjectLifecycleJob)
+              }
               onClick={requestStopProject}
             >
               {selectedProjectStopping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
@@ -155,10 +187,7 @@ export function ProjectHeader({ createJob, jobs, loading, openingOdoo, pendingSe
             <Button
               className="col-span-2 w-full sm:col-span-1"
               variant="outline"
-              disabled={
-                !selectedProjectReady ||
-                openingOdoo
-              }
+              disabled={!selectedProjectReady || openingOdoo}
               onClick={requestOpenOdoo}
             >
               {openingOdoo ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}

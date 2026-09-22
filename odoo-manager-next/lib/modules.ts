@@ -7,7 +7,8 @@ export function socleAppInstalled(app: SocleApp) {
 export function normalizedModuleOrigin(origin?: string, sourcePath?: string): ModuleOrigin {
   if (origin === "enterprise") return "enterprise";
   const normalizedPath = (sourcePath || "").replace(/\\/g, "/").toLowerCase();
-  return normalizedPath.includes("/addons-store/odoo_entreprise/") || normalizedPath.includes("/addons-store/odoo_enterprise/")
+  return normalizedPath.includes("/addons-store/odoo_entreprise/") ||
+    normalizedPath.includes("/addons-store/odoo_enterprise/")
     ? "enterprise"
     : "other";
 }

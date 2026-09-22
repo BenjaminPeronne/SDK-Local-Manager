@@ -18,12 +18,14 @@ export function useModuleFilters(modules: ModuleInfo[], projectName: string | un
     const query = deferredSearch.trim().toLowerCase();
     return modules
       .filter((module) => !query || module.name.toLowerCase().includes(query))
-      .filter((module) => (
-        status === "all" ||
-        module.state === status ||
-        (status === "uninstalled" && module.state === "disponible")
-      ))
-      .filter((module) => origin === "all" || normalizedModuleOrigin(module.origin, module.source_path || module.path) === origin);
+      .filter(
+        (module) =>
+          status === "all" || module.state === status || (status === "uninstalled" && module.state === "disponible"),
+      )
+      .filter(
+        (module) =>
+          origin === "all" || normalizedModuleOrigin(module.origin, module.source_path || module.path) === origin,
+      );
   }, [deferredSearch, modules, status, origin]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / MODULES_PER_PAGE));
@@ -47,7 +49,21 @@ export function useModuleFilters(modules: ModuleInfo[], projectName: string | un
     setOrigin("all");
   }
 
-  return { search, setSearch, status, setStatus, origin, setOrigin, page, setPage, pageCount, filtered, visible, active, reset };
+  return {
+    search,
+    setSearch,
+    status,
+    setStatus,
+    origin,
+    setOrigin,
+    page,
+    setPage,
+    pageCount,
+    filtered,
+    visible,
+    active,
+    reset,
+  };
 }
 
 export type ModuleFilters = ReturnType<typeof useModuleFilters>;

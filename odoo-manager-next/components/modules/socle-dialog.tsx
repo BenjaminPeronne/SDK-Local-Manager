@@ -35,7 +35,27 @@ type SocleDialogProps = {
   socleSearch: string;
 };
 
-export function SocleDialog({ createJob, loading, loadingSocleCatalog, onOpenChange, open, refreshModules, schedule, selectedDb, selectedProject, selectedSoclePresets, setActiveTab, setSelectedSoclePresets, setSoclePlan, setSocleSearch, socleCatalog, soclePlan, soclePlanKey, soclePresetsToInstall, socleSearch }: SocleDialogProps) {
+export function SocleDialog({
+  createJob,
+  loading,
+  loadingSocleCatalog,
+  onOpenChange,
+  open,
+  refreshModules,
+  schedule,
+  selectedDb,
+  selectedProject,
+  selectedSoclePresets,
+  setActiveTab,
+  setSelectedSoclePresets,
+  setSoclePlan,
+  setSocleSearch,
+  socleCatalog,
+  soclePlan,
+  soclePlanKey,
+  soclePresetsToInstall,
+  socleSearch,
+}: SocleDialogProps) {
   const [loadingSoclePlan, setLoadingSoclePlan] = useState(false);
   const [soclePlanError, setSoclePlanError] = useState("");
   const visibleSocleApps = useMemo(() => {
@@ -113,8 +133,8 @@ export function SocleDialog({ createJob, loading, loadingSocleCatalog, onOpenCha
         <DialogHeader>
           <DialogTitle>Installer un socle Odoo</DialogTitle>
           <DialogDescription>
-            Sélectionne les applications à installer dans {selectedDb || "la base choisie"}. Les dépendances et les modules
-            qu’Odoo installe automatiquement sont calculés à partir des manifestes du projet.
+            Sélectionne les applications à installer dans {selectedDb || "la base choisie"}. Les dépendances et les
+            modules qu’Odoo installe automatiquement sont calculés à partir des manifestes du projet.
           </DialogDescription>
         </DialogHeader>
         <div className="relative">
@@ -144,7 +164,9 @@ export function SocleDialog({ createJob, loading, loadingSocleCatalog, onOpenCha
             if (!apps.length) return null;
             return (
               <section key={section.id} aria-labelledby={`socle-section-${section.id}`}>
-                <h3 id={`socle-section-${section.id}`} className="mb-2 text-sm font-semibold">{section.label}</h3>
+                <h3 id={`socle-section-${section.id}`} className="mb-2 text-sm font-semibold">
+                  {section.label}
+                </h3>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {apps.map((app) => {
                     const unavailable = app.missing.length > 0;
@@ -154,7 +176,9 @@ export function SocleDialog({ createJob, loading, loadingSocleCatalog, onOpenCha
                         key={app.id}
                         className={cn(
                           "flex min-w-0 items-start gap-3 rounded-md border p-2.5 text-sm transition-colors",
-                          unavailable || alreadyInstalled ? "cursor-not-allowed bg-muted/35 opacity-60" : "cursor-pointer hover:bg-hover",
+                          unavailable || alreadyInstalled
+                            ? "cursor-not-allowed bg-muted/35 opacity-60"
+                            : "cursor-pointer hover:bg-hover",
                           selectedSoclePresets.has(app.id) && !alreadyInstalled && "border-primary bg-selected",
                         )}
                       >
@@ -164,16 +188,27 @@ export function SocleDialog({ createJob, loading, loadingSocleCatalog, onOpenCha
                           disabled={unavailable || alreadyInstalled || loading}
                           onCheckedChange={(checked) => toggleSoclePreset(app.id, checked === true)}
                         />
-                        <img src={`/odoo-apps/${app.id}.svg`} alt="" aria-hidden="true" className="h-9 w-9 shrink-0 object-contain" />
+                        <img
+                          src={`/odoo-apps/${app.id}.svg`}
+                          alt=""
+                          aria-hidden="true"
+                          className="h-9 w-9 shrink-0 object-contain"
+                        />
                         <span className="min-w-0">
                           <span className="block font-medium">{app.label}</span>
-                          <span className="mt-0.5 block break-all font-mono text-[11px] text-muted-foreground">{app.modules.join(" + ")}</span>
+                          <span className="mt-0.5 block break-all font-mono text-[11px] text-muted-foreground">
+                            {app.modules.join(" + ")}
+                          </span>
                           {unavailable ? (
-                            <span className="mt-0.5 block text-xs text-destructive">Absent de cette version : {app.missing.join(", ")}</span>
+                            <span className="mt-0.5 block text-xs text-destructive">
+                              Absent de cette version : {app.missing.join(", ")}
+                            </span>
                           ) : alreadyInstalled ? (
                             <span className="mt-0.5 block text-xs text-muted-foreground">Déjà installé</span>
                           ) : app.extra_count > 0 ? (
-                            <span className="mt-0.5 block text-xs text-muted-foreground">+ {app.extra_count} module(s) installé(s) avec</span>
+                            <span className="mt-0.5 block text-xs text-muted-foreground">
+                              + {app.extra_count} module(s) installé(s) avec
+                            </span>
                           ) : null}
                         </span>
                       </label>
@@ -184,11 +219,16 @@ export function SocleDialog({ createJob, loading, loadingSocleCatalog, onOpenCha
             );
           })}
           {socleCatalog && !visibleSocleApps.length && (
-            <p className="py-6 text-center text-sm text-muted-foreground">Aucune application ne correspond à la recherche.</p>
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Aucune application ne correspond à la recherche.
+            </p>
           )}
         </div>
         <div className="space-y-3 border-t pt-3">
-          <div className="max-h-[20dvh] overflow-y-auto rounded-md border bg-muted/35 p-3 text-sm sm:max-h-[30dvh]" aria-live="polite">
+          <div
+            className="max-h-[20dvh] overflow-y-auto rounded-md border bg-muted/35 p-3 text-sm sm:max-h-[30dvh]"
+            aria-live="polite"
+          >
             {!soclePresetsToInstall.length ? (
               <p className="text-muted-foreground">Sélectionne des applications pour voir tout ce qui sera installé.</p>
             ) : loadingSoclePlan && !soclePlan ? (
@@ -203,8 +243,9 @@ export function SocleDialog({ createJob, loading, loadingSocleCatalog, onOpenCha
                 <div className="font-medium">
                   {soclePlan.total} module(s) seront installés
                   <span className="font-normal text-muted-foreground">
-                    {" "}· {soclePlan.requested.length} demandé(s), {soclePlan.dependencies.length} dépendance(s),
-                    {" "}{soclePlan.auto_installed.length} automatique(s)
+                    {" "}
+                    · {soclePlan.requested.length} demandé(s), {soclePlan.dependencies.length} dépendance(s),{" "}
+                    {soclePlan.auto_installed.length} automatique(s)
                   </span>
                 </div>
                 {soclePlan.applications.length > 0 && (
@@ -216,12 +257,16 @@ export function SocleDialog({ createJob, loading, loadingSocleCatalog, onOpenCha
                 {(soclePlan.missing.length > 0 || soclePlan.uninstallable.length > 0) && (
                   <div className="text-xs text-destructive">
                     Installation impossible, dépendances introuvables ou non installables :{" "}
-                    {[...soclePlan.missing, ...soclePlan.uninstallable].map((item) => `${item.name} (requis par ${item.required_by})`).join(", ")}
+                    {[...soclePlan.missing, ...soclePlan.uninstallable]
+                      .map((item) => `${item.name} (requis par ${item.required_by})`)
+                      .join(", ")}
                   </div>
                 )}
                 {soclePlan.dependencies.length > 0 && (
                   <details>
-                    <summary className="cursor-pointer text-xs font-medium">Dépendances ({soclePlan.dependencies.length})</summary>
+                    <summary className="cursor-pointer text-xs font-medium">
+                      Dépendances ({soclePlan.dependencies.length})
+                    </summary>
                     <PlanModuleChips items={soclePlan.dependencies} />
                   </details>
                 )}

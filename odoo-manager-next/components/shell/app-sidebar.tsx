@@ -31,7 +31,24 @@ type AppSidebarProps = {
   systemStatus: SystemStatus | null;
 };
 
-export function AppSidebar({ jobs, openCreateProjectDialog, openSettingsDialog, overview, pendingProjectArrivals, selectedAppIcon, selectedProject, selectedProjectName, selectJob, setAboutOpen, setActiveTab, setExternalLogView, setSelectedDb, setSelectedProjectName, settings, systemStatus }: AppSidebarProps) {
+export function AppSidebar({
+  jobs,
+  openCreateProjectDialog,
+  openSettingsDialog,
+  overview,
+  pendingProjectArrivals,
+  selectedAppIcon,
+  selectedProject,
+  selectedProjectName,
+  selectJob,
+  setAboutOpen,
+  setActiveTab,
+  setExternalLogView,
+  setSelectedDb,
+  setSelectedProjectName,
+  settings,
+  systemStatus,
+}: AppSidebarProps) {
   const [projectsFilter, setProjectsFilter] = useState("");
   const projectLifecycleJobs = useMemo(() => {
     const runningJobs = new Map<string, Job>();
@@ -71,15 +88,24 @@ export function AppSidebar({ jobs, openCreateProjectDialog, openSettingsDialog, 
                   settings?.interface_icon === "local" ? "rounded-full" : "rounded-[9px]",
                 )}
               />
-              <div className="min-w-0"><p className="sdk-eyebrow">Sudokeys</p><h1 className="sdk-brand-name text-sm font-extrabold leading-tight">SDK Local Manager</h1></div>
+              <div className="min-w-0">
+                <p className="sdk-eyebrow">Sudokeys</p>
+                <h1 className="sdk-brand-name text-sm font-extrabold leading-tight">SDK Local Manager</h1>
+              </div>
             </div>
             <ThemeToggle />
           </div>
           <div className="mt-1 flex min-w-0 items-center gap-2">
-            <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={overview?.workspace || "Workspace local"}>
+            <p
+              className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+              title={overview?.workspace || "Workspace local"}
+            >
               {overview?.workspace || "Workspace local"}
             </p>
-            <Badge className="shrink-0" variant={(systemStatus?.docker.running ?? overview?.docker_ok) ? "success" : "destructive"}>
+            <Badge
+              className="shrink-0"
+              variant={(systemStatus?.docker.running ?? overview?.docker_ok) ? "success" : "destructive"}
+            >
               {(systemStatus?.docker.running ?? overview?.docker_ok) ? "Docker" : "Docker off"}
             </Badge>
           </div>
@@ -120,7 +146,9 @@ export function AppSidebar({ jobs, openCreateProjectDialog, openSettingsDialog, 
                     {job.title.startsWith(MIGRATION_JOB_PREFIX) ? "Copie en cours…" : "Création en cours…"}
                   </span>
                 </span>
-                <Badge className="shrink-0" variant="outline">Préparation</Badge>
+                <Badge className="shrink-0" variant="outline">
+                  Préparation
+                </Badge>
               </button>
             </div>
           ))}
@@ -152,7 +180,12 @@ export function AppSidebar({ jobs, openCreateProjectDialog, openSettingsDialog, 
                       setActiveTab(project.odoo_status === "running" ? "bases" : "logs");
                     }}
                   >
-                    <span className={cn("block truncate text-sm font-semibold", absent ? "text-muted-foreground" : "text-foreground")}>
+                    <span
+                      className={cn(
+                        "block truncate text-sm font-semibold",
+                        absent ? "text-muted-foreground" : "text-foreground",
+                      )}
+                    >
                       {project.name}
                     </span>
                     <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -164,14 +197,22 @@ export function AppSidebar({ jobs, openCreateProjectDialog, openSettingsDialog, 
                       <Loader2 className="h-4 w-4 animate-spin text-primary" aria-label="Changement d’état en cours" />
                     ) : (
                       <span
-                        className={cn("inline-flex h-6 w-6 shrink-0 items-center justify-center", displayedRunning ? "text-emerald-500" : "text-red-500")}
+                        className={cn(
+                          "inline-flex h-6 w-6 shrink-0 items-center justify-center",
+                          displayedRunning ? "text-emerald-500" : "text-red-500",
+                        )}
                         role="img"
                         aria-label={`${project.name} : ${displayedRunning ? "allumé" : "éteint"}`}
                       >
                         <Circle className="h-5 w-5 fill-current" aria-hidden="true" />
                       </span>
                     )}
-                    <span className={cn("w-7 text-xs font-semibold", displayedRunning ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
+                    <span
+                      className={cn(
+                        "w-7 text-xs font-semibold",
+                        displayedRunning ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
+                      )}
+                    >
                       {displayedRunning ? "ON" : "OFF"}
                     </span>
                   </div>
@@ -194,21 +235,12 @@ export function AppSidebar({ jobs, openCreateProjectDialog, openSettingsDialog, 
             <FolderPlus className="h-4 w-4" />
             Nouveau projet
           </Button>
-          <Button
-            className="w-full"
-            variant="outline"
-            onClick={openSettingsDialog}
-          >
+          <Button className="w-full" variant="outline" onClick={openSettingsDialog}>
             <Settings className="h-4 w-4" />
             Paramètres
           </Button>
-          <Button
-            className="w-full"
-            variant="secondary"
-            onClick={() => setAboutOpen(true)}
-          >
-            <Info className="h-4 w-4" />
-            À propos
+          <Button className="w-full" variant="secondary" onClick={() => setAboutOpen(true)}>
+            <Info className="h-4 w-4" />À propos
           </Button>
         </div>
       </div>

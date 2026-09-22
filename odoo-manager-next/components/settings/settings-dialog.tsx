@@ -44,7 +44,8 @@ import {
   type SettingsSectionId,
 } from "@/components/settings/settings-section";
 
-const GITLAB_TOKEN_URL = "https://gitlab.sudokeys.com/-/user_settings/personal_access_tokens?name=SDK%20Local%20Manager&scopes=read_api";
+const GITLAB_TOKEN_URL =
+  "https://gitlab.sudokeys.com/-/user_settings/personal_access_tokens?name=SDK%20Local%20Manager&scopes=read_api";
 
 type SettingsDialogProps = {
   desktopRuntime: boolean;
@@ -84,7 +85,43 @@ type SettingsDialogProps = {
   systemStatus: SystemStatus | null;
 };
 
-export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrerequisites, loading, loadingManagerErrors, loadManagerErrors, managerErrorLogPath, managerErrors, migration, migrationCandidates, onOpenChange, open, openSshAssistant, pushToast, refreshMigration, refreshOverview, refreshSystemStatus, requestProjectMigration, selectedSshKey, setGitlabStatus, setManagerErrors, setMigrationBannerClosed, setModules, setOnboardingOpen, setSelectedDb, setSelectedProjectName, setSettings, setSettingsDraft, setSettingsSection, setStoredRikaCredentials, settings, settingsDraft, settingsSection, storedRikaCredentials, systemStatus }: SettingsDialogProps) {
+export function SettingsDialog({
+  desktopRuntime,
+  gitlabStatus,
+  loadCreationPrerequisites,
+  loading,
+  loadingManagerErrors,
+  loadManagerErrors,
+  managerErrorLogPath,
+  managerErrors,
+  migration,
+  migrationCandidates,
+  onOpenChange,
+  open,
+  openSshAssistant,
+  pushToast,
+  refreshMigration,
+  refreshOverview,
+  refreshSystemStatus,
+  requestProjectMigration,
+  selectedSshKey,
+  setGitlabStatus,
+  setManagerErrors,
+  setMigrationBannerClosed,
+  setModules,
+  setOnboardingOpen,
+  setSelectedDb,
+  setSelectedProjectName,
+  setSettings,
+  setSettingsDraft,
+  setSettingsSection,
+  setStoredRikaCredentials,
+  settings,
+  settingsDraft,
+  settingsSection,
+  storedRikaCredentials,
+  systemStatus,
+}: SettingsDialogProps) {
   const [savingSettings, setSavingSettings] = useState(false);
   const [selectingWorkspace, setSelectingWorkspace] = useState(false);
   const [gitlabTokenDraft, setGitlabTokenDraft] = useState("");
@@ -95,11 +132,17 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
     void loadCreationPrerequisites();
   }, [loadCreationPrerequisites]);
   async function copyManagerErrors() {
-    const content = managerErrors.map((entry) => [
-      `[${entry.timestamp}] ${entry.source}${entry.project ? ` · ${entry.project}` : ""}`,
-      entry.message,
-      entry.details || "",
-    ].filter(Boolean).join("\n")).join("\n\n");
+    const content = managerErrors
+      .map((entry) =>
+        [
+          `[${entry.timestamp}] ${entry.source}${entry.project ? ` · ${entry.project}` : ""}`,
+          entry.message,
+          entry.details || "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      )
+      .join("\n\n");
     try {
       await navigator.clipboard.writeText(content);
       pushToast("success", "Journal d’erreurs copié.");
@@ -136,7 +179,12 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
       setSelectedProjectName("");
       setSelectedDb("");
       setModules([]);
-      pushToast("success", apiPortChanged ? "Paramètres enregistrés. Redémarre le gestionnaire pour appliquer le nouveau port." : "Paramètres enregistrés.");
+      pushToast(
+        "success",
+        apiPortChanged
+          ? "Paramètres enregistrés. Redémarre le gestionnaire pour appliquer le nouveau port."
+          : "Paramètres enregistrés.",
+      );
       await Promise.all([refreshOverview(), refreshSystemStatus(), refreshMigration()]);
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : "Enregistrement impossible.");
@@ -186,14 +234,18 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                       aria-current={active ? "page" : undefined}
                       className={cn(
                         "flex shrink-0 items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        active ? "bg-selected font-medium text-primary" : "text-muted-foreground hover:bg-hover hover:text-foreground",
+                        active
+                          ? "bg-selected font-medium text-primary"
+                          : "text-muted-foreground hover:bg-hover hover:text-foreground",
                       )}
                       onClick={() => setSettingsSection(section.id)}
                     >
                       <Icon className="h-4 w-4 shrink-0" />
                       <span className="min-w-0 flex-1 whitespace-nowrap">{section.label}</span>
                       {section.id === "diagnostic" && managerErrors.length > 0 && (
-                        <Badge variant="warning" className="shrink-0">{managerErrors.length}</Badge>
+                        <Badge variant="warning" className="shrink-0">
+                          {managerErrors.length}
+                        </Badge>
                       )}
                     </button>
                   );
@@ -202,7 +254,10 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
 
               <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
                 {settingsSection === "general" && (
-                  <SettingsSection title="Général" description="Emplacement des projets et configuration de base du poste.">
+                  <SettingsSection
+                    title="Général"
+                    description="Emplacement des projets et configuration de base du poste."
+                  >
                     <SettingsGroup>
                       <div className="grid min-w-0 gap-1.5 text-sm font-medium">
                         <label htmlFor="projects-workspace">Dossier des projets</label>
@@ -222,22 +277,26 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                             title={desktopRuntime ? "Choisir un dossier" : "Disponible dans l’application installée"}
                             onClick={selectWorkspaceDirectory}
                           >
-                            {selectingWorkspace ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderOpen className="h-4 w-4" />}
+                            {selectingWorkspace ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <FolderOpen className="h-4 w-4" />
+                            )}
                             Choisir
                           </Button>
                         </div>
                         <span className="text-xs font-normal leading-relaxed text-muted-foreground">
-                          Le dossier est créé s’il n’existe pas encore. Dans l’application installée, « Choisir » ouvre le sélecteur du système.
+                          Le dossier est créé s’il n’existe pas encore. Dans l’application installée, « Choisir » ouvre
+                          le sélecteur du système.
                         </span>
                       </div>
-
                     </SettingsGroup>
                     <div className="rounded-md border bg-muted/40 p-3">
                       <div className="text-sm font-medium">Exécution automatique</div>
                       <p className="mt-1 text-xs font-normal leading-relaxed text-muted-foreground">
-                        Le gestionnaire choisit automatiquement les outils adaptés au système. Sous Windows, Docker,
-                        Git et les chemins sont exécutés dans l’environnement compatible avec le workspace. Les chemins Windows
-                        sont traduits automatiquement lorsque Docker ou Git passe par WSL.
+                        Le gestionnaire choisit automatiquement les outils adaptés au système. Sous Windows, Docker, Git
+                        et les chemins sont exécutés dans l’environnement compatible avec le workspace. Les chemins
+                        Windows sont traduits automatiquement lorsque Docker ou Git passe par WSL.
                       </p>
                     </div>
 
@@ -283,7 +342,8 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                         <div>
                           <div className="text-sm font-medium">Configuration initiale</div>
                           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                            Rouvre l’assistant du premier démarrage pour vérifier le workspace, Docker, Git, SSH et Traefik.
+                            Rouvre l’assistant du premier démarrage pour vérifier le workspace, Docker, Git, SSH et
+                            Traefik.
                           </p>
                         </div>
                         <Button type="button" variant="outline" onClick={reopenInitialConfiguration}>
@@ -291,7 +351,6 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                           Ouvrir l’assistant de configuration
                         </Button>
                       </div>
-
                     </SettingsGroup>
                   </SettingsSection>
                 )}
@@ -301,23 +360,32 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                     <SettingsGroup>
                       <div className="grid gap-3">
                         <div>
-                        <div className="text-sm font-medium">Mise en page</div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          L’interface affinée réorganise Bases, Modules, Activité et Réglages du projet : moins de vide, colonnes
-                          alignées, survols et focus plus visibles, sortie technique dépliée à la demande. Aucune action ni
-                          information n’est retirée.
-                        </p>
+                          <div className="text-sm font-medium">Mise en page</div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            L’interface affinée réorganise Bases, Modules, Activité et Réglages du projet : moins de
+                            vide, colonnes alignées, survols et focus plus visibles, sortie technique dépliée à la
+                            demande. Aucune action ni information n’est retirée.
+                          </p>
                         </div>
                         <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Interface">
-                          {([
-                            ["classic", "Classique", "Interface actuelle, inchangée."],
-                            ["refined", "Affinée (bêta)", "Nouvelle organisation des écrans Bases, Modules, Activité et Réglages."],
-                          ] as const).map(([value, title, description]) => (
+                          {(
+                            [
+                              ["classic", "Classique", "Interface actuelle, inchangée."],
+                              [
+                                "refined",
+                                "Affinée (bêta)",
+                                "Nouvelle organisation des écrans Bases, Modules, Activité et Réglages.",
+                              ],
+                            ] as const
+                          ).map(([value, title, description]) => (
                             <InteractiveCard
                               key={value}
                               role="radio"
                               aria-checked={(settingsDraft.interface_layout ?? "classic") === value}
-                              className={cn("p-3 text-left", (settingsDraft.interface_layout ?? "classic") === value && "border-primary bg-selected")}
+                              className={cn(
+                                "p-3 text-left",
+                                (settingsDraft.interface_layout ?? "classic") === value && "border-primary bg-selected",
+                              )}
                               onClick={() => setSettingsDraft({ ...settingsDraft, interface_layout: value })}
                             >
                               <span className="block text-sm font-medium">{title}</span>
@@ -326,7 +394,6 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                           ))}
                         </div>
                       </div>
-
                     </SettingsGroup>
                     <SettingsGroup>
                       <div className="grid gap-2">
@@ -340,75 +407,91 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                           <InteractiveCard
                             className={cn(
                               "flex min-h-24 items-center gap-3 p-3",
-                              settingsDraft.interface_icon === "manager" && "border-primary bg-selected ring-1 ring-primary/25",
+                              settingsDraft.interface_icon === "manager" &&
+                                "border-primary bg-selected ring-1 ring-primary/25",
                             )}
                             role="radio"
                             aria-checked={settingsDraft.interface_icon === "manager"}
                             onClick={() => setSettingsDraft({ ...settingsDraft, interface_icon: "manager" })}
                           >
-                            <img src={appIcon.src} alt="" aria-hidden="true" className="h-14 w-14 shrink-0 rounded-[13px] object-cover" />
+                            <img
+                              src={appIcon.src}
+                              alt=""
+                              aria-hidden="true"
+                              className="h-14 w-14 shrink-0 rounded-[13px] object-cover"
+                            />
                             <span className="min-w-0 flex-1">
                               <span className="block text-sm font-semibold">SDK Local Manager</span>
                               <span className="mt-1 block text-xs text-muted-foreground">Logo Sudokeys</span>
                             </span>
-                            {settingsDraft.interface_icon === "manager" && <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />}
+                            {settingsDraft.interface_icon === "manager" && (
+                              <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+                            )}
                           </InteractiveCard>
                           <InteractiveCard
                             className={cn(
                               "flex min-h-24 items-center gap-3 p-3",
-                              settingsDraft.interface_icon === "local" && "border-primary bg-selected ring-1 ring-primary/25",
+                              settingsDraft.interface_icon === "local" &&
+                                "border-primary bg-selected ring-1 ring-primary/25",
                             )}
                             role="radio"
                             aria-checked={settingsDraft.interface_icon === "local"}
                             onClick={() => setSettingsDraft({ ...settingsDraft, interface_icon: "local" })}
                           >
-                            <img src={localIcon.src} alt="" aria-hidden="true" className="h-14 w-14 shrink-0 rounded-full object-cover" />
+                            <img
+                              src={localIcon.src}
+                              alt=""
+                              aria-hidden="true"
+                              className="h-14 w-14 shrink-0 rounded-full object-cover"
+                            />
                             <span className="min-w-0 flex-1">
                               <span className="block text-sm font-semibold">Logo Local</span>
                               <span className="mt-1 block text-xs text-muted-foreground">Nouvelle icône</span>
                             </span>
-                            {settingsDraft.interface_icon === "local" && <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />}
+                            {settingsDraft.interface_icon === "local" && (
+                              <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+                            )}
                           </InteractiveCard>
                         </div>
                       </div>
-
                     </SettingsGroup>
                     <div className="divide-y overflow-hidden rounded-md border bg-card">
-                    <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-hover">
-                      <Checkbox
-                        className="mt-0.5"
-                        checked={settingsDraft.show_technical_details}
-                        onCheckedChange={(checked) =>
-                          setSettingsDraft({ ...settingsDraft, show_technical_details: checked === true })
-                        }
-                      />
-                      <span className="min-w-0">
-                        <span className="block font-medium">Afficher les détails techniques</span>
-                        <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
-                          Affiche les états Odoo et PostgreSQL ainsi que le nombre de bases dans la liste des projets,
-                          les emplacements des modules, et les actions de mise à jour du code et des images Docker.
-                          Désactivé, le gestionnaire présente uniquement le voyant d’état des projets et une liste de modules compacte.
+                      <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-hover">
+                        <Checkbox
+                          className="mt-0.5"
+                          checked={settingsDraft.show_technical_details}
+                          onCheckedChange={(checked) =>
+                            setSettingsDraft({ ...settingsDraft, show_technical_details: checked === true })
+                          }
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-medium">Afficher les détails techniques</span>
+                          <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
+                            Affiche les états Odoo et PostgreSQL ainsi que le nombre de bases dans la liste des projets,
+                            les emplacements des modules, et les actions de mise à jour du code et des images Docker.
+                            Désactivé, le gestionnaire présente uniquement le voyant d’état des projets et une liste de
+                            modules compacte.
+                          </span>
                         </span>
-                      </span>
-                    </label>
+                      </label>
 
-                    <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-hover">
-                      <Checkbox
-                        className="mt-0.5"
-                        checked={settingsDraft.sticky_header}
-                        onCheckedChange={(checked) =>
-                          setSettingsDraft({ ...settingsDraft, sticky_header: checked === true })
-                        }
-                      />
-                      <span className="min-w-0">
-                        <span className="block font-medium">En-tête fixe</span>
-                        <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
-                          Garde le nom du projet, les actions et les onglets visibles pendant le défilement.
-                          L’en-tête se compacte dès que la page défile. Sur les fenêtres étroites, il reste non fixe pour préserver la place.
+                      <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-hover">
+                        <Checkbox
+                          className="mt-0.5"
+                          checked={settingsDraft.sticky_header}
+                          onCheckedChange={(checked) =>
+                            setSettingsDraft({ ...settingsDraft, sticky_header: checked === true })
+                          }
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-medium">En-tête fixe</span>
+                          <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
+                            Garde le nom du projet, les actions et les onglets visibles pendant le défilement. L’en-tête
+                            se compacte dès que la page défile. Sur les fenêtres étroites, il reste non fixe pour
+                            préserver la place.
+                          </span>
                         </span>
-                      </span>
-                    </label>
-
+                      </label>
                     </div>
                   </SettingsSection>
                 )}
@@ -431,7 +514,12 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                         </div>
                       </div>
                       <div className="grid gap-2 sm:grid-cols-2">
-                        <Button type="button" variant="outline" className={cn(!selectedSshKey && "sm:col-span-2")} onClick={() => openSshAssistant()}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className={cn(!selectedSshKey && "sm:col-span-2")}
+                          onClick={() => openSshAssistant()}
+                        >
                           <KeyRound className="h-4 w-4" />
                           {selectedSshKey ? "Gérer la clé SSH" : "Configurer une clé"}
                         </Button>
@@ -474,7 +562,9 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                             </Button>
                           )}
                         </div>
-                        {!gitlabStatus.available && <p className="text-xs text-amber-700 dark:text-amber-300">{gitlabStatus.reason}</p>}
+                        {!gitlabStatus.available && (
+                          <p className="text-xs text-amber-700 dark:text-amber-300">{gitlabStatus.reason}</p>
+                        )}
                         {gitlabStatus.available && !gitlabStatus.connected && (
                           <form
                             className="flex flex-col gap-2 sm:flex-row"
@@ -501,11 +591,24 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                               placeholder="Jeton personnel GitLab (glpat-…)"
                               aria-label="Jeton personnel GitLab"
                             />
-                            <Button type="submit" className="shrink-0" disabled={gitlabConnecting || !gitlabTokenDraft.trim()}>
-                              {gitlabConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                            <Button
+                              type="submit"
+                              className="shrink-0"
+                              disabled={gitlabConnecting || !gitlabTokenDraft.trim()}
+                            >
+                              {gitlabConnecting ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <KeyRound className="h-4 w-4" />
+                              )}
                               Activer
                             </Button>
-                            <Button type="button" variant="ghost" className="shrink-0" onClick={() => void openExternalUrl(GITLAB_TOKEN_URL)}>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="shrink-0"
+                              onClick={() => void openExternalUrl(GITLAB_TOKEN_URL)}
+                            >
                               <ExternalLink className="h-4 w-4" />
                               Créer un jeton
                             </Button>
@@ -544,7 +647,6 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                         )}
                       </div>
                     )}
-
                   </SettingsSection>
                 )}
 
@@ -555,7 +657,9 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                         Commande Docker
                         <Input
                           value={settingsDraft.docker_executable}
-                          onChange={(event) => setSettingsDraft({ ...settingsDraft, docker_executable: event.target.value })}
+                          onChange={(event) =>
+                            setSettingsDraft({ ...settingsDraft, docker_executable: event.target.value })
+                          }
                           placeholder="docker"
                         />
                       </label>
@@ -564,7 +668,9 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                         Dossier Traefik
                         <Input
                           value={settingsDraft.traefik_directory}
-                          onChange={(event) => setSettingsDraft({ ...settingsDraft, traefik_directory: event.target.value })}
+                          onChange={(event) =>
+                            setSettingsDraft({ ...settingsDraft, traefik_directory: event.target.value })
+                          }
                           placeholder="Détection automatique si vide"
                         />
                       </label>
@@ -576,7 +682,9 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                           min={3}
                           max={60}
                           value={settingsDraft.docker_poll_interval}
-                          onChange={(event) => setSettingsDraft({ ...settingsDraft, docker_poll_interval: Number(event.target.value) })}
+                          onChange={(event) =>
+                            setSettingsDraft({ ...settingsDraft, docker_poll_interval: Number(event.target.value) })
+                          }
                         />
                       </label>
 
@@ -587,34 +695,49 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                           min={1024}
                           max={65535}
                           value={settingsDraft.api_port}
-                          onChange={(event) => setSettingsDraft({ ...settingsDraft, api_port: Number(event.target.value) })}
+                          onChange={(event) =>
+                            setSettingsDraft({ ...settingsDraft, api_port: Number(event.target.value) })
+                          }
                         />
                         <span className="text-xs font-normal leading-relaxed text-muted-foreground">
-                          Port préféré de l’API locale. Un redémarrage est nécessaire après modification. S’il est occupé, notamment par Docker, le gestionnaire choisit automatiquement un port libre.
+                          Port préféré de l’API locale. Un redémarrage est nécessaire après modification. S’il est
+                          occupé, notamment par Docker, le gestionnaire choisit automatiquement un port libre.
                         </span>
                       </label>
-
                     </SettingsGroup>
                     <div className="grid gap-3 rounded-md border bg-muted/40 p-3 text-sm">
                       <div>
                         <div className="font-medium">Ports utilisés ou contactés</div>
-                        <p className="mt-1 text-xs text-muted-foreground">Les ports internes Docker ne sont pas réservés sur Windows sauf publication explicite du projet.</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Les ports internes Docker ne sont pas réservés sur Windows sauf publication explicite du
+                          projet.
+                        </p>
                       </div>
                       <div className="grid gap-x-4 gap-y-2 text-xs sm:grid-cols-[100px_minmax(0,1fr)]">
-                        <code>{settingsDraft.api_port_actual || settingsDraft.api_port}</code><span>API locale du gestionnaire, sur <code>127.0.0.1</code> uniquement</span>
+                        <code>{settingsDraft.api_port_actual || settingsDraft.api_port}</code>
+                        <span>
+                          API locale du gestionnaire, sur <code>127.0.0.1</code> uniquement
+                        </span>
                         <code>{systemStatus?.traefik?.http_port ?? 80}</code>
                         <span>
                           Traefik, accès HTTP aux projets
-                          {systemStatus?.traefik?.external && systemStatus.traefik.container ? ` (instance existante : ${systemStatus.traefik.container})` : ""}
+                          {systemStatus?.traefik?.external && systemStatus.traefik.container
+                            ? ` (instance existante : ${systemStatus.traefik.container})`
+                            : ""}
                         </span>
-                        <code>8069</code><span>Odoo à l’intérieur de chaque conteneur</span>
-                        <code>5432</code><span>PostgreSQL à l’intérieur de chaque conteneur</span>
-                        <code>10022</code><span>Connexion SSH sortante vers GitLab Sudokeys</span>
-                        <code>3000</code><span>Interface Next.js, uniquement en mode développement</span>
+                        <code>8069</code>
+                        <span>Odoo à l’intérieur de chaque conteneur</span>
+                        <code>5432</code>
+                        <span>PostgreSQL à l’intérieur de chaque conteneur</span>
+                        <code>10022</code>
+                        <span>Connexion SSH sortante vers GitLab Sudokeys</span>
+                        <code>3000</code>
+                        <span>Interface Next.js, uniquement en mode développement</span>
                       </div>
                       {settingsDraft.api_port_actual && settingsDraft.api_port_actual !== settingsDraft.api_port && (
                         <p className="text-xs text-amber-700 dark:text-amber-300">
-                          Le port {settingsDraft.api_port} était occupé au démarrage. Cette session utilise automatiquement le port {settingsDraft.api_port_actual}.
+                          Le port {settingsDraft.api_port} était occupé au démarrage. Cette session utilise
+                          automatiquement le port {settingsDraft.api_port_actual}.
                         </p>
                       )}
                     </div>
@@ -623,7 +746,6 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                       <div>Plateforme : {settingsDraft.platform || systemStatus?.docker.platform || "-"}</div>
                       <div className="mt-1 break-all">Configuration : {settingsDraft.config_file || "-"}</div>
                     </div>
-
                   </SettingsSection>
                 )}
 
@@ -634,9 +756,14 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                         <div className="min-w-0">
                           <div className="text-sm font-medium">Journal d’erreurs du gestionnaire</div>
                           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                            Les erreurs d’API, de jobs et d’interface sont conservées localement. Les mots de passe, jetons et secrets détectés sont masqués.
+                            Les erreurs d’API, de jobs et d’interface sont conservées localement. Les mots de passe,
+                            jetons et secrets détectés sont masqués.
                           </p>
-                          {managerErrorLogPath && <p className="mt-1 break-all text-xs text-muted-foreground">Fichier : {managerErrorLogPath}</p>}
+                          {managerErrorLogPath && (
+                            <p className="mt-1 break-all text-xs text-muted-foreground">
+                              Fichier : {managerErrorLogPath}
+                            </p>
+                          )}
                         </div>
                         <Badge className="shrink-0" variant={managerErrors.length ? "warning" : "secondary"}>
                           {managerErrors.length} erreur(s)
@@ -647,44 +774,78 @@ export function SettingsDialog({ desktopRuntime, gitlabStatus, loadCreationPrere
                           <div className="flex items-center gap-2 p-2 text-xs text-muted-foreground">
                             <Loader2 className="h-4 w-4 animate-spin" /> Chargement…
                           </div>
-                        ) : managerErrors.length ? managerErrors.map((entry) => (
-                          <details key={entry.id} className="rounded-md border bg-card p-2 text-xs">
-                            <summary className="cursor-pointer break-words font-medium">
-                              {entry.timestamp} · {entry.source}{entry.project ? ` · ${entry.project}` : ""}
-                            </summary>
-                            <p className="mt-2 whitespace-pre-wrap break-words text-destructive">{entry.message}</p>
-                            {entry.details && <pre className="log-terminal mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-2 text-[11px] text-slate-100">{entry.details}</pre>}
-                          </details>
-                        )) : (
+                        ) : managerErrors.length ? (
+                          managerErrors.map((entry) => (
+                            <details key={entry.id} className="rounded-md border bg-card p-2 text-xs">
+                              <summary className="cursor-pointer break-words font-medium">
+                                {entry.timestamp} · {entry.source}
+                                {entry.project ? ` · ${entry.project}` : ""}
+                              </summary>
+                              <p className="mt-2 whitespace-pre-wrap break-words text-destructive">{entry.message}</p>
+                              {entry.details && (
+                                <pre className="log-terminal mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-2 text-[11px] text-slate-100">
+                                  {entry.details}
+                                </pre>
+                              )}
+                            </details>
+                          ))
+                        ) : (
                           <p className="p-2 text-xs text-muted-foreground">Aucune erreur enregistrée.</p>
                         )}
                       </div>
                       <div className="grid gap-2 sm:grid-cols-3">
-                        <Button type="button" variant="outline" onClick={loadManagerErrors} disabled={loadingManagerErrors}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={loadManagerErrors}
+                          disabled={loadingManagerErrors}
+                        >
                           <RefreshCcw className="h-4 w-4" /> Actualiser
                         </Button>
-                        <Button type="button" variant="outline" onClick={copyManagerErrors} disabled={!managerErrors.length}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={copyManagerErrors}
+                          disabled={!managerErrors.length}
+                        >
                           <Copy className="h-4 w-4" /> Copier
                         </Button>
-                        <Button type="button" variant="outline" onClick={clearManagerErrors} disabled={!managerErrors.length}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={clearManagerErrors}
+                          disabled={!managerErrors.length}
+                        >
                           <Trash2 className="h-4 w-4" /> Effacer
                         </Button>
                       </div>
                     </div>
-
                   </SettingsSection>
                 )}
               </div>
             </div>
 
             <div className="flex flex-col-reverse gap-3 border-t px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-              <p className={cn("text-xs", settingsDirty ? "font-medium text-amber-700 dark:text-amber-300" : "text-muted-foreground")}>
+              <p
+                className={cn(
+                  "text-xs",
+                  settingsDirty ? "font-medium text-amber-700 dark:text-amber-300" : "text-muted-foreground",
+                )}
+              >
                 {settingsDirty ? "Modifications non enregistrées." : "Aucune modification en attente."}
               </p>
               <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                <Button variant="outline" onClick={() => onOpenChange(false)}>Annuler</Button>
+                <Button variant="outline" onClick={() => onOpenChange(false)}>
+                  Annuler
+                </Button>
                 <Button
-                  disabled={savingSettings || !settingsDirty || !settingsDraft.workspace.trim() || settingsDraft.api_port < 1024 || settingsDraft.api_port > 65535}
+                  disabled={
+                    savingSettings ||
+                    !settingsDirty ||
+                    !settingsDraft.workspace.trim() ||
+                    settingsDraft.api_port < 1024 ||
+                    settingsDraft.api_port > 65535
+                  }
                   onClick={saveSettings}
                 >
                   {savingSettings && <Loader2 className="h-4 w-4 animate-spin" />}

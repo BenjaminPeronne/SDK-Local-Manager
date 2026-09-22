@@ -17,7 +17,10 @@ export default defineConfig([
     files: ["**/*.ts", "**/*.tsx"],
     rules: {
       // Préfixe « _ » : valeur écartée volontairement, par exemple lors d'une déstructuration.
-      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", destructuredArrayIgnorePattern: "^_" }],
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_", destructuredArrayIgnorePattern: "^_" },
+      ],
       // Export statique chargé par Electron : next/image n'y optimise rien, les <img> sont voulus.
       "@next/next/no-img-element": "off",
       // Règle du React Compiler : le code existant réinitialise souvent un état dans un effet.

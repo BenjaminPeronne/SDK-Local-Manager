@@ -18,10 +18,22 @@ type AllTranslationsResetDialogProps = {
   selectedProject: Project | undefined;
   selectedTranslationLanguages: Set<string>;
   setSelectedTranslationLanguages: Dispatch<SetStateAction<Set<string>>>;
-  translationLanguages: { code: string; name: string; }[] | null;
+  translationLanguages: { code: string; name: string }[] | null;
 };
 
-export function AllTranslationsResetDialog({ canUseDb, createJob, loading, onOpenChange, open, selectedDatabaseOrNotify, selectedDb, selectedProject, selectedTranslationLanguages, setSelectedTranslationLanguages, translationLanguages }: AllTranslationsResetDialogProps) {
+export function AllTranslationsResetDialog({
+  canUseDb,
+  createJob,
+  loading,
+  onOpenChange,
+  open,
+  selectedDatabaseOrNotify,
+  selectedDb,
+  selectedProject,
+  selectedTranslationLanguages,
+  setSelectedTranslationLanguages,
+  translationLanguages,
+}: AllTranslationsResetDialogProps) {
   async function confirmAllTranslationsReset() {
     const db = selectedDatabaseOrNotify("la réinitialisation des traductions");
     if (!db || !selectedProject || !selectedTranslationLanguages.size) return;
@@ -40,9 +52,9 @@ export function AllTranslationsResetDialog({ canUseDb, createJob, loading, onOpe
         <DialogHeader>
           <DialogTitle>Réinitialiser les traductions · {selectedDb || "base"}</DialogTitle>
           <DialogDescription>
-            Recharge les termes de <strong>tous les modules installés</strong> depuis leurs fichiers <code className="text-xs">.po</code>,
-            comme l’option « Écraser les termes existants » de Paramètres › Traductions › Langues. Les données et les vues ne sont
-            pas mises à jour. Odoo sera arrêté brièvement.
+            Recharge les termes de <strong>tous les modules installés</strong> depuis leurs fichiers{" "}
+            <code className="text-xs">.po</code>, comme l’option « Écraser les termes existants » de Paramètres ›
+            Traductions › Langues. Les données et les vues ne sont pas mises à jour. Odoo sera arrêté brièvement.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
@@ -55,7 +67,10 @@ export function AllTranslationsResetDialog({ canUseDb, createJob, loading, onOpe
           ) : translationLanguages.length ? (
             <div className="grid gap-2 sm:grid-cols-2">
               {translationLanguages.map((language) => (
-                <label key={language.code} className="flex cursor-pointer items-center gap-2 rounded-md border p-2.5 text-sm hover:bg-hover">
+                <label
+                  key={language.code}
+                  className="flex cursor-pointer items-center gap-2 rounded-md border p-2.5 text-sm hover:bg-hover"
+                >
                   <Checkbox
                     checked={selectedTranslationLanguages.has(language.code)}
                     onCheckedChange={(checked) =>
@@ -82,8 +97,13 @@ export function AllTranslationsResetDialog({ canUseDb, createJob, loading, onOpe
           Les traductions modifiées à la main dans Odoo seront écrasées pour les langues sélectionnées.
         </div>
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Annuler</Button>
-          <Button disabled={!canUseDb || loading || !selectedTranslationLanguages.size} onClick={confirmAllTranslationsReset}>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Annuler
+          </Button>
+          <Button
+            disabled={!canUseDb || loading || !selectedTranslationLanguages.size}
+            onClick={confirmAllTranslationsReset}
+          >
             <Languages className="h-4 w-4" />
             Réinitialiser ({selectedTranslationLanguages.size} langue{selectedTranslationLanguages.size > 1 ? "s" : ""})
           </Button>

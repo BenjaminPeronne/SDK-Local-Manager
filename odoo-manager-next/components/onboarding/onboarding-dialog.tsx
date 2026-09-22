@@ -29,7 +29,26 @@ type OnboardingDialogProps = {
   traefikInstallRunning: boolean;
 };
 
-export function OnboardingDialog({ completeOnboarding, createJob, creationPrerequisites, jobs, loadCreationPrerequisites, loading, loadingCreationPrerequisites, onOpenChange, open, openCreateProjectDialog, openSshAssistant, overview, pushToast, requestDockerStart, requestTraefikInstall, schedule, systemStatus, traefikInstallRunning }: OnboardingDialogProps) {
+export function OnboardingDialog({
+  completeOnboarding,
+  createJob,
+  creationPrerequisites,
+  jobs,
+  loadCreationPrerequisites,
+  loading,
+  loadingCreationPrerequisites,
+  onOpenChange,
+  open,
+  openCreateProjectDialog,
+  openSshAssistant,
+  overview,
+  pushToast,
+  requestDockerStart,
+  requestTraefikInstall,
+  schedule,
+  systemStatus,
+  traefikInstallRunning,
+}: OnboardingDialogProps) {
   const gitInstallRunning = jobs.some((job) => isJobUnfinished(job) && job.title === "Installer Git pour Windows");
   // La clé GitLab déjà déclarée reste côté Windows : sans elle, l'environnement Linux ne clone rien.
   async function requestSshKeyImport() {
@@ -52,7 +71,9 @@ export function OnboardingDialog({ completeOnboarding, createJob, creationPrereq
     if (gitInstallRunning) return;
     const job = await createJob("install_git");
     if (!job) return;
-    const refreshPrerequisites = async () => { await loadCreationPrerequisites(); };
+    const refreshPrerequisites = async () => {
+      await loadCreationPrerequisites();
+    };
     schedule(refreshPrerequisites, 3000);
     schedule(refreshPrerequisites, 10000);
     schedule(refreshPrerequisites, 25000);
@@ -93,13 +114,21 @@ export function OnboardingDialog({ completeOnboarding, createJob, creationPrereq
             icon={GitBranch}
             title="Git"
             detail={[
-              creationPrerequisites?.git_version || creationPrerequisites?.git_install_message || "Git doit être disponible sur la machine.",
+              creationPrerequisites?.git_version ||
+                creationPrerequisites?.git_install_message ||
+                "Git doit être disponible sur la machine.",
               creationPrerequisites?.tool_environment,
-            ].filter(Boolean).join(" · ")}
+            ]
+              .filter(Boolean)
+              .join(" · ")}
             action={
               !creationPrerequisites?.git_available && creationPrerequisites?.git_install_supported ? (
                 <Button size="sm" variant="outline" onClick={requestGitInstall} disabled={loading || gitInstallRunning}>
-                  {gitInstallRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+                  {gitInstallRunning ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CloudDownload className="h-4 w-4" />
+                  )}
                   {gitInstallRunning ? "Installation…" : "Installer"}
                 </Button>
               ) : undefined
@@ -150,7 +179,13 @@ export function OnboardingDialog({ completeOnboarding, createJob, creationPrereq
                   disabled={!creationPrerequisites?.git_available || loading || traefikInstallRunning}
                   title={!creationPrerequisites?.git_available ? "Installe Git avant Traefik" : undefined}
                 >
-                  {traefikInstallRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : systemStatus.traefik.installed ? <Play className="h-4 w-4" /> : <CloudDownload className="h-4 w-4" />}
+                  {traefikInstallRunning ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : systemStatus.traefik.installed ? (
+                    <Play className="h-4 w-4" />
+                  ) : (
+                    <CloudDownload className="h-4 w-4" />
+                  )}
                   {traefikInstallRunning ? "Installation…" : systemStatus.traefik.installed ? "Démarrer" : "Installer"}
                 </Button>
               ) : undefined

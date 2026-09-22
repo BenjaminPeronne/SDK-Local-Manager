@@ -15,7 +15,8 @@ export interface WslStatus {
   release: string;
 }
 
-export type WslSetupStep = "unsupported" | "install-wsl" | "outdated-wsl" | "install-environment" | "update-environment" | "ready";
+export type WslSetupStep =
+  "unsupported" | "install-wsl" | "outdated-wsl" | "install-environment" | "update-environment" | "ready";
 
 export interface WslSetupState {
   step: WslSetupStep;
@@ -68,7 +69,8 @@ export function wslSetupState(status: WslStatus | null, applicationVersion: stri
     return {
       step: "install-environment",
       title: "Préparer mon poste",
-      detail: "L'application installe son environnement Linux, avec Docker et Git. Aucune autre action ne sera demandée.",
+      detail:
+        "L'application installe son environnement Linux, avec Docker et Git. Aucune autre action ne sera demandée.",
       actionLabel: "Préparer mon poste",
       needsElevation: false,
     };
@@ -92,7 +94,10 @@ export function isWslSetupPending(status: WslStatus | null, applicationVersion: 
 
 /** Message lisible pour un échec de préparation, sans jargon. */
 export function wslSetupError(error: unknown): string {
-  const message = (error instanceof Error ? error.message : String(error ?? "")).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+  const message = (error instanceof Error ? error.message : String(error ?? "")).replace(
+    /^Error invoking remote method '[^']+': (Error: )?/,
+    "",
+  );
   if (/empreinte/i.test(message)) {
     return "L'image de l'environnement ne correspond pas à son empreinte. Retélécharge l'application.";
   }

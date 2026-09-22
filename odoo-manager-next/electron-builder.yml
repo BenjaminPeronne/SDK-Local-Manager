@@ -9,7 +9,7 @@ files:
   - electron/*.cjs
   - electron/icons/*
   - package.json
-  - '!node_modules/**/*'
+  - "!node_modules/**/*"
 extraResources:
   - from: electron/binaries
     to: backend
@@ -27,7 +27,7 @@ mac:
   target: [dmg, zip]
   category: public.app-category.developer-tools
   icon: electron/icons/icon.icns
-  identity: '-'
+  identity: "-"
   timestamp: none
   hardenedRuntime: true
   gatekeeperAssess: false

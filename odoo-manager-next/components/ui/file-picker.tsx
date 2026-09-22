@@ -28,15 +28,7 @@ export const FilePicker = React.forwardRef<HTMLInputElement, FilePickerProps>(
 
     return (
       <div className={cn("min-w-0", className)}>
-        <input
-          ref={ref}
-          id={inputId}
-          type="file"
-          accept={accept}
-          disabled={disabled}
-          className="sr-only"
-          {...props}
-        />
+        <input ref={ref} id={inputId} type="file" accept={accept} disabled={disabled} className="sr-only" {...props} />
         <div
           className={cn(
             "flex min-h-14 min-w-0 items-center gap-3 rounded-md border border-input bg-card p-2 transition-[border-color,box-shadow] duration-150",

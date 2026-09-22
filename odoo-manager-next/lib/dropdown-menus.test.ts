@@ -16,5 +16,8 @@ test("every dropdown menu is non-modal to keep sticky layout in place", () => {
   const files = [new URL("../app/", import.meta.url), new URL("../components/", import.meta.url)].flatMap(sourceFiles);
   const roots = files.flatMap((file) => readFileSync(file, "utf8").match(/<DropdownMenu\.Root\b[^>]*>/g) ?? []);
   assert.ok(roots.length > 0);
-  assert.deepEqual(roots.filter((root) => !root.includes("modal={false}")), []);
+  assert.deepEqual(
+    roots.filter((root) => !root.includes("modal={false}")),
+    [],
+  );
 });

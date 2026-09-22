@@ -24,7 +24,22 @@ type DeleteModuleCodeDialogProps = {
   setSelectedModules: Dispatch<SetStateAction<Set<string>>>;
 };
 
-export function DeleteModuleCodeDialog({ canUseDb, createJob, deleteCodeUninstallFirst, loading, onOpenChange, open, pendingDeleteCodeModules, refreshModules, schedule, selectedDb, selectedProject, setDeleteCodeUninstallFirst, setPendingDeleteCodeModules, setSelectedModules }: DeleteModuleCodeDialogProps) {
+export function DeleteModuleCodeDialog({
+  canUseDb,
+  createJob,
+  deleteCodeUninstallFirst,
+  loading,
+  onOpenChange,
+  open,
+  pendingDeleteCodeModules,
+  refreshModules,
+  schedule,
+  selectedDb,
+  selectedProject,
+  setDeleteCodeUninstallFirst,
+  setPendingDeleteCodeModules,
+  setSelectedModules,
+}: DeleteModuleCodeDialogProps) {
   async function confirmDeleteCode() {
     if (!selectedProject || !pendingDeleteCodeModules.length) return;
     const job = await createJob("delete_module_code", {
@@ -47,8 +62,8 @@ export function DeleteModuleCodeDialog({ canUseDb, createJob, deleteCodeUninstal
         <DialogHeader>
           <DialogTitle>Supprimer les modules du projet</DialogTitle>
           <DialogDescription>
-            Cette action retire les modules de `odoo/addons` et supprime le dossier géré dans `odoo/addons-store`.
-            Les anciens imports encore liés depuis `.odoo_manager_imports` restent aussi nettoyés.
+            Cette action retire les modules de `odoo/addons` et supprime le dossier géré dans `odoo/addons-store`. Les
+            anciens imports encore liés depuis `.odoo_manager_imports` restent aussi nettoyés.
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-52 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs">
@@ -70,7 +85,11 @@ export function DeleteModuleCodeDialog({ canUseDb, createJob, deleteCodeUninstal
             </span>
           </span>
         </label>
-        <Button variant="destructive" disabled={!pendingDeleteCodeModules.length || loading} onClick={confirmDeleteCode}>
+        <Button
+          variant="destructive"
+          disabled={!pendingDeleteCodeModules.length || loading}
+          onClick={confirmDeleteCode}
+        >
           <PackageX className="h-4 w-4" />
           Confirmer la suppression du projet
         </Button>

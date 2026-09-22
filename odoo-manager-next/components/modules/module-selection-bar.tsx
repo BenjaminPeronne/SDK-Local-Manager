@@ -47,11 +47,16 @@ export function ModuleSelectionBar({
   const installable = installableModules.length;
   const installed = installedModules.length;
   const removable = removableModules.length;
-  const details = [installable && `${installable} disponible(s)`, installed && `${installed} installé(s)`].filter(Boolean).join(", ");
+  const details = [installable && `${installable} disponible(s)`, installed && `${installed} installé(s)`]
+    .filter(Boolean)
+    .join(", ");
   const selectAllFiltered = !allFilteredSelected && filteredCount > 0 && (
     <button
       type="button"
-      className={cn("shrink-0 rounded-sm text-sm font-medium text-primary underline-offset-2 hover:underline", REFINED_FOCUS_RING)}
+      className={cn(
+        "shrink-0 rounded-sm text-sm font-medium text-primary underline-offset-2 hover:underline",
+        REFINED_FOCUS_RING,
+      )}
       onClick={() => onSelectAllFiltered()}
     >
       Tout sélectionner ({filteredCount})
@@ -99,12 +104,7 @@ export function ModuleSelectionBar({
       </div>
       <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
         {installable > 0 && (
-          <Button
-            size="sm"
-            variant="success"
-            disabled={busy}
-            onClick={() => onInstall(installableModules)}
-          >
+          <Button size="sm" variant="success" disabled={busy} onClick={() => onInstall(installableModules)}>
             <PlusCircle className="h-4 w-4" />
             Installer ({installable})
           </Button>
@@ -157,7 +157,9 @@ export function ModuleSelectionBar({
         <Button size="sm" variant="ghost" onClick={onClearSelection} title="Désélectionner tous les modules (Échap)">
           <X className="h-4 w-4" />
           Désélectionner
-          <kbd className="ml-0.5 rounded border px-1 font-mono text-[10px] font-normal text-muted-foreground">Échap</kbd>
+          <kbd className="ml-0.5 rounded border px-1 font-mono text-[10px] font-normal text-muted-foreground">
+            Échap
+          </kbd>
         </Button>
       </div>
     </div>

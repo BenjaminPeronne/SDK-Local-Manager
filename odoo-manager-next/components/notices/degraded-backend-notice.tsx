@@ -18,18 +18,29 @@ export function DegradedBackendNotice({ degradedBackendReason, openUrl }: Degrad
       title="Mode Windows, plus lent"
       actions={
         <>
-          <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => openUrl("https://aka.ms/enablevirtualization")}>
+          <Button
+            className="w-full sm:w-auto"
+            size="sm"
+            variant="outline"
+            onClick={() => openUrl("https://aka.ms/enablevirtualization")}
+          >
             <ExternalLink className="h-4 w-4" />
             Guide Microsoft
           </Button>
-          <Button className="w-full sm:w-auto" size="sm" disabled={!desktopBridge()?.relaunch} onClick={() => desktopBridge()?.relaunch?.()}>
+          <Button
+            className="w-full sm:w-auto"
+            size="sm"
+            disabled={!desktopBridge()?.relaunch}
+            onClick={() => desktopBridge()?.relaunch?.()}
+          >
             <RefreshCcw className="h-4 w-4" />
             Relancer
           </Button>
         </>
       }
     >
-      {degradedBackendReason} Les projets restent utilisables depuis Windows, mais Odoo y démarre en une minute environ, contre quelques secondes dans l’environnement Linux.
+      {degradedBackendReason} Les projets restent utilisables depuis Windows, mais Odoo y démarre en une minute environ,
+      contre quelques secondes dans l’environnement Linux.
     </Notice>
   );
 }

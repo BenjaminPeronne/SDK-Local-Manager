@@ -26,7 +26,13 @@ export function OdooLogsModeBar({
           ? "Traces complètes : les erreurs non bloquantes du nettoyage du filestore ne sont pas résumées."
           : "Des traces non bloquantes du nettoyage du filestore ont été résumées."}
       </span>
-      <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={full ? onShowSummary : onShowFull}>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="shrink-0"
+        onClick={full ? onShowSummary : onShowFull}
+      >
         <Logs className="h-4 w-4" />
         {full ? "Revenir aux logs résumés" : "Voir les traces complètes"}
       </Button>

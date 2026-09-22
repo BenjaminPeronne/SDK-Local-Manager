@@ -19,7 +19,15 @@ type ProjectSettingsTabProps = {
   settings: ManagerSettings | null;
 };
 
-export function ProjectSettingsTab({ createJob, openUrl, refinedInterface, selectedProject, selectedProjectReady, setDeleteDialogOpen, settings }: ProjectSettingsTabProps) {
+export function ProjectSettingsTab({
+  createJob,
+  openUrl,
+  refinedInterface,
+  selectedProject,
+  selectedProjectReady,
+  setDeleteDialogOpen,
+  settings,
+}: ProjectSettingsTabProps) {
   return (
     <TabsContent value="actions">
       {refinedInterface ? (
@@ -46,7 +54,11 @@ export function ProjectSettingsTab({ createJob, openUrl, refinedInterface, selec
                 title="Code et images"
                 description="Met à jour les sources et images Docker."
               >
-                <Button variant="outline" disabled={!selectedProjectReady} onClick={() => createJob("update_project", { project: selectedProject?.name })}>
+                <Button
+                  variant="outline"
+                  disabled={!selectedProjectReady}
+                  onClick={() => createJob("update_project", { project: selectedProject?.name })}
+                >
                   <CloudDownload className="h-4 w-4" />
                   MAJ projet
                 </Button>
@@ -61,8 +73,8 @@ export function ProjectSettingsTab({ createJob, openUrl, refinedInterface, selec
               title="Suppression du projet"
               description={
                 <>
-                  Action définitive. Le projet est déplacé dans <code className="text-xs">.odoo_manager_deleted</code> et le
-                  nom devra être saisi pour confirmer.
+                  Action définitive. Le projet est déplacé dans <code className="text-xs">.odoo_manager_deleted</code>{" "}
+                  et le nom devra être saisi pour confirmer.
                 </>
               }
             >
@@ -82,7 +94,12 @@ export function ProjectSettingsTab({ createJob, openUrl, refinedInterface, selec
                 <CardDescription>Met à jour les sources et images Docker.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                <Button className="w-full" variant="outline" disabled={!selectedProjectReady} onClick={() => createJob("update_project", { project: selectedProject?.name })}>
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  disabled={!selectedProjectReady}
+                  onClick={() => createJob("update_project", { project: selectedProject?.name })}
+                >
                   <CloudDownload className="h-4 w-4" />
                   MAJ projet
                 </Button>
@@ -99,7 +116,12 @@ export function ProjectSettingsTab({ createJob, openUrl, refinedInterface, selec
               <CardDescription>Suppression du projet local sélectionné.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button className="w-full" variant="destructive" disabled={!selectedProjectReady} onClick={() => setDeleteDialogOpen(true)}>
+              <Button
+                className="w-full"
+                variant="destructive"
+                disabled={!selectedProjectReady}
+                onClick={() => setDeleteDialogOpen(true)}
+              >
                 <Trash2 className="h-4 w-4" />
                 Supprimer projet
               </Button>

@@ -216,7 +216,11 @@ export default function Home() {
   const [pendingDeleteCodeModules, setPendingDeleteCodeModules] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("bases");
   const [pendingCreatedProjectName, setPendingCreatedProjectName] = useState("");
-  const [pendingCreatedDatabase, setPendingCreatedDatabase] = useState<{ jobId: number; project: string; database: string } | null>(null);
+  const [pendingCreatedDatabase, setPendingCreatedDatabase] = useState<{
+    jobId: number;
+    project: string;
+    database: string;
+  } | null>(null);
   const lastDockerState = useRef<string | null>(null);
   const pendingDockerState = useRef<{ state: string; count: number } | null>(null);
   const consecutiveApiFailures = useRef(0);
@@ -277,18 +281,16 @@ export default function Home() {
     [projectJobs, selectedJobId],
   );
   const hasRunningJobs = useMemo(() => jobs.some(isJobUnfinished), [jobs]);
-  const runningJobs = useMemo(
-    () => jobs.filter(isJobUnfinished),
-    [jobs],
-  );
+  const runningJobs = useMemo(() => jobs.filter(isJobUnfinished), [jobs]);
   const pendingProjectArrivals = useMemo(
-    () => jobs.filter(
-      (job) =>
-        isJobUnfinished(job) &&
-        PROJECT_ARRIVAL_PREFIXES.some((prefix) => job.title.startsWith(prefix)) &&
-        Boolean(job.project) &&
-        !(overview?.projects.some((project) => project.name === job.project)),
-    ),
+    () =>
+      jobs.filter(
+        (job) =>
+          isJobUnfinished(job) &&
+          PROJECT_ARRIVAL_PREFIXES.some((prefix) => job.title.startsWith(prefix)) &&
+          Boolean(job.project) &&
+          !overview?.projects.some((project) => project.name === job.project),
+      ),
     [jobs, overview?.projects],
   );
   const pendingSelectedProjectArrival = useMemo(
@@ -313,8 +315,13 @@ export default function Home() {
   const moduleFilters = useModuleFilters(modules, selectedProject?.name, selectedDb);
   const refinedInterface = settings?.interface_layout === "refined";
   const stickyHeader = settings?.sticky_header ?? false;
-  const { projectHeaderRef, projectHeaderHeight, projectTabsRef, projectTabsHeight, projectHeaderCompact } = useStickyProjectHeader(stickyHeader, projectViewOpen, selectedProject?.name);
-  const [setModuleSelectionBanner, moduleSelectionBannerHidden] = useHiddenBelowStickyHeader(stickyHeader, projectHeaderHeight, projectTabsHeight);
+  const { projectHeaderRef, projectHeaderHeight, projectTabsRef, projectTabsHeight, projectHeaderCompact } =
+    useStickyProjectHeader(stickyHeader, projectViewOpen, selectedProject?.name);
+  const [setModuleSelectionBanner, moduleSelectionBannerHidden] = useHiddenBelowStickyHeader(
+    stickyHeader,
+    projectHeaderHeight,
+    projectTabsHeight,
+  );
 
   const moduleByName = useMemo(() => new Map(modules.map((module) => [module.name, module])), [modules]);
   const installedSoclePresetIds = useMemo<Set<string>>(
@@ -322,7 +329,10 @@ export default function Home() {
     [socleCatalog],
   );
   const soclePresetsToInstall = useMemo(
-    () => Array.from(selectedSoclePresets).filter((presetId) => !installedSoclePresetIds.has(presetId)).sort(),
+    () =>
+      Array.from(selectedSoclePresets)
+        .filter((presetId) => !installedSoclePresetIds.has(presetId))
+        .sort(),
     [selectedSoclePresets, installedSoclePresetIds],
   );
   const detectedImportedModules = useMemo(() => {
@@ -335,39 +345,49 @@ export default function Home() {
     }
     return [];
   }, [jobs, selectedProject?.name]);
-  const filteredModuleNames = useMemo(() => moduleFilters.filtered.map((module) => module.name), [moduleFilters.filtered]);
+  const filteredModuleNames = useMemo(
+    () => moduleFilters.filtered.map((module) => module.name),
+    [moduleFilters.filtered],
+  );
   const selectedFilteredModuleCount = useMemo(
     () => filteredModuleNames.filter((name) => selectedModules.has(name)).length,
     [filteredModuleNames, selectedModules],
   );
-  const allFilteredModulesSelected = filteredModuleNames.length > 0 && selectedFilteredModuleCount === filteredModuleNames.length;
+  const allFilteredModulesSelected =
+    filteredModuleNames.length > 0 && selectedFilteredModuleCount === filteredModuleNames.length;
   const { toasts, pushToast } = useToasts(schedule);
 
-  const notifyJobCompletion = useCallback((job: Job) => {
-    const successful = job.status === "done";
-    const title = `${jobCompletionTitle(job)} : ${job.title}`;
-    const message = !successful && job.error_message ? `${title}\n${job.error_message}` : title;
-    pushToast(successful ? "success" : job.status === "cancelled" ? "info" : "error", message);
-    void sendTaskNotification(job).catch(() => {
-      // A refused system permission must not affect job polling.
-    });
-  }, [pushToast]);
+  const notifyJobCompletion = useCallback(
+    (job: Job) => {
+      const successful = job.status === "done";
+      const title = `${jobCompletionTitle(job)} : ${job.title}`;
+      const message = !successful && job.error_message ? `${title}\n${job.error_message}` : title;
+      pushToast(successful ? "success" : job.status === "cancelled" ? "info" : "error", message);
+      void sendTaskNotification(job).catch(() => {
+        // A refused system permission must not affect job polling.
+      });
+    },
+    [pushToast],
+  );
 
-  const applyJobs = useCallback((receivedJobs: Job[], notify = true) => {
-    const nextJobs = mergeIncrementalJobOutput(receivedJobs, jobOutputCache.current);
-    const previousStatuses = jobStatuses.current;
-    if (notify && jobNotificationsInitialized.current) {
-      for (const job of nextJobs) {
-        const previousStatus = previousStatuses.get(job.id);
-        if (previousStatus && isJobUnfinished({ status: previousStatus }) && !isJobUnfinished(job)) {
-          notifyJobCompletion(job);
+  const applyJobs = useCallback(
+    (receivedJobs: Job[], notify = true) => {
+      const nextJobs = mergeIncrementalJobOutput(receivedJobs, jobOutputCache.current);
+      const previousStatuses = jobStatuses.current;
+      if (notify && jobNotificationsInitialized.current) {
+        for (const job of nextJobs) {
+          const previousStatus = previousStatuses.get(job.id);
+          if (previousStatus && isJobUnfinished({ status: previousStatus }) && !isJobUnfinished(job)) {
+            notifyJobCompletion(job);
+          }
         }
       }
-    }
-    jobStatuses.current = new Map(nextJobs.map((job) => [job.id, job.status]));
-    jobNotificationsInitialized.current = true;
-    setJobs((current) => jobsFingerprint(current) === jobsFingerprint(nextJobs) ? current : nextJobs);
-  }, [notifyJobCompletion]);
+      jobStatuses.current = new Map(nextJobs.map((job) => [job.id, job.status]));
+      jobNotificationsInitialized.current = true;
+      setJobs((current) => (jobsFingerprint(current) === jobsFingerprint(nextJobs) ? current : nextJobs));
+    },
+    [notifyJobCompletion],
+  );
 
   const markApiSuccess = useCallback(() => {
     consecutiveApiFailures.current = 0;
@@ -381,48 +401,56 @@ export default function Home() {
     return consecutiveApiFailures.current === 2;
   }, []);
 
-  const applyBootstrapSnapshot = useCallback((payload: BootstrapSnapshot) => {
-    setOverview(payload.overview);
-    setSystemStatus(payload.system_status);
-    setSettings(payload.settings);
-    setSettingsDraft(payload.settings);
-    applyJobs(payload.jobs, false);
-    setSelectedProjectName((currentName) => {
-      if (currentName && pendingProjectNames.current.has(currentName)) return currentName;
-      // Un projet disparu (supprimé, renommé) ramène à l'accueil plutôt qu'au premier de la liste.
-      const project = payload.overview.projects.find((item) => item.name === currentName);
-      return project?.name || "";
-    });
-    setSelectedJobId((currentId) => payload.jobs.some((job) => job.id === currentId) ? currentId : payload.jobs[0]?.id ?? null);
-    lastDockerState.current = payload.system_status.docker.state;
-    pendingDockerState.current = null;
-    markApiSuccess();
-    setError("");
-  }, [applyJobs, markApiSuccess]);
+  const applyBootstrapSnapshot = useCallback(
+    (payload: BootstrapSnapshot) => {
+      setOverview(payload.overview);
+      setSystemStatus(payload.system_status);
+      setSettings(payload.settings);
+      setSettingsDraft(payload.settings);
+      applyJobs(payload.jobs, false);
+      setSelectedProjectName((currentName) => {
+        if (currentName && pendingProjectNames.current.has(currentName)) return currentName;
+        // Un projet disparu (supprimé, renommé) ramène à l'accueil plutôt qu'au premier de la liste.
+        const project = payload.overview.projects.find((item) => item.name === currentName);
+        return project?.name || "";
+      });
+      setSelectedJobId((currentId) =>
+        payload.jobs.some((job) => job.id === currentId) ? currentId : (payload.jobs[0]?.id ?? null),
+      );
+      lastDockerState.current = payload.system_status.docker.state;
+      pendingDockerState.current = null;
+      markApiSuccess();
+      setError("");
+    },
+    [applyJobs, markApiSuccess],
+  );
 
-  const commitSystemStatus = useCallback((payload: SystemStatus, immediate = false) => {
-    markApiSuccess();
-    const previous = lastDockerState.current;
-    const next = payload.docker.state;
-    const sameState = previous === next;
-    const recoverToReady = payload.docker.running;
+  const commitSystemStatus = useCallback(
+    (payload: SystemStatus, immediate = false) => {
+      markApiSuccess();
+      const previous = lastDockerState.current;
+      const next = payload.docker.state;
+      const sameState = previous === next;
+      const recoverToReady = payload.docker.running;
 
-    if (!immediate && previous && !sameState && !recoverToReady) {
-      const pending = pendingDockerState.current;
-      const count = pending?.state === next ? pending.count + 1 : 1;
-      pendingDockerState.current = { state: next, count };
-      if (count < 2) return false;
-    }
+      if (!immediate && previous && !sameState && !recoverToReady) {
+        const pending = pendingDockerState.current;
+        const count = pending?.state === next ? pending.count + 1 : 1;
+        pendingDockerState.current = { state: next, count };
+        if (count < 2) return false;
+      }
 
-    pendingDockerState.current = null;
-    setSystemStatus(payload);
-    if (!immediate && previous && previous !== next) {
-      if (payload.docker.running) pushToast("success", "Docker est maintenant disponible.");
-      else pushToast("error", payload.docker.message || "Docker n'est plus disponible.");
-    }
-    lastDockerState.current = next;
-    return true;
-  }, [markApiSuccess, pushToast]);
+      pendingDockerState.current = null;
+      setSystemStatus(payload);
+      if (!immediate && previous && previous !== next) {
+        if (payload.docker.running) pushToast("success", "Docker est maintenant disponible.");
+        else pushToast("error", payload.docker.message || "Docker n'est plus disponible.");
+      }
+      lastDockerState.current = next;
+      return true;
+    },
+    [markApiSuccess, pushToast],
+  );
 
   const initializeApplication = useCallback(async () => {
     const generation = ++bootstrapGeneration.current;
@@ -474,18 +502,21 @@ export default function Home() {
     }
   }, [applyBootstrapSnapshot, markApiSuccess]);
 
-  const applyOverview = useCallback((payload: Overview) => {
-    setOverview((currentOverview) =>
-      currentOverview && JSON.stringify(currentOverview) === JSON.stringify(payload) ? currentOverview : payload,
-    );
-    markApiSuccess();
-    setError("");
-    setSelectedProjectName((currentName) => {
-      if (currentName && pendingProjectNames.current.has(currentName)) return currentName;
-      const current = payload.projects.find((project) => project.name === currentName);
-      return current?.name || "";
-    });
-  }, [markApiSuccess]);
+  const applyOverview = useCallback(
+    (payload: Overview) => {
+      setOverview((currentOverview) =>
+        currentOverview && JSON.stringify(currentOverview) === JSON.stringify(payload) ? currentOverview : payload,
+      );
+      markApiSuccess();
+      setError("");
+      setSelectedProjectName((currentName) => {
+        if (currentName && pendingProjectNames.current.has(currentName)) return currentName;
+        const current = payload.projects.find((project) => project.name === currentName);
+        return current?.name || "";
+      });
+    },
+    [markApiSuccess],
+  );
 
   const refreshOverview = useCallback(async () => {
     if (overviewRefreshInFlight.current) return;
@@ -495,7 +526,13 @@ export default function Home() {
       applyOverview(payload);
     } catch (err) {
       markApiFailure(err);
-      setError(!initializingRef.current && !(err instanceof ApiUnavailableError) ? err instanceof Error ? err.message : "Impossible de charger l'overview." : "");
+      setError(
+        !initializingRef.current && !(err instanceof ApiUnavailableError)
+          ? err instanceof Error
+            ? err.message
+            : "Impossible de charger l'overview."
+          : "",
+      );
     } finally {
       overviewRefreshInFlight.current = false;
     }
@@ -535,8 +572,14 @@ export default function Home() {
     setSettingsDraft(fallbackManagerSettings(settings, overview, systemStatus));
     setSettingsOpen(true);
     setStoredRikaCredentials(null);
-    window.sdkDesktop?.rikaCredentials().then(setStoredRikaCredentials).catch(() => setStoredRikaCredentials(null));
-    window.sdkDesktop?.gitlabStatus().then(setGitlabStatus).catch(() => setGitlabStatus(null));
+    window.sdkDesktop
+      ?.rikaCredentials()
+      .then(setStoredRikaCredentials)
+      .catch(() => setStoredRikaCredentials(null));
+    window.sdkDesktop
+      ?.gitlabStatus()
+      .then(setGitlabStatus)
+      .catch(() => setGitlabStatus(null));
     void loadSettings();
     void loadSshKeys();
     void loadManagerErrors();
@@ -582,27 +625,30 @@ export default function Home() {
     }
   }, [pushToast]);
 
-  const refreshJobs = useCallback(async (detailJobId?: number | null) => {
-    if (jobsRefreshInFlight.current) return;
-    jobsRefreshInFlight.current = true;
-    try {
-      const requestedJobId = detailJobId ?? selectedJobIdRef.current;
-      const knownOutput = requestedJobId ? jobOutputCache.current.get(requestedJobId) : undefined;
-      const params = new URLSearchParams();
-      if (requestedJobId) params.set("detail", String(requestedJobId));
-      if (requestedJobId && knownOutput?.total) params.set("output_from", String(knownOutput.total));
-      const query = params.size ? `?${params}` : "";
-      const payload = await api<{ jobs: Job[] }>(`/api/jobs${query}`);
-      applyJobs(payload.jobs);
-      markApiSuccess();
-      setSelectedJobId((currentId) => currentId ?? payload.jobs[0]?.id ?? null);
-    } catch (err) {
-      markApiFailure(err);
-      // Jobs polling should not break the whole screen.
-    } finally {
-      jobsRefreshInFlight.current = false;
-    }
-  }, [applyJobs, markApiFailure, markApiSuccess]);
+  const refreshJobs = useCallback(
+    async (detailJobId?: number | null) => {
+      if (jobsRefreshInFlight.current) return;
+      jobsRefreshInFlight.current = true;
+      try {
+        const requestedJobId = detailJobId ?? selectedJobIdRef.current;
+        const knownOutput = requestedJobId ? jobOutputCache.current.get(requestedJobId) : undefined;
+        const params = new URLSearchParams();
+        if (requestedJobId) params.set("detail", String(requestedJobId));
+        if (requestedJobId && knownOutput?.total) params.set("output_from", String(knownOutput.total));
+        const query = params.size ? `?${params}` : "";
+        const payload = await api<{ jobs: Job[] }>(`/api/jobs${query}`);
+        applyJobs(payload.jobs);
+        markApiSuccess();
+        setSelectedJobId((currentId) => currentId ?? payload.jobs[0]?.id ?? null);
+      } catch (err) {
+        markApiFailure(err);
+        // Jobs polling should not break the whole screen.
+      } finally {
+        jobsRefreshInFlight.current = false;
+      }
+    },
+    [applyJobs, markApiFailure, markApiSuccess],
+  );
 
   useEffect(() => {
     selectedJobIdRef.current = selectedJobId;
@@ -671,7 +717,9 @@ export default function Home() {
     void configureRuntimeApiBase()
       .then(initializeApplication)
       .catch((err) => {
-        setInitializationError(err instanceof Error ? err.message : "Impossible de déterminer le port du gestionnaire.");
+        setInitializationError(
+          err instanceof Error ? err.message : "Impossible de déterminer le port du gestionnaire.",
+        );
         setInitializationMessage("Le gestionnaire n’est pas encore prêt.");
       });
     return () => {
@@ -687,7 +735,8 @@ export default function Home() {
       !settings ||
       settings.onboarding_completed ||
       overview.projects.length > 0
-    ) return;
+    )
+      return;
     onboardingPrompted.current = true;
     setOnboardingOpen(true);
     void loadCreationPrerequisites();
@@ -698,7 +747,10 @@ export default function Home() {
   useEffect(() => {
     const bridge = desktopBridge();
     if (initializing || !bridge?.wslStatus) return;
-    bridge.wslStatus().then(setWslStatus).catch(() => setWslStatus(null));
+    bridge
+      .wslStatus()
+      .then(setWslStatus)
+      .catch(() => setWslStatus(null));
   }, [initializing]);
 
   // Le repli sur le backend Windows se décide au démarrage : l'interface dit pourquoi le poste
@@ -706,7 +758,8 @@ export default function Home() {
   useEffect(() => {
     const bridge = desktopBridge();
     if (initializing || !bridge?.backendMode) return;
-    bridge.backendMode()
+    bridge
+      .backendMode()
       .then((mode) => setDegradedBackendReason(mode?.degradedReason || ""))
       .catch(() => setDegradedBackendReason(""));
   }, [initializing]);
@@ -727,10 +780,12 @@ export default function Home() {
       setPendingCreatedProjectName("");
       return;
     }
-    const job = jobs.find((item) => item.project === pendingCreatedProjectName && item.title.startsWith("Créer le projet "));
+    const job = jobs.find(
+      (item) => item.project === pendingCreatedProjectName && item.title.startsWith("Créer le projet "),
+    );
     if (job?.status !== "error") return;
     pendingProjectNames.current.delete(pendingCreatedProjectName);
-    setSelectedProjectName((currentName) => currentName === pendingCreatedProjectName ? "" : currentName);
+    setSelectedProjectName((currentName) => (currentName === pendingCreatedProjectName ? "" : currentName));
     setPendingCreatedProjectName("");
   }, [jobs, overview, pendingCreatedProjectName]);
 
@@ -816,7 +871,9 @@ export default function Home() {
     const remembered = rememberedDatabases.current[selectedProject.name];
     const sameProject = databaseOwner.current === selectedProject.name;
     databaseOwner.current = selectedProject.name;
-    setSelectedDb((current) => databaseToKeep(selectedProject.databases, sameProject ? current : remembered || "", remembered));
+    setSelectedDb((current) =>
+      databaseToKeep(selectedProject.databases, sameProject ? current : remembered || "", remembered),
+    );
   }, [selectedProject]);
 
   useEffect(() => stopLiveLogStream, [stopLiveLogStream]);
@@ -845,7 +902,10 @@ export default function Home() {
       setExternalLogView(null);
       enableLogAutoFollow();
       if (result.job.status === "queued") {
-        pushToast("info", `Action en attente : ${result.job.title}${result.job.waiting_for ? ` (${result.job.waiting_for.toLowerCase()})` : ""}. Elle démarrera automatiquement.`);
+        pushToast(
+          "info",
+          `Action en attente : ${result.job.title}${result.job.waiting_for ? ` (${result.job.waiting_for.toLowerCase()})` : ""}. Elle démarrera automatiquement.`,
+        );
       } else {
         pushToast("success", `Action lancée : ${result.job.title}`);
       }
@@ -864,7 +924,9 @@ export default function Home() {
     setLoadingSocleCatalog(true);
     try {
       const params = new URLSearchParams(canUseDb ? { db: selectedDb } : {});
-      setSocleCatalog(await api<SocleCatalog>(`/api/projects/${encodeURIComponent(selectedProject.name)}/socle?${params}`));
+      setSocleCatalog(
+        await api<SocleCatalog>(`/api/projects/${encodeURIComponent(selectedProject.name)}/socle?${params}`),
+      );
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : "Impossible de charger le catalogue d’applications.");
     } finally {
@@ -909,7 +971,10 @@ export default function Home() {
           schedule(refreshSystemStatus, 3000);
           return;
         } catch (nativeError) {
-          pushToast("error", nativeError instanceof Error ? nativeError.message : "Impossible d'ouvrir Docker Desktop.");
+          pushToast(
+            "error",
+            nativeError instanceof Error ? nativeError.message : "Impossible d'ouvrir Docker Desktop.",
+          );
           return;
         }
       }
@@ -954,7 +1019,7 @@ export default function Home() {
       pushToast("error", "Installe et démarre Docker avant d'installer Traefik.");
       return;
     }
-    const prerequisites = creationPrerequisites || await loadCreationPrerequisites();
+    const prerequisites = creationPrerequisites || (await loadCreationPrerequisites());
     if (!prerequisites?.git_available) {
       pushToast("error", "Installe Git avant d'installer Traefik.");
       return;
@@ -998,11 +1063,18 @@ export default function Home() {
     try {
       const payload = await api<{ settings: ManagerSettings }>("/api/settings", {
         method: "POST",
-        body: JSON.stringify({ interface_layout: "refined", sticky_header: true, beta_interface_banner_dismissed: true }),
+        body: JSON.stringify({
+          interface_layout: "refined",
+          sticky_header: true,
+          beta_interface_banner_dismissed: true,
+        }),
       });
       setSettings(payload.settings);
       setSettingsDraft(payload.settings);
-      pushToast("success", "Nouvelle interface activée. Retour à l’interface classique possible dans Paramètres, section Apparence.");
+      pushToast(
+        "success",
+        "Nouvelle interface activée. Retour à l’interface classique possible dans Paramètres, section Apparence.",
+      );
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : "Impossible de changer d’interface.");
     }
@@ -1125,7 +1197,10 @@ export default function Home() {
       return "";
     }
     if (!canUseDb) {
-      pushToast("error", `Sélectionne une base Odoo avant de lancer ${action}. La base technique postgres n'est pas utilisable ici.`);
+      pushToast(
+        "error",
+        `Sélectionne une base Odoo avant de lancer ${action}. La base technique postgres n'est pas utilisable ici.`,
+      );
       return "";
     }
     return selectedDb;
@@ -1142,12 +1217,18 @@ export default function Home() {
     setUpdateScope(detectedImportedModules.length ? "imported" : "all");
     setCheckingUpdatePrerequisites(true);
     try {
-      const diagnostics = await api<ProjectDiagnostics>(`/api/projects/${encodeURIComponent(selectedProject.name)}/diagnostics`);
+      const diagnostics = await api<ProjectDiagnostics>(
+        `/api/projects/${encodeURIComponent(selectedProject.name)}/diagnostics`,
+      );
       const database = diagnostics.databases?.find((item) => item.name === db);
       setUpdateFilestoreStatus(database?.filestore || null);
       setUpdatePendingModules(
         database?.pending_modules ||
-        (database?.pending_missing_modules || []).map((name) => ({ name, state: "en attente", code_available: false })),
+          (database?.pending_missing_modules || []).map((name) => ({
+            name,
+            state: "en attente",
+            code_available: false,
+          })),
       );
       setUpdateLocalExcludedModules(database?.local_excluded_modules || database?.ignored_missing_modules || []);
     } catch (err) {
@@ -1185,7 +1266,9 @@ export default function Home() {
       pushToast("error", "Le suivi en direct des logs n'est pas disponible dans cet environnement.");
       return;
     }
-    const source = new EventSource(`${API_BASE}/api/projects/${encodeURIComponent(projectName)}/logs/stream${raw ? "?raw=1" : ""}`);
+    const source = new EventSource(
+      `${API_BASE}/api/projects/${encodeURIComponent(projectName)}/logs/stream${raw ? "?raw=1" : ""}`,
+    );
     logStreamRef.current = source;
     source.addEventListener("log", (event) => {
       let line = "";
@@ -1230,7 +1313,9 @@ export default function Home() {
   }
 
   function requestUninstall(moduleNames: string[]) {
-    const installed = moduleNames.filter((name) => modules.find((module) => module.name === name)?.state === "installed");
+    const installed = moduleNames.filter(
+      (name) => modules.find((module) => module.name === name)?.state === "installed",
+    );
     if (!installed.length) {
       pushToast("error", "Sélectionne au moins un module installé.");
       return;
@@ -1240,7 +1325,9 @@ export default function Home() {
   }
 
   function requestTranslationReset(moduleNames: string[]) {
-    const installed = moduleNames.filter((name) => modules.find((module) => module.name === name)?.state === "installed");
+    const installed = moduleNames.filter(
+      (name) => modules.find((module) => module.name === name)?.state === "installed",
+    );
     if (!installed.length) {
       pushToast("error", "Sélectionne au moins un module installé.");
       return;
@@ -1326,10 +1413,7 @@ export default function Home() {
     setDeleteCodeDialogOpen(true);
   }
 
-  async function restoreDatabaseBackup(
-    payload: RestoreDatabasePayload,
-    onProgress: (progress: number) => void,
-  ) {
+  async function restoreDatabaseBackup(payload: RestoreDatabasePayload, onProgress: (progress: number) => void) {
     setLoading(true);
     void requestTaskNotificationPermission().catch(() => {
       // The in-app completion toast remains available if system notifications are refused.
@@ -1417,13 +1501,17 @@ export default function Home() {
     executeDatabaseAction(pendingDatabaseAction.action);
     // executeDatabaseAction est recréée à chaque rendu et lit la sélection courante.
   }, [pendingDatabaseAction, selectedDb]);
-  const repositoryInspectionKey = repositoryOpen && repositoryUrl.trim() && !repositoryUrlError && repositoryBranch.trim()
-    ? `${selectedProject?.name || ""}|${repositoryUrl.trim()}|${repositoryBranch.trim()}`
-    : "";
+  const repositoryInspectionKey =
+    repositoryOpen && repositoryUrl.trim() && !repositoryUrlError && repositoryBranch.trim()
+      ? `${selectedProject?.name || ""}|${repositoryUrl.trim()}|${repositoryBranch.trim()}`
+      : "";
   const soclePlanKey = socleDialogOpen && canUseDb ? soclePresetsToInstall.join(",") : "";
   const scopedExternalLogView = externalLogView?.project === selectedProject?.name ? externalLogView : null;
-  const outputContent = scopedExternalLogView?.content || selectedJob?.output || selectedJob?.lines?.join("\n") || "Aucune sortie.";
-  const outputSource = scopedExternalLogView ? `external:${scopedExternalLogView.title}` : `job:${selectedJob?.id || "none"}`;
+  const outputContent =
+    scopedExternalLogView?.content || selectedJob?.output || selectedJob?.lines?.join("\n") || "Aucune sortie.";
+  const outputSource = scopedExternalLogView
+    ? `external:${scopedExternalLogView.title}`
+    : `job:${selectedJob?.id || "none"}`;
 
   useEffect(() => {
     setLogDescriptionExpanded(false);
@@ -1437,7 +1525,13 @@ export default function Home() {
   useEffect(() => {
     const previous = previousSelectedJobRef.current;
     const current = { id: selectedJob?.id ?? null, status: selectedJob?.status ?? null };
-    if (previous.id === current.id && previous.status && isJobUnfinished({ status: previous.status }) && current.status && !isJobUnfinished({ status: current.status })) {
+    if (
+      previous.id === current.id &&
+      previous.status &&
+      isJobUnfinished({ status: previous.status }) &&
+      current.status &&
+      !isJobUnfinished({ status: current.status })
+    ) {
       setRawOutputVisible(true);
     }
     previousSelectedJobRef.current = current;
@@ -1500,7 +1594,6 @@ export default function Home() {
     );
   }
 
-
   const moduleSelectionBarProps = {
     selectedCount: selectedModuleList.length,
     installableModules: selectedInstallableModuleList,
@@ -1512,19 +1605,24 @@ export default function Home() {
     loading,
     onSelectAllFiltered: () => toggleFilteredModules(true),
     onClearSelection: () => setSelectedModules(new Set()),
-    onInstall: (names: string[]) => void createJob("install_module", { project: selectedProject?.name, db: selectedDb, modules: names.join(",") }),
-    onUpdate: (names: string[]) => void createJob("update_module", { project: selectedProject?.name, db: selectedDb, modules: names.join(",") }),
+    onInstall: (names: string[]) =>
+      void createJob("install_module", { project: selectedProject?.name, db: selectedDb, modules: names.join(",") }),
+    onUpdate: (names: string[]) =>
+      void createJob("update_module", { project: selectedProject?.name, db: selectedDb, modules: names.join(",") }),
     onUninstall: requestUninstall,
     onResetTranslations: requestTranslationReset,
     onDeleteCode: requestDeleteCode,
   } satisfies ModuleSelectionBarProps;
 
-
   const showFloatingModuleActions =
     activeTab === "modules" && selectedModuleList.length > 0 && moduleSelectionBannerHidden;
 
   // Le ref suit la barre en place : quand elle sort de l'écran, sa copie flottante prend le relais.
-  const moduleSelectionBlock = <div ref={setModuleSelectionBanner}><ModuleSelectionBar {...moduleSelectionBarProps} /></div>;
+  const moduleSelectionBlock = (
+    <div ref={setModuleSelectionBanner}>
+      <ModuleSelectionBar {...moduleSelectionBarProps} />
+    </div>
+  );
 
   return (
     <main className="sdk-shell min-h-screen overflow-x-clip">
@@ -1644,9 +1742,7 @@ export default function Home() {
                 switchToRefinedInterface={switchToRefinedInterface}
               />
             )}
-            {runningJobs.length > 0 && (
-              <RunningJobsBanner onFollowJob={followJob} runningJobs={runningJobs} />
-            )}
+            {runningJobs.length > 0 && <RunningJobsBanner onFollowJob={followJob} runningJobs={runningJobs} />}
 
             {showWelcome ? (
               <WelcomeScreen
@@ -1656,7 +1752,11 @@ export default function Home() {
                   ready: Boolean(systemStatus?.docker.running),
                   message: systemStatus?.docker.message || "Vérification en cours…",
                 }}
-                traefik={systemStatus?.traefik ? { ready: systemStatus.traefik.running, message: systemStatus.traefik.message } : null}
+                traefik={
+                  systemStatus?.traefik
+                    ? { ready: systemStatus.traefik.running, message: systemStatus.traefik.message }
+                    : null
+                }
                 onCreateProject={openCreateProjectDialog}
                 onOpenSettings={openSettingsDialog}
                 onRefresh={refreshAllViews}
@@ -1678,52 +1778,52 @@ export default function Home() {
                   )}
                   style={stickyHeader ? { top: projectHeaderHeight } : undefined}
                 >
-                <TabsList
-                  className="grid w-full overflow-hidden transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none lg:w-fit"
-                  style={{
-                    gridTemplateColumns: ["bases", "modules", "logs", "actions"]
-                      .map((tab) => (projectTabVisible[tab] ? "minmax(0,1fr)" : "minmax(0,0fr)"))
-                      .join(" "),
-                  }}
-                >
-                  <TabsTrigger
-                    value="bases"
-                    disabled={!projectTabVisible.bases}
-                    className={cn(
-                      "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-                      !projectTabVisible.bases && "pointer-events-none -translate-x-1 opacity-0",
-                    )}
+                  <TabsList
+                    className="grid w-full overflow-hidden transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none lg:w-fit"
+                    style={{
+                      gridTemplateColumns: ["bases", "modules", "logs", "actions"]
+                        .map((tab) => (projectTabVisible[tab] ? "minmax(0,1fr)" : "minmax(0,0fr)"))
+                        .join(" "),
+                    }}
                   >
-                    <Database className="mr-1.5 h-4 w-4" />
-                    Bases
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="modules"
-                    disabled={!projectTabVisible.modules}
-                    className={cn(
-                      "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-                      !projectTabVisible.modules && "pointer-events-none -translate-x-1 opacity-0",
-                    )}
-                  >
-                    <Boxes className="mr-1.5 h-4 w-4" />
-                    Modules
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="logs"
-                    disabled={!projectTabVisible.logs}
-                    className={cn(
-                      "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-                      !projectTabVisible.logs && "pointer-events-none -translate-x-1 opacity-0",
-                    )}
-                  >
-                    <Logs className="mr-1.5 h-4 w-4" />
-                    {refinedInterface ? "Activité" : "Logs"}
-                  </TabsTrigger>
-                  <TabsTrigger value="actions">
-                    <Settings className="mr-1.5 h-4 w-4" />
-                    {refinedInterface ? "Réglages" : "Actions"}
-                  </TabsTrigger>
-                </TabsList>
+                    <TabsTrigger
+                      value="bases"
+                      disabled={!projectTabVisible.bases}
+                      className={cn(
+                        "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+                        !projectTabVisible.bases && "pointer-events-none -translate-x-1 opacity-0",
+                      )}
+                    >
+                      <Database className="mr-1.5 h-4 w-4" />
+                      Bases
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="modules"
+                      disabled={!projectTabVisible.modules}
+                      className={cn(
+                        "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+                        !projectTabVisible.modules && "pointer-events-none -translate-x-1 opacity-0",
+                      )}
+                    >
+                      <Boxes className="mr-1.5 h-4 w-4" />
+                      Modules
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="logs"
+                      disabled={!projectTabVisible.logs}
+                      className={cn(
+                        "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+                        !projectTabVisible.logs && "pointer-events-none -translate-x-1 opacity-0",
+                      )}
+                    >
+                      <Logs className="mr-1.5 h-4 w-4" />
+                      {refinedInterface ? "Activité" : "Logs"}
+                    </TabsTrigger>
+                    <TabsTrigger value="actions">
+                      <Settings className="mr-1.5 h-4 w-4" />
+                      {refinedInterface ? "Réglages" : "Actions"}
+                    </TabsTrigger>
+                  </TabsList>
                 </div>
 
                 {selectedProjectOnline && (
@@ -1837,7 +1937,10 @@ export default function Home() {
           // Le backend en service est encore celui de Windows : l'application redémarre sur
           // l'environnement Linux, sauf si une action tourne, qu'un redémarrage interromprait.
           if (hasRunningJobs) {
-            pushToast("success", "Environnement Linux prêt. Redémarre l’application une fois les actions en cours terminées.");
+            pushToast(
+              "success",
+              "Environnement Linux prêt. Redémarre l’application une fois les actions en cours terminées.",
+            );
             return;
           }
           pushToast("success", "Environnement Linux prêt. Redémarrage de l’application…");
@@ -2054,7 +2157,8 @@ export default function Home() {
             db: selectedDb,
             master_pwd: masterPwd,
           });
-          if (job && selectedProject) droppedDatabase.current = { jobId: job.id, project: selectedProject.name, db: selectedDb };
+          if (job && selectedProject)
+            droppedDatabase.current = { jobId: job.id, project: selectedProject.name, db: selectedDb };
           if (job) setDropDbOpen(false);
         }}
       />

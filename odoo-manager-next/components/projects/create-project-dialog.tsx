@@ -34,13 +34,24 @@ export function PrerequisiteRow({
   return (
     <div className="flex min-w-0 flex-col gap-4 p-4 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-start gap-4">
-        <div className={cn("mt-0.5 rounded-md p-2", ready ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300")}>
+        <div
+          className={cn(
+            "mt-0.5 rounded-md p-2",
+            ready
+              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+              : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+          )}
+        >
           <Icon className="h-4 w-4" />
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2 font-medium">
             {title}
-            {ready ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <AlertTriangle className="h-4 w-4 text-amber-600" />}
+            {ready ? (
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            ) : (
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+            )}
           </div>
           <div className="mt-0.5 break-words text-xs leading-5 text-muted-foreground">{detail}</div>
         </div>
@@ -93,7 +104,8 @@ export function CreateProjectDialog({
     const bridge = window.sdkDesktop;
     if (!bridge) return;
     let cancelled = false;
-    bridge.rikaCredentials()
+    bridge
+      .rikaCredentials()
       .then((stored) => {
         if (cancelled) return;
         setCredentialStore(stored);
@@ -122,7 +134,8 @@ export function CreateProjectDialog({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    window.sdkDesktop?.gitlabStatus()
+    window.sdkDesktop
+      ?.gitlabStatus()
       .then((status) => {
         if (cancelled) return;
         setGitlabStatus(status);
@@ -173,9 +186,10 @@ export function CreateProjectDialog({
   const prerequisitesReady = Boolean(
     prerequisites?.workspace_ready && prerequisites.git_available && prerequisites.ssh_key_present,
   );
-  const sourceFieldsReady = sourceType === "standard"
-    || (sourceType === "gitlab" && Boolean(repositoryUrl.trim() && repositoryBranch.trim()))
-    || (sourceType === "rika" && Boolean(rikaInstance.trim() && rikaLogin.trim() && rikaPassword));
+  const sourceFieldsReady =
+    sourceType === "standard" ||
+    (sourceType === "gitlab" && Boolean(repositoryUrl.trim() && repositoryBranch.trim())) ||
+    (sourceType === "rika" && Boolean(rikaInstance.trim() && rikaLogin.trim() && rikaPassword));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -199,15 +213,21 @@ export function CreateProjectDialog({
                 placeholder="CLIENT_V19"
                 autoFocus
               />
-              <span className="min-h-4 text-xs font-normal text-muted-foreground">Lettres, chiffres, tirets, points et underscores.</span>
+              <span className="min-h-4 text-xs font-normal text-muted-foreground">
+                Lettres, chiffres, tirets, points et underscores.
+              </span>
             </div>
             <div className="grid content-start gap-1.5 text-sm font-medium">
               <label htmlFor="new-project-version">Version Odoo</label>
               <Select value={version} onValueChange={setVersion} disabled={sourceType === "rika"}>
-                <SelectTrigger id="new-project-version"><SelectValue /></SelectTrigger>
+                <SelectTrigger id="new-project-version">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   {(prerequisites?.supported_versions || ["15.0", "16.0", "17.0", "18.0", "19.0"]).map((item) => (
-                    <SelectItem key={item} value={item}>Odoo {item}</SelectItem>
+                    <SelectItem key={item} value={item}>
+                      Odoo {item}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -221,34 +241,31 @@ export function CreateProjectDialog({
             <legend className="mb-1 text-sm font-medium">Source du projet</legend>
             <div className="grid gap-2 sm:grid-cols-3">
               <InteractiveCard
-                className={cn(
-                  "min-h-20 p-3",
-                  sourceType === "standard" && "border-primary bg-selected",
-                )}
+                className={cn("min-h-20 p-3", sourceType === "standard" && "border-primary bg-selected")}
                 onClick={() => setSourceType("standard")}
               >
                 <span className="block font-medium">Odoo standard</span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">Odoo Community et Enterprise Sudokeys.</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  Odoo Community et Enterprise Sudokeys.
+                </span>
               </InteractiveCard>
               <InteractiveCard
-                className={cn(
-                  "min-h-20 p-3",
-                  sourceType === "gitlab" && "border-primary bg-selected",
-                )}
+                className={cn("min-h-20 p-3", sourceType === "gitlab" && "border-primary bg-selected")}
                 onClick={() => setSourceType("gitlab")}
               >
                 <span className="block font-medium">Dépôt d’addons GitLab</span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">Ajoute le dépôt client au socle standard.</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  Ajoute le dépôt client au socle standard.
+                </span>
               </InteractiveCard>
               <InteractiveCard
-                className={cn(
-                  "min-h-20 p-3",
-                  sourceType === "rika" && "border-primary bg-selected",
-                )}
+                className={cn("min-h-20 p-3", sourceType === "rika" && "border-primary bg-selected")}
                 onClick={() => setSourceType("rika")}
               >
                 <span className="block font-medium">Copie depuis RIKA</span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">Récupère une instance et détecte sa version Odoo.</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  Récupère une instance et détecte sa version Odoo.
+                </span>
               </InteractiveCard>
             </div>
           </fieldset>
@@ -285,7 +302,11 @@ export function CreateProjectDialog({
                   </label>
                   <label className="grid gap-1.5 text-sm font-medium">
                     Branche
-                    <Input value={repositoryBranch} onChange={(event) => setRepositoryBranch(event.target.value)} placeholder="master" />
+                    <Input
+                      value={repositoryBranch}
+                      onChange={(event) => setRepositoryBranch(event.target.value)}
+                      placeholder="master"
+                    />
                   </label>
                 </div>
               )}
@@ -342,12 +363,19 @@ export function CreateProjectDialog({
                     <span>Mémoriser aussi le mot de passe</span>
                   </label>
                   <p className="text-xs leading-5 text-muted-foreground">
-                    Chiffrés par le coffre-fort du système (Trousseau macOS, DPAPI Windows, trousseau Linux) et enregistrés
-                    uniquement si la création démarre. Décocher puis créer efface les identifiants mémorisés.
+                    Chiffrés par le coffre-fort du système (Trousseau macOS, DPAPI Windows, trousseau Linux) et
+                    enregistrés uniquement si la création démarre. Décocher puis créer efface les identifiants
+                    mémorisés.
                   </p>
-                  {credentialStore.reason && <p className="text-xs text-amber-700 dark:text-amber-300">{credentialStore.reason}</p>}
+                  {credentialStore.reason && (
+                    <p className="text-xs text-amber-700 dark:text-amber-300">{credentialStore.reason}</p>
+                  )}
                   {hasStoredRikaCredentials && (
-                    <button type="button" className="justify-self-start text-xs font-medium text-primary underline-offset-2 hover:underline" onClick={() => void forgetRikaCredentials()}>
+                    <button
+                      type="button"
+                      className="justify-self-start text-xs font-medium text-primary underline-offset-2 hover:underline"
+                      onClick={() => void forgetRikaCredentials()}
+                    >
                       Oublier les identifiants enregistrés
                     </button>
                   )}
@@ -393,7 +421,9 @@ export function CreateProjectDialog({
           )}
 
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>Annuler</Button>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Annuler
+            </Button>
             <Button
               disabled={loading || !name.trim() || !prerequisitesReady || !sourceFieldsReady}
               onClick={() => void submitProject()}

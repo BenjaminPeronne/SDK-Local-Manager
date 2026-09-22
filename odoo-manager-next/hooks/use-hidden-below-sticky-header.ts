@@ -15,11 +15,11 @@ export function useHiddenBelowStickyHeader(stickyHeader: boolean, headerHeight: 
       setVisible(true);
       return;
     }
-    const hiddenTop = stickyHeader && window.matchMedia("(min-width: 1024px)").matches ? headerHeight + (tabsHeight || 72) : 0;
-    const observer = new IntersectionObserver(
-      ([entry]) => setVisible(entry.isIntersecting),
-      { rootMargin: `-${hiddenTop}px 0px 0px 0px` },
-    );
+    const hiddenTop =
+      stickyHeader && window.matchMedia("(min-width: 1024px)").matches ? headerHeight + (tabsHeight || 72) : 0;
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), {
+      rootMargin: `-${hiddenTop}px 0px 0px 0px`,
+    });
     observer.observe(element);
     return () => observer.disconnect();
   }, [element, stickyHeader, headerHeight, tabsHeight]);

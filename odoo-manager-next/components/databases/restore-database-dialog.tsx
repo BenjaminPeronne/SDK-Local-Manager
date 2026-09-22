@@ -18,10 +18,7 @@ export function RestoreDatabaseDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   project?: Project;
-  onSubmit: (
-    payload: RestoreDatabasePayload,
-    onProgress: (progress: number) => void,
-  ) => Promise<boolean>;
+  onSubmit: (payload: RestoreDatabasePayload, onProgress: (progress: number) => void) => Promise<boolean>;
 }) {
   const [db, setDb] = useState("");
   const [masterPwd, setMasterPwd] = useState("odoo");
@@ -120,7 +117,8 @@ export function RestoreDatabaseDialog({
             <span>
               <span className="block font-medium">Neutraliser la base pour les tests</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">
-                Recommandé en local : désactive notamment les envois d’e-mails et les actions externes. La restauration est toujours déclarée comme une copie.
+                Recommandé en local : désactive notamment les envois d’e-mails et les actions externes. La restauration
+                est toujours déclarée comme une copie.
               </span>
             </span>
           </label>

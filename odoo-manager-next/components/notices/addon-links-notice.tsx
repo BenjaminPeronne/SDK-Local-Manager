@@ -13,12 +13,22 @@ type AddonLinksNoticeProps = {
   selectedProjectOnline: boolean;
 };
 
-export function AddonLinksNotice({ addonLinks, convertWslAddonLinks, loading, refreshAddonLinks, selectedProjectOnline }: AddonLinksNoticeProps) {
+export function AddonLinksNotice({
+  addonLinks,
+  convertWslAddonLinks,
+  loading,
+  refreshAddonLinks,
+  selectedProjectOnline,
+}: AddonLinksNoticeProps) {
   return (
     <Notice
       tone="warning"
       icon={AlertTriangle}
-      title={addonLinks.interrupted ? "Conversion des liens d’addons interrompue" : "Liens d’addons créés par une ancienne version"}
+      title={
+        addonLinks.interrupted
+          ? "Conversion des liens d’addons interrompue"
+          : "Liens d’addons créés par une ancienne version"
+      }
       actions={
         <>
           <Button

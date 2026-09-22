@@ -17,7 +17,16 @@ type TranslationResetDialogProps = {
   setPendingTranslationResetModules: Dispatch<SetStateAction<string[]>>;
 };
 
-export function TranslationResetDialog({ canUseDb, createJob, loading, pendingTranslationResetModules, selectedDatabaseOrNotify, selectedDb, selectedProject, setPendingTranslationResetModules }: TranslationResetDialogProps) {
+export function TranslationResetDialog({
+  canUseDb,
+  createJob,
+  loading,
+  pendingTranslationResetModules,
+  selectedDatabaseOrNotify,
+  selectedDb,
+  selectedProject,
+  setPendingTranslationResetModules,
+}: TranslationResetDialogProps) {
   async function confirmTranslationReset() {
     const db = selectedDatabaseOrNotify("la réinitialisation des traductions");
     if (!db || !selectedProject || !pendingTranslationResetModules.length) return;
@@ -40,8 +49,9 @@ export function TranslationResetDialog({ canUseDb, createJob, loading, pendingTr
         <DialogHeader>
           <DialogTitle>Réinitialiser les traductions</DialogTitle>
           <DialogDescription>
-            Les modules sont mis à jour sur {selectedDb || "la base sélectionnée"} avec <code className="text-xs">--i18n-overwrite</code> :
-            les traductions sont rechargées depuis les fichiers <code className="text-xs">.po</code> du code.
+            Les modules sont mis à jour sur {selectedDb || "la base sélectionnée"} avec{" "}
+            <code className="text-xs">--i18n-overwrite</code> : les traductions sont rechargées depuis les fichiers{" "}
+            <code className="text-xs">.po</code> du code.
           </DialogDescription>
         </DialogHeader>
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100">
@@ -53,7 +63,9 @@ export function TranslationResetDialog({ canUseDb, createJob, loading, pendingTr
           ))}
         </div>
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <Button variant="outline" onClick={() => setPendingTranslationResetModules([])}>Annuler</Button>
+          <Button variant="outline" onClick={() => setPendingTranslationResetModules([])}>
+            Annuler
+          </Button>
           <Button disabled={!canUseDb || loading} onClick={confirmTranslationReset}>
             <Languages className="h-4 w-4" />
             Réinitialiser ({pendingTranslationResetModules.length})
