@@ -69,7 +69,19 @@ class GitLabClient {
   status() {
     const reason = this.unavailableReason();
     const account = this.storedAccount();
-    return { available: !reason, reason, connected: Boolean(account), username: account?.username || '', url: this.baseUrl };
+    // Jeton présent mais indéchiffrable : sur macOS, un nouveau build signé ad hoc peut se voir
+    // refuser la clé du trousseau. Le dire, au lieu de faire disparaître GitLab de l'interface.
+    const unreadable = !reason && !account && fs.existsSync(this.file);
+    return {
+      available: !reason,
+      reason: unreadable
+        ? "Le jeton GitLab enregistré ne peut plus être lu : le trousseau du système en refuse l'accès à cette version de l'application. Reconnecte ton compte."
+        : reason,
+      connected: Boolean(account),
+      unreadable,
+      username: account?.username || '',
+      url: this.baseUrl,
+    };
   }
 
   async connect(token) {

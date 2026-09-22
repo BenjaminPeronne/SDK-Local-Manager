@@ -38,7 +38,7 @@ test('connects with a validated token stored encrypted, then disconnects', async
 
   const status = await gitlab.connect(`  ${TOKEN} `);
 
-  assert.deepEqual(status, { available: true, reason: '', connected: true, username: 'bperonne', url: 'https://gitlab.sudokeys.com' });
+  assert.deepEqual(status, { available: true, reason: '', connected: true, unreadable: false, username: 'bperonne', url: 'https://gitlab.sudokeys.com' });
   assert.equal(calls[0].url.origin, 'https://gitlab.sudokeys.com');
   assert.equal(calls[0].headers['PRIVATE-TOKEN'], TOKEN);
   assert.equal(calls[0].redirect, 'error');
@@ -85,4 +85,28 @@ test('refuses API calls while disconnected and invalid identifiers', async t => 
   await gitlab.connect(TOKEN);
   await assert.rejects(gitlab.listRefs('42/../../user', ''), /Dépôt GitLab invalide/);
   await assert.rejects(gitlab.searchProjects('x'.repeat(101)), /Recherche GitLab invalide/);
+});
+
+test('a stored token that can no longer be decrypted is reported, not silently dropped', async t => {
+  // Cas vécu sur macOS : un nouveau build signé ad hoc se voit refuser la clé du trousseau. Le
+  // jeton restait sur le disque, GitLab disparaissait de l'interface sans aucune explication.
+  const { directory, gitlab } = client(t, { '/api/v4/user': [200, { username: 'bperonne' }] });
+  await gitlab.connect(TOKEN);
+  gitlab.safeStorage = { ...safeStorage(), decryptString: () => { throw new Error('Keychain access denied'); } };
+
+  const status = gitlab.status();
+
+  assert.equal(status.connected, false);
+  assert.equal(status.unreadable, true);
+  assert.equal(status.available, true);
+  assert.match(status.reason, /Reconnecte ton compte/);
+  assert.ok(fs.existsSync(path.join(directory, TOKEN_FILE)), 'le fichier n’est jamais supprimé en silence');
+});
+
+test('an account never connected is simply disconnected, without alarming message', t => {
+  const { gitlab } = client(t, {});
+  const status = gitlab.status();
+  assert.equal(status.connected, false);
+  assert.equal(status.unreadable, false);
+  assert.equal(status.reason, '');
 });

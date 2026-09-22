@@ -1,6 +1,6 @@
 "use client";
 
-import type { GitLabProject, GitLabRefs, GitLabStatus, StoredRikaCredentials } from "@/lib/desktop";
+import type { GitLabStatus, StoredRikaCredentials } from "@/lib/desktop";
 
 import {
   Activity,
@@ -59,11 +59,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { GitLabRepositoryPicker, RepositorySourceToggle, defaultRepositorySource, type RepositorySource } from "@/components/gitlab-repository-picker";
 import { WslSetupDialog } from "@/components/wsl-setup";
 import { desktopBridge, desktopErrorMessage, type WslStatus } from "@/lib/desktop";
 import { isWslSetupPending } from "@/lib/wsl-setup";
 import { databaseToKeep, readRememberedDatabases, writeRememberedDatabases } from "@/lib/database-selection";
-import { handleListKeys } from "@/lib/list-navigation";
 import { cn } from "@/lib/utils";
 import { mergeIncrementalJobOutput, type JobOutputCache } from "@/lib/job-output";
 import appIcon from "./icon.png";
@@ -1463,50 +1463,7 @@ export default function Home() {
   const [gitlabStatus, setGitlabStatus] = useState<GitLabStatus | null>(null);
   const [gitlabTokenDraft, setGitlabTokenDraft] = useState("");
   const [gitlabConnecting, setGitlabConnecting] = useState(false);
-  const [repositorySource, setRepositorySource] = useState<"ssh" | "gitlab">("ssh");
-  const [gitlabSearch, setGitlabSearch] = useState("");
-  const [gitlabProjects, setGitlabProjects] = useState<GitLabProject[] | null>(null);
-  const [gitlabProject, setGitlabProject] = useState<GitLabProject | null>(null);
-  const [gitlabRefSearch, setGitlabRefSearch] = useState("");
-  const [gitlabRefs, setGitlabRefs] = useState<GitLabRefs | null>(null);
-  // Ligne active au clavier dans les listes GitLab : flèches pour parcourir, Entrée pour choisir,
-  // sans quitter le champ de recherche.
-  const [gitlabActiveIndex, setGitlabActiveIndex] = useState(0);
-  const [gitlabRefActiveIndex, setGitlabRefActiveIndex] = useState(0);
-  const gitlabRefOptions = useMemo(
-    () =>
-      gitlabRefs
-        ? [
-            ...[...gitlabRefs.branches]
-              .sort((left, right) => Number(right.default) - Number(left.default))
-              .map((branch) => ({ name: branch.name, kind: branch.default ? "Branche par défaut" : "Branche" })),
-            ...gitlabRefs.tags.map((tag) => ({ name: tag, kind: "Tag" })),
-          ]
-        : [],
-    [gitlabRefs],
-  );
-
-  // Nouvelle liste : la première ligne est active ; pour les branches, celle déjà choisie.
-  useEffect(() => setGitlabActiveIndex(0), [gitlabProjects]);
-  useEffect(() => {
-    const selected = gitlabRefOptions.findIndex((ref) => ref.name === repositoryBranch);
-    setGitlabRefActiveIndex(selected >= 0 ? selected : 0);
-  }, [gitlabRefOptions, repositoryBranch]);
-  // La ligne active reste visible quand on la déplace au clavier dans une liste qui défile.
-  useEffect(() => {
-    document.getElementById(`gitlab-project-${gitlabActiveIndex}`)?.scrollIntoView({ block: "nearest" });
-  }, [gitlabActiveIndex]);
-  useEffect(() => {
-    document.getElementById(`gitlab-ref-${gitlabRefActiveIndex}`)?.scrollIntoView({ block: "nearest" });
-  }, [gitlabRefActiveIndex]);
-
-  function chooseGitlabProject(project: GitLabProject) {
-    setGitlabProject(project);
-    setGitlabRefSearch("");
-    setRepositoryUrl(project.sshUrl);
-    setRepositoryBranch("");
-  }
-  const [gitlabError, setGitlabError] = useState("");
+  const [repositorySource, setRepositorySource] = useState<RepositorySource>("ssh");
   const repositoryUrlError = moduleRepositoryUrlError(repositoryUrl);
   const [zipDialogOpen, setZipDialogOpen] = useState(false);
   const [createDbOpen, setCreateDbOpen] = useState(false);
@@ -2044,6 +2001,12 @@ export default function Home() {
     void loadSshKeys();
     void loadManagerErrors();
   }, [loadSettings, overview, settings, systemStatus]);
+
+  // Raccourci vers les comptes : « Connecter GitLab » y mène directement.
+  const openAccountSettings = useCallback(() => {
+    setSettingsSection("accounts");
+    openSettingsDialog();
+  }, [openSettingsDialog]);
 
   const loadCreationPrerequisites = useCallback(async () => {
     setLoadingCreationPrerequisites(true);
@@ -3494,69 +3457,14 @@ export default function Home() {
     setRepositorySource("ssh");
     // Proposition par défaut : la branche qui porte le nom de la version Odoo du projet.
     setRepositoryBranch((current) => current || selectedProject?.odoo_version || "");
-    setGitlabProject(null);
-    setGitlabRefs(null);
-    setGitlabError("");
-    window.sdkDesktop?.gitlabStatus().then(setGitlabStatus).catch(() => setGitlabStatus(null));
+    // Compte GitLab connecté : la recherche remplace la saisie d'une URL.
+    window.sdkDesktop?.gitlabStatus()
+      .then((status) => {
+        setGitlabStatus(status);
+        setRepositorySource(defaultRepositorySource(status));
+      })
+      .catch(() => setGitlabStatus(null));
   }, [repositoryOpen]);
-
-  useEffect(() => {
-    const bridge = window.sdkDesktop;
-    if (!repositoryOpen || repositorySource !== "gitlab" || gitlabProject || !bridge) return;
-    let cancelled = false;
-    setGitlabProjects(null);
-    const timer = window.setTimeout(() => {
-      bridge.gitlabProjects(gitlabSearch)
-        .then((projects) => {
-          if (!cancelled) {
-            setGitlabProjects(projects);
-            setGitlabError("");
-          }
-        })
-        .catch((err) => {
-          if (!cancelled) {
-            setGitlabProjects([]);
-            setGitlabError(desktopErrorMessage(err, "Recherche GitLab impossible."));
-          }
-        });
-    }, 350);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [repositoryOpen, repositorySource, gitlabProject, gitlabSearch]);
-
-  useEffect(() => {
-    const bridge = window.sdkDesktop;
-    if (!repositoryOpen || repositorySource !== "gitlab" || !gitlabProject || !bridge) return;
-    let cancelled = false;
-    setGitlabRefs(null);
-    const timer = window.setTimeout(() => {
-      bridge.gitlabRefs(gitlabProject.id, gitlabRefSearch)
-        .then((refs) => {
-          if (!cancelled) {
-            setGitlabRefs(refs);
-            setGitlabError("");
-          }
-        })
-        .catch((err) => {
-          if (!cancelled) {
-            setGitlabRefs({ branches: [], tags: [] });
-            setGitlabError(desktopErrorMessage(err, "Lecture des branches impossible."));
-          }
-        });
-    }, 300);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [repositoryOpen, repositorySource, gitlabProject, gitlabRefSearch]);
-
-  useEffect(() => {
-    const version = selectedProject?.odoo_version;
-    if (!gitlabRefs || repositoryBranch || !version) return;
-    if (gitlabRefs.branches.some((branch) => branch.name === version)) setRepositoryBranch(version);
-  }, [gitlabRefs]);
 
   useEffect(() => {
     if (!repositoryOpen) {
@@ -6077,6 +5985,10 @@ export default function Home() {
         loading={loading}
         onRefreshPrerequisites={loadCreationPrerequisites}
         onSubmit={requestProjectCreation}
+        onManageGitlab={() => {
+          setCreateProjectOpen(false);
+          openAccountSettings();
+        }}
       />
 
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
@@ -6850,167 +6762,24 @@ export default function Home() {
             <section className="space-y-3" aria-labelledby="repository-source-title">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 id="repository-source-title" className="text-sm font-semibold">Dépôt et branche</h3>
-                {gitlabStatus?.connected && (
-                  <div className="grid grid-cols-2 gap-1 rounded-md border bg-muted p-1" role="radiogroup" aria-label="Source du dépôt">
-                    {([["ssh", "Lien SSH"], ["gitlab", "Rechercher dans GitLab"]] as const).map(([value, label]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        role="radio"
-                        aria-checked={repositorySource === value}
-                        className={cn(
-                          "rounded px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          repositorySource === value
-                            ? "bg-card text-foreground shadow-sm ring-1 ring-primary/40"
-                            : "text-muted-foreground hover:bg-hover hover:text-foreground",
-                        )}
-                        onClick={() => setRepositorySource(value)}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <RepositorySourceToggle value={repositorySource} onChange={setRepositorySource} status={gitlabStatus} />
               </div>
-                {repositorySource === "gitlab" && gitlabStatus?.connected ? (
-                  <div className="space-y-3">
-                    {gitlabError && <p className="text-sm text-destructive">{gitlabError}</p>}
-                    {!gitlabProject ? (
-                      <div className="space-y-2">
-                        <div className="relative">
-                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                          <Input
-                            className="pl-9"
-                            value={gitlabSearch}
-                            onChange={(event) => setGitlabSearch(event.target.value)}
-                            onKeyDown={(event) =>
-                              handleListKeys(event, gitlabProjects?.length ?? 0, gitlabActiveIndex, setGitlabActiveIndex, (index) => {
-                                const project = gitlabProjects?.[index];
-                                if (project) chooseGitlabProject(project);
-                              })
-                            }
-                            placeholder="Nom du dépôt, par exemple protex"
-                            aria-label="Rechercher un dépôt GitLab"
-                            role="combobox"
-                            aria-expanded={Boolean(gitlabProjects?.length)}
-                            aria-controls="gitlab-projects"
-                            aria-activedescendant={gitlabProjects?.length ? `gitlab-project-${gitlabActiveIndex}` : undefined}
-                            autoFocus
-                          />
-                        </div>
-                        <div className="max-h-64 overflow-y-auto rounded-md border">
-                          {gitlabProjects === null ? (
-                            <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Recherche dans GitLab…</p>
-                          ) : gitlabProjects.length ? (
-                            <div className="divide-y" role="listbox" id="gitlab-projects" aria-label="Dépôts GitLab">
-                              {gitlabProjects.map((project, index) => (
-                                <button
-                                  key={project.id}
-                                  id={`gitlab-project-${index}`}
-                                  type="button"
-                                  role="option"
-                                  tabIndex={-1}
-                                  aria-selected={index === gitlabActiveIndex}
-                                  className={cn(
-                                    "flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-hover",
-                                    index === gitlabActiveIndex && "bg-hover ring-1 ring-inset ring-primary/40",
-                                  )}
-                                  onMouseMove={() => setGitlabActiveIndex(index)}
-                                  onClick={() => chooseGitlabProject(project)}
-                                >
-                                  <span className="min-w-0">
-                                    <span className="block truncate font-medium">{project.name}</span>
-                                    <span className="block truncate text-xs text-muted-foreground">{project.path}</span>
-                                  </span>
-                                  {project.defaultBranch && <Badge variant="outline" className="shrink-0">{project.defaultBranch}</Badge>}
-                                </button>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="p-3 text-sm text-muted-foreground">Aucun dépôt accessible ne correspond à cette recherche.</p>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <div className="flex min-w-0 items-center justify-between gap-3 rounded-md border bg-muted/35 p-3 text-sm">
-                          <span className="min-w-0">
-                            <span className="block truncate font-medium">{gitlabProject.name}</span>
-                            <span className="block truncate font-mono text-xs text-muted-foreground">{gitlabProject.sshUrl}</span>
-                          </span>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="shrink-0"
-                            onClick={() => {
-                              setGitlabProject(null);
-                              setGitlabRefs(null);
-                              setRepositoryUrl("");
-                              setRepositoryBranch("");
-                            }}
-                          >
-                            Changer
-                          </Button>
-                        </div>
-                        <div className="relative">
-                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                          <Input
-                            className="pl-9"
-                            value={gitlabRefSearch}
-                            onChange={(event) => setGitlabRefSearch(event.target.value)}
-                            onKeyDown={(event) =>
-                              handleListKeys(event, gitlabRefOptions.length, gitlabRefActiveIndex, setGitlabRefActiveIndex, (index) => {
-                                const ref = gitlabRefOptions[index];
-                                if (ref) setRepositoryBranch(ref.name);
-                              })
-                            }
-                            placeholder="Filtrer les branches et tags"
-                            aria-label="Filtrer les branches et tags"
-                            role="combobox"
-                            aria-expanded={gitlabRefOptions.length > 0}
-                            aria-controls="gitlab-refs"
-                            aria-activedescendant={gitlabRefOptions.length ? `gitlab-ref-${gitlabRefActiveIndex}` : undefined}
-                            autoFocus
-                          />
-                        </div>
-                        <div className="max-h-56 overflow-y-auto rounded-md border" role="listbox" id="gitlab-refs" aria-label="Branches et tags">
-                          {gitlabRefs === null ? (
-                            <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Lecture des branches…</p>
-                          ) : gitlabRefs.branches.length || gitlabRefs.tags.length ? (
-                            <div className="divide-y">
-                              {gitlabRefOptions.map((ref, index) => (
-                                <button
-                                  key={`${ref.kind}:${ref.name}`}
-                                  id={`gitlab-ref-${index}`}
-                                  type="button"
-                                  role="option"
-                                  tabIndex={-1}
-                                  aria-selected={repositoryBranch === ref.name}
-                                  className={cn(
-                                    "flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-hover",
-                                    index === gitlabRefActiveIndex && "bg-hover ring-1 ring-inset ring-primary/40",
-                                    repositoryBranch === ref.name && "bg-selected font-medium",
-                                  )}
-                                  onMouseMove={() => setGitlabRefActiveIndex(index)}
-                                  onClick={() => setRepositoryBranch(ref.name)}
-                                >
-                                  <span className="flex min-w-0 items-center gap-2">
-                                    {repositoryBranch === ref.name ? <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" /> : <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />}
-                                    <span className="truncate font-mono text-[13px]">{ref.name}</span>
-                                  </span>
-                                  <span className="shrink-0 text-xs text-muted-foreground">{ref.kind}</span>
-                                </button>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="p-3 text-sm text-muted-foreground">Aucune branche ni aucun tag ne correspond.</p>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-            ) : (
+              {repositorySource === "gitlab" && (gitlabStatus?.available || gitlabStatus?.unreadable) ? (
+                <GitLabRepositoryPicker
+                  status={gitlabStatus}
+                  url={repositoryUrl}
+                  branch={repositoryBranch}
+                  preferredBranches={selectedProject?.odoo_version ? [selectedProject.odoo_version] : []}
+                  onChange={({ url, branch }) => {
+                    setRepositoryUrl(url);
+                    setRepositoryBranch(branch);
+                  }}
+                  onManageAccount={() => {
+                    setRepositoryOpen(false);
+                    openAccountSettings();
+                  }}
+                />
+              ) : (
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
                   <label className="grid gap-1.5 text-sm font-medium">
                     URL SSH du dépôt
@@ -7842,6 +7611,7 @@ function CreateProjectDialog({
   loading,
   onRefreshPrerequisites,
   onSubmit,
+  onManageGitlab,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -7850,12 +7620,15 @@ function CreateProjectDialog({
   loading: boolean;
   onRefreshPrerequisites: () => Promise<ProjectCreationPrerequisites | null>;
   onSubmit: (payload: Record<string, unknown>) => Promise<boolean>;
+  onManageGitlab: () => void;
 }) {
   const [name, setName] = useState("");
   const [version, setVersion] = useState("19.0");
   const [sourceType, setSourceType] = useState<"standard" | "gitlab" | "rika">("standard");
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [repositoryBranch, setRepositoryBranch] = useState("master");
+  const [repositorySource, setRepositorySource] = useState<RepositorySource>("ssh");
+  const [gitlabStatus, setGitlabStatus] = useState<GitLabStatus | null>(null);
   const [rikaInstance, setRikaInstance] = useState("");
   const [rikaLogin, setRikaLogin] = useState("");
   const [rikaPassword, setRikaPassword] = useState("");
@@ -7897,6 +7670,24 @@ function CreateProjectDialog({
       setVersion(prerequisites.supported_versions.at(-1) || "19.0");
     }
   }, [dockerReady, open, prerequisites?.supported_versions, version]);
+
+  // Compte GitLab connecté : le dépôt d'addons se choisit dans la liste plutôt que par son URL.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    window.sdkDesktop?.gitlabStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setGitlabStatus(status);
+        setRepositorySource(defaultRepositorySource(status));
+      })
+      .catch(() => {
+        if (!cancelled) setGitlabStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const hasStoredRikaCredentials = Boolean(credentialStore?.login);
 
@@ -8016,19 +7807,41 @@ function CreateProjectDialog({
           </fieldset>
 
           {sourceType === "gitlab" && (
-            <div className="grid gap-3 border-l-2 border-primary pl-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
-              <label className="grid min-w-0 gap-1.5 text-sm font-medium">
-                URL SSH du dépôt d’addons
-                <Input
-                  value={repositoryUrl}
-                  onChange={(event) => setRepositoryUrl(event.target.value)}
-                  placeholder="ssh://git@gitlab.sudokeys.com:10022/sudokeys/client-addons.git"
+            <div className="grid gap-3 border-l-2 border-primary pl-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-medium">Dépôt d’addons</span>
+                <RepositorySourceToggle value={repositorySource} onChange={setRepositorySource} status={gitlabStatus} />
+              </div>
+              {repositorySource === "gitlab" && (gitlabStatus?.available || gitlabStatus?.unreadable) ? (
+                <GitLabRepositoryPicker
+                  status={gitlabStatus}
+                  url={repositoryUrl}
+                  branch={repositoryBranch}
+                  // La branche au nom de la version Odoo, sinon la branche par défaut du dépôt.
+                  preferredBranches={[version]}
+                  preferDefaultBranch
+                  onChange={({ url, branch }) => {
+                    setRepositoryUrl(url);
+                    setRepositoryBranch(branch);
+                  }}
+                  onManageAccount={onManageGitlab}
                 />
-              </label>
-              <label className="grid gap-1.5 text-sm font-medium">
-                Branche
-                <Input value={repositoryBranch} onChange={(event) => setRepositoryBranch(event.target.value)} placeholder="master" />
-              </label>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+                  <label className="grid min-w-0 gap-1.5 text-sm font-medium">
+                    URL SSH du dépôt d’addons
+                    <Input
+                      value={repositoryUrl}
+                      onChange={(event) => setRepositoryUrl(event.target.value)}
+                      placeholder="ssh://git@gitlab.sudokeys.com:10022/sudokeys/client-addons.git"
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-sm font-medium">
+                    Branche
+                    <Input value={repositoryBranch} onChange={(event) => setRepositoryBranch(event.target.value)} placeholder="master" />
+                  </label>
+                </div>
+              )}
             </div>
           )}
 

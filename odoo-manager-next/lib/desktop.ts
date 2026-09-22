@@ -47,6 +47,8 @@ export interface GitLabStatus {
   available: boolean;
   reason: string;
   connected: boolean;
+  /** Jeton enregistré mais indéchiffrable : le compte est à reconnecter. */
+  unreadable?: boolean;
   username: string;
   url: string;
 }
