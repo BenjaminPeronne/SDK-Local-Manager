@@ -352,6 +352,28 @@ Frontend (types et utilitaires) et processus Electron :
 cd odoo-manager-next && npm run typecheck && npm run test:lib && npm run test:desktop
 ```
 
+### Qualité du code
+
+| Outil | Rôle | Configuration |
+| --- | --- | --- |
+| **ESLint** | Règles Next.js, React et TypeScript du frontend et d'Electron | `odoo-manager-next/eslint.config.mjs` |
+| **Prettier** | Mise en forme du frontend | `odoo-manager-next/.prettierrc.json` |
+| **ruff** | Lint et mise en forme du backend Python | `pyproject.toml` |
+
+Vérifier avant de commiter :
+
+```bash
+cd odoo-manager-next && npm run lint && npm run format:check && cd .. && ruff check . && ruff format --check .
+```
+
+Corriger la mise en forme :
+
+```bash
+cd odoo-manager-next && npm run format && cd .. && ruff check --fix . && ruff format .
+```
+
+ruff s'installe avec `brew install ruff` (ou `pipx install ruff`). Dans VS Code, les extensions recommandées par `.vscode/extensions.json` appliquent ces réglages à l'enregistrement.
+
 ---
 
 ## Compilation et publication
