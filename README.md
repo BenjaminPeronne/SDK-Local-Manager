@@ -171,9 +171,12 @@ SDK-Local-Manager/
 │   ├── windows_links.py         #   Liens d'addons sous Windows
 │   └── version.py               #   Version publiée par /api/version
 ├── odoo-manager-next/           # Frontend et application de bureau
-│   ├── app/                     #   Page Next.js (page.tsx), styles globaux, icônes
-│   ├── components/              #   Composants UI (Radix UI + Tailwind), assistant WSL, sélecteur GitLab
-│   ├── lib/                     #   Pont desktop et utilitaires, avec leurs tests
+│   ├── app/                     #   Page Next.js (page.tsx : état et assemblage), styles globaux, icônes
+│   ├── components/              #   Composants par domaine : databases/, modules/, projects/, jobs/,
+│   │                            #   notices/, settings/, onboarding/, shell/, common/ ; primitives dans ui/
+│   ├── hooks/                   #   Hooks React (filtres de modules, notifications, en-tête collant…)
+│   ├── lib/                     #   Client API, types, pont desktop et utilitaires, avec leurs tests
+│   ├── assets/app-icon.png      #   Source 1024 px de l'icône de l'application
 │   ├── electron/                #   main.cjs, preload.cjs, runtime.cjs, wsl.cjs, gitlab.cjs, icônes, tests
 │   ├── public/                  #   Polices et icônes des applications Odoo
 │   └── electron-builder.yml     #   Configuration des installateurs
