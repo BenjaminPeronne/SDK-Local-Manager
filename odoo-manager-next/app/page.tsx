@@ -7993,7 +7993,12 @@ function CreateDatabaseDialog({
             <Input value={db} onChange={(event) => setDb(event.target.value)} placeholder="ma_base_locale" />
           </label>
           <label className="grid gap-1.5 text-sm font-medium">
-            Master password
+            <span className="inline-flex items-center gap-1">
+              Master password
+              <span title="Valeur par défaut fournie par Odoo (pas la tienne) : modifiable si besoin.">
+                <Info className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              </span>
+            </span>
             <Input value={masterPwd} onChange={(event) => setMasterPwd(event.target.value)} type="password" />
           </label>
           <label className="grid gap-1.5 text-sm font-medium">
@@ -8001,7 +8006,12 @@ function CreateDatabaseDialog({
             <Input value={login} onChange={(event) => setLogin(event.target.value)} />
           </label>
           <label className="grid gap-1.5 text-sm font-medium">
-            Mot de passe admin
+            <span className="inline-flex items-center gap-1">
+              Mot de passe admin
+              <span title="Valeur par défaut fournie par Odoo (pas la tienne) : modifiable si besoin.">
+                <Info className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              </span>
+            </span>
             <Input value={password} onChange={(event) => setPassword(event.target.value)} type="password" />
           </label>
           <label className="grid gap-1.5 text-sm font-medium">
