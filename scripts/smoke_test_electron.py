@@ -44,8 +44,14 @@ def main():
         )
         env.pop("ODOO_MANAGER_CONFIG", None)
         env.pop("ELECTRON_RUN_AS_NODE", None)
+        argv = [str(application)]
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            # Le conteneur Docker de la CI GitLab tourne en root ; Electron refuse
+            # de démarrer sans --no-sandbox dans ce cas (sans lien avec la sécurité
+            # de l'application, seulement celle du sandbox Chromium local).
+            argv.append("--no-sandbox")
         try:
-            result = subprocess.run([str(application)], env=env, capture_output=True, text=True, timeout=args.timeout)
+            result = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=args.timeout)
         except subprocess.TimeoutExpired as error:
             raise SystemExit(
                 f"L’application ne termine pas son smoke test après {args.timeout}s: {error.stderr}"
