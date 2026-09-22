@@ -248,13 +248,17 @@ if [ "$LOCAL_BUILD" -eq 1 ]; then
   run sh "$ROOT/scripts/build_local_desktop.sh"
 fi
 
-if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-  die "le tag existe déjà localement: $TAG"
-fi
 HEAD_SHA=$(git rev-parse HEAD)
 
-log "Création du tag $TAG"
-run git tag "$TAG" "$HEAD_SHA"
+if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+  existing_sha=$(git rev-parse "refs/tags/$TAG^{commit}")
+  [ "$existing_sha" = "$HEAD_SHA" ] \
+    || die "le tag $TAG existe déjà localement mais pointe sur un autre commit ($existing_sha)"
+  log "Tag $TAG déjà présent localement sur ce commit, réutilisation"
+else
+  log "Création du tag $TAG"
+  run git tag "$TAG" "$HEAD_SHA"
+fi
 
 log "Push du tag vers $REMOTE"
 run git push "$REMOTE" "refs/tags/$TAG"
