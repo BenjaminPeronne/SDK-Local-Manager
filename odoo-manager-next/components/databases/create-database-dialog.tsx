@@ -69,7 +69,7 @@ export function CreateDatabaseDialog({
         </div>
         <p className="flex items-start gap-2 text-xs text-muted-foreground">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Les mots de passe sont pré-remplis avec les valeurs par défaut d'Odoo : rien à changer, mais tu peux les modifier.
+          Les mots de passe sont pré-remplis avec les valeurs par défaut d’Odoo : rien à changer, mais tu peux les modifier.
         </p>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={demo} onCheckedChange={(checked) => setDemo(checked === true)} />

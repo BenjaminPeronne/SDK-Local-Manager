@@ -1162,6 +1162,53 @@ export default function Home() {
     await Promise.all([refreshOverview(), refreshSystemStatus(), refreshJobs()]);
   }
 
+  const handleLogOutputScroll = useCallback(() => {
+    const output = logOutputRef.current;
+    if (!output) return;
+    const distanceFromBottom = output.scrollHeight - output.scrollTop - output.clientHeight;
+    logAutoFollow.current = distanceFromBottom <= 48;
+  }, []);
+
+  function showLogs(raw = false) {
+    if (!selectedProject) return;
+    const projectName = selectedProject.name;
+    stopLiveLogStream();
+    logStreamFirstLineRef.current = true;
+    setExternalLogView({
+      title: `Logs Odoo${raw ? " (traces complètes)" : ""} - ${projectName}`,
+      content: "Connexion au flux de logs en direct…",
+      project: projectName,
+      logs: raw ? "full" : "summary",
+    });
+    enableLogAutoFollow();
+    if (typeof EventSource === "undefined") {
+      pushToast("error", "Le suivi en direct des logs n'est pas disponible dans cet environnement.");
+      return;
+    }
+    const source = new EventSource(`${API_BASE}/api/projects/${encodeURIComponent(projectName)}/logs/stream${raw ? "?raw=1" : ""}`);
+    logStreamRef.current = source;
+    source.addEventListener("log", (event) => {
+      let line = "";
+      try {
+        line = (JSON.parse((event as MessageEvent<string>).data) as { line?: string }).line || "";
+      } catch {
+        return;
+      }
+      setExternalLogView((current) => {
+        if (!current || current.project !== projectName) return current;
+        const content = logStreamFirstLineRef.current ? line : `${current.content}\n${line}`;
+        logStreamFirstLineRef.current = false;
+        return { ...current, content };
+      });
+    });
+    source.addEventListener("log_end", () => {
+      if (logStreamRef.current === source) stopLiveLogStream();
+    });
+    source.onerror = () => {
+      if (logStreamRef.current === source) pushToast("error", "Flux de logs interrompu, nouvelle tentative en cours…");
+    };
+  }
+
   /** Ouvre le suivi d'une action : son projet, puis l'onglet Activité sur cette action. */
   function followJob(job: Job) {
     if (job.project) {
@@ -1264,8 +1311,8 @@ export default function Home() {
 
   function requestDeleteCode(moduleNames: string[]) {
     const removable = moduleNames.filter((name) => {
-      const module = modules.find((candidate) => candidate.name === name);
-      return module?.removable && module.removal_mode !== "link_only";
+      const moduleInfo = modules.find((candidate) => candidate.name === name);
+      return moduleInfo?.removable && moduleInfo.removal_mode !== "link_only";
     });
     if (!removable.length) {
       pushToast("error", "Sélectionne au moins un module supprimable du dossier addons.");
@@ -1318,8 +1365,8 @@ export default function Home() {
   const selectedRemovableModuleList = useMemo(
     () =>
       selectedModuleList.filter((name) => {
-        const module = moduleByName.get(name);
-        return module?.removable && module.removal_mode !== "link_only";
+        const moduleInfo = moduleByName.get(name);
+        return moduleInfo?.removable && moduleInfo.removal_mode !== "link_only";
       }),
     [moduleByName, selectedModuleList],
   );
@@ -1742,11 +1789,10 @@ export default function Home() {
 
                 <ActivityTab
                   enableLogAutoFollow={enableLogAutoFollow}
-                  logAutoFollow={logAutoFollow}
                   logDescriptionExpanded={logDescriptionExpanded}
                   logOutputRef={logOutputRef}
-                  logStreamFirstLineRef={logStreamFirstLineRef}
-                  logStreamRef={logStreamRef}
+                  onLogOutputScroll={handleLogOutputScroll}
+                  onShowLogs={showLogs}
                   outputContent={outputContent}
                   projectJobs={projectJobs}
                   pushToast={pushToast}

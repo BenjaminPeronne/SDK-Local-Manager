@@ -44,7 +44,7 @@ export function ApiUnavailableNotice({ desktopRuntime, loadSettings, openUrl, re
         </>
       }
     >
-      L'application n'arrive pas à joindre son API locale. Attends quelques secondes puis actualise. Si Docker n'est pas encore installé,
+      L’application n’arrive pas à joindre son API locale. Attends quelques secondes puis actualise. Si Docker n’est pas encore installé,
       installe Docker Desktop avant de lancer les projets Odoo.
       <div className="mt-3 rounded-md border border-red-200 bg-white/70 p-3 text-red-950 dark:border-red-800 dark:bg-red-950/55 dark:text-red-50">
         <div className="font-medium">{fallbackDockerGuide.title}</div>

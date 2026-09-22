@@ -1,8 +1,8 @@
 "use client";
 
-import { type Dispatch, type RefObject, type SetStateAction, useCallback } from "react";
+import { type Dispatch, type RefObject, type SetStateAction } from "react";
 import { Activity, AlertTriangle, CheckCircle2, Copy, Logs, Square, Trash2 } from "lucide-react";
-import { api, API_BASE } from "@/lib/api";
+import { api } from "@/lib/api";
 import { statusLabel, statusVariant } from "@/lib/format";
 import { isJobActive, isJobUnfinished, jobStopUnavailableReason } from "@/lib/jobs";
 import { formatDiagnostics } from "@/lib/projects";
@@ -20,11 +20,10 @@ const LOG_DESCRIPTION_MAX_LENGTH = 240;
 
 type ActivityTabProps = {
   enableLogAutoFollow: () => void;
-  logAutoFollow: RefObject<boolean>;
   logDescriptionExpanded: boolean;
   logOutputRef: RefObject<HTMLPreElement | null>;
-  logStreamFirstLineRef: RefObject<boolean>;
-  logStreamRef: RefObject<EventSource | null>;
+  onLogOutputScroll: () => void;
+  onShowLogs: (raw?: boolean) => void;
   outputContent: string;
   projectJobs: Job[];
   pushToast: (kind: Toast["kind"], message: string) => void;
@@ -45,13 +44,7 @@ type ActivityTabProps = {
   stopLiveLogStream: () => void;
 };
 
-export function ActivityTab({ enableLogAutoFollow, logAutoFollow, logDescriptionExpanded, logOutputRef, logStreamFirstLineRef, logStreamRef, outputContent, projectJobs, pushToast, rawOutputVisible, refinedInterface, refreshJobs, scopedExternalLogView, selectedJob, selectedJobId, selectedProject, selectedProjectReady, selectJob, setExternalLogView, setJobToCancelId, setLogDescriptionExpanded, setRawOutputVisible, setSelectedJobId, stopLiveLogStream }: ActivityTabProps) {
-  const handleLogOutputScroll = useCallback(() => {
-    const output = logOutputRef.current;
-    if (!output) return;
-    const distanceFromBottom = output.scrollHeight - output.scrollTop - output.clientHeight;
-    logAutoFollow.current = distanceFromBottom <= 48;
-  }, []);
+export function ActivityTab({ enableLogAutoFollow, logDescriptionExpanded, logOutputRef, onLogOutputScroll, onShowLogs, outputContent, projectJobs, pushToast, rawOutputVisible, refinedInterface, refreshJobs, scopedExternalLogView, selectJob, selectedJob, selectedJobId, selectedProject, selectedProjectReady, setExternalLogView, setJobToCancelId, setLogDescriptionExpanded, setRawOutputVisible, setSelectedJobId, stopLiveLogStream }: ActivityTabProps) {
   async function copyOutput() {
     try {
       await navigator.clipboard.writeText(outputContent);
@@ -59,45 +52,6 @@ export function ActivityTab({ enableLogAutoFollow, logAutoFollow, logDescription
     } catch {
       pushToast("error", "Impossible de copier la sortie.");
     }
-  }
-  function showLogs(raw = false) {
-    if (!selectedProject) return;
-    const projectName = selectedProject.name;
-    stopLiveLogStream();
-    logStreamFirstLineRef.current = true;
-    setExternalLogView({
-      title: `Logs Odoo${raw ? " (traces complètes)" : ""} - ${projectName}`,
-      content: "Connexion au flux de logs en direct…",
-      project: projectName,
-      logs: raw ? "full" : "summary",
-    });
-    enableLogAutoFollow();
-    if (typeof EventSource === "undefined") {
-      pushToast("error", "Le suivi en direct des logs n'est pas disponible dans cet environnement.");
-      return;
-    }
-    const source = new EventSource(`${API_BASE}/api/projects/${encodeURIComponent(projectName)}/logs/stream${raw ? "?raw=1" : ""}`);
-    logStreamRef.current = source;
-    source.addEventListener("log", (event) => {
-      let line = "";
-      try {
-        line = (JSON.parse((event as MessageEvent<string>).data) as { line?: string }).line || "";
-      } catch {
-        return;
-      }
-      setExternalLogView((current) => {
-        if (!current || current.project !== projectName) return current;
-        const content = logStreamFirstLineRef.current ? line : `${current.content}\n${line}`;
-        logStreamFirstLineRef.current = false;
-        return { ...current, content };
-      });
-    });
-    source.addEventListener("log_end", () => {
-      if (logStreamRef.current === source) stopLiveLogStream();
-    });
-    source.onerror = () => {
-      if (logStreamRef.current === source) pushToast("error", "Flux de logs interrompu, nouvelle tentative en cours…");
-    };
   }
   async function showDiagnostics() {
     if (!selectedProject) return;
@@ -258,7 +212,7 @@ export function ActivityTab({ enableLogAutoFollow, logAutoFollow, logDescription
                   <Activity className="h-4 w-4" />
                   Diagnostic
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => showLogs()} disabled={!selectedProjectReady}>
+                <Button variant="outline" size="sm" onClick={() => onShowLogs()} disabled={!selectedProjectReady}>
                   <Logs className="h-4 w-4" />
                   Logs Odoo
                 </Button>
@@ -321,12 +275,12 @@ export function ActivityTab({ enableLogAutoFollow, logAutoFollow, logDescription
                   </Button>
                 </div>
               )}
-              <OdooLogsModeBar view={scopedExternalLogView} onShowFull={() => showLogs(true)} onShowSummary={() => showLogs()} />
+              <OdooLogsModeBar view={scopedExternalLogView} onShowFull={() => onShowLogs(true)} onShowSummary={() => onShowLogs()} />
               <JobOutputPre
                 outputRef={logOutputRef}
                 content={outputContent}
                 hidden={rawOutputHidden}
-                onScroll={handleLogOutputScroll}
+                onScroll={onLogOutputScroll}
               />
             </div>
           </RefinedPanel>
@@ -415,7 +369,7 @@ export function ActivityTab({ enableLogAutoFollow, logAutoFollow, logDescription
                   <Activity className="h-4 w-4" />
                   Diagnostic
                 </Button>
-                <Button className="w-full justify-start sm:justify-center" variant="outline" size="sm" onClick={() => showLogs()} disabled={!selectedProjectReady}>
+                <Button className="w-full justify-start sm:justify-center" variant="outline" size="sm" onClick={() => onShowLogs()} disabled={!selectedProjectReady}>
                   <Logs className="h-4 w-4" />
                   Logs Odoo
                 </Button>
@@ -439,8 +393,8 @@ export function ActivityTab({ enableLogAutoFollow, logAutoFollow, logDescription
                   action={selectedJobStop}
                 />
               )}
-              <OdooLogsModeBar view={scopedExternalLogView} onShowFull={() => showLogs(true)} onShowSummary={() => showLogs()} />
-              <JobOutputPre outputRef={logOutputRef} content={outputContent} onScroll={handleLogOutputScroll} />
+              <OdooLogsModeBar view={scopedExternalLogView} onShowFull={() => onShowLogs(true)} onShowSummary={() => onShowLogs()} />
+              <JobOutputPre outputRef={logOutputRef} content={outputContent} onScroll={onLogOutputScroll} />
             </CardContent>
           </Card>
         </div>

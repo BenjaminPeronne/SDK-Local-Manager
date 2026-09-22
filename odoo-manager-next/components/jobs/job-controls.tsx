@@ -78,7 +78,7 @@ export function JobCancelState({ job, action }: { job: Job; action?: ReactNode }
         <div className="min-w-0 flex-1">
           <p className="font-medium">En attente</p>
           <p className="mt-0.5 break-words text-muted-foreground">
-            {job.waiting_for || "Une autre action occupe ce projet"} : l'action démarrera automatiquement.
+            {job.waiting_for || "Une autre action occupe ce projet"} : l’action démarrera automatiquement.
           </p>
         </div>
         {action}
