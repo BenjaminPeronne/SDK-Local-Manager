@@ -68,6 +68,10 @@ def abandoned_staging_entries(workspace, now=None, min_age_seconds=ABANDONED_STA
 
 RIKA_BASE_URL = "https://rika.sudokeys.com/"
 MAX_RIKA_ARCHIVE_BYTES = 100 * 1024 * 1024 * 1024
+# RIKA génère la copie de façon asynchrone après ?action=zip : l'archive peut répondre 404
+# pendant quelques minutes le temps que la génération se termine côté RIKA.
+RIKA_ZIP_GENERATION_TIMEOUT_SECONDS = 600
+RIKA_ZIP_POLL_INTERVAL_SECONDS = 5
 MAX_RIKA_ARCHIVE_ENTRIES = 2_000_000
 
 
@@ -680,11 +684,22 @@ class ProjectCreator:
 
             archive = Path(temporary) / f"{instance}.zip"
             self.log(log, f"Téléchargement de la copie RIKA de {instance}...")
+            zip_url = urllib.parse.urljoin(RIKA_BASE_URL, f"{encoded_instance}.zip")
+            deadline = time.monotonic() + RIKA_ZIP_GENERATION_TIMEOUT_SECONDS
+            waited = False
+            while True:
+                try:
+                    response = opener.open(zip_url, timeout=300)
+                    break
+                except urllib.error.HTTPError as exc:
+                    if exc.code != 404 or time.monotonic() >= deadline:
+                        raise
+                    if not waited:
+                        self.log(log, "RIKA prépare encore la copie, nouvelle tentative en arrière-plan...")
+                        waited = True
+                    time.sleep(RIKA_ZIP_POLL_INTERVAL_SECONDS)
             with (
-                opener.open(
-                    urllib.parse.urljoin(RIKA_BASE_URL, f"{encoded_instance}.zip"),
-                    timeout=300,
-                ) as response,
+                response,
                 archive.open("wb") as output,
             ):
                 content_length = int(response.headers.get("Content-Length") or 0)

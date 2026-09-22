@@ -9,6 +9,7 @@ aveuglement sur un système POSIX et exécutent les scripts WSL avec `sh`.
 import ast
 import os
 import sys
+import tempfile
 import time
 import unittest
 import urllib.error
@@ -345,6 +346,10 @@ class RikaErrorMessageTests(unittest.TestCase):
         with (
             mock.patch("odoo_manager_core.project_creator.CookieJar", return_value=[SessionCookie()]),
             mock.patch("urllib.request.build_opener", return_value=Opener()),
+            # L'archive manquante est réessayée pendant RIKA_ZIP_GENERATION_TIMEOUT_SECONDS :
+            # un délai nul garde ce test instantané sans changer son comportement observable.
+            mock.patch("odoo_manager_core.project_creator.RIKA_ZIP_GENERATION_TIMEOUT_SECONDS", 0),
+            mock.patch("odoo_manager_core.project_creator.time.sleep"),
         ):
             return creator.download_rika_project("dev06", "login", "secret", ROOT)
 
@@ -355,6 +360,45 @@ class RikaErrorMessageTests(unittest.TestCase):
     def test_missing_archive_after_generation_is_not_reported_as_unknown_instance(self):
         with self.assertRaisesRegex(RuntimeError, "archive dev06.zip est introuvable"):
             self.download("dev06.zip")
+
+    def test_archive_still_generating_is_retried_until_available(self):
+        from odoo_manager_core.project_creator import ProjectCreator
+
+        attempts = {"count": 0}
+
+        class Opener:
+            def open(self, request, timeout=None):
+                url = getattr(request, "full_url", request)
+                if url.endswith("dev06.zip"):
+                    attempts["count"] += 1
+                    if attempts["count"] < 3:
+                        raise urllib.error.HTTPError(url, 404, "File not found", {}, None)
+                    response = mock.MagicMock()
+                    response.headers = {}
+                    response.read = mock.Mock(return_value=b"")
+                    return response
+                return mock.MagicMock()
+
+        class SessionCookie:
+            name = "sessionId"
+            value = "token"
+
+        with mock.patch("odoo_manager_core.project_creator.platform_id", return_value="linux"):
+            creator = ProjectCreator(mock.Mock(), ROOT, mock.Mock())
+        with (
+            mock.patch("odoo_manager_core.project_creator.CookieJar", return_value=[SessionCookie()]),
+            mock.patch("urllib.request.build_opener", return_value=Opener()),
+            mock.patch("odoo_manager_core.project_creator.time.sleep") as sleep,
+            mock.patch.object(creator, "extract_rika_archive"),
+            mock.patch("odoo_manager_core.project_creator.detected_odoo_version", return_value="17.0"),
+            tempfile.TemporaryDirectory() as temporary,
+        ):
+            source_root, version = creator.download_rika_project("dev06", "login", "secret", temporary)
+
+        self.assertEqual(3, attempts["count"])
+        self.assertEqual("17.0", version)
+        self.assertEqual(Path(temporary) / "rika" / "dev06", source_root)
+        self.assertTrue(sleep.called)
 
 
 if __name__ == "__main__":
