@@ -7995,9 +7995,7 @@ function CreateDatabaseDialog({
           <label className="grid gap-1.5 text-sm font-medium">
             <span className="inline-flex items-center gap-1">
               Master password
-              <span title="Valeur par défaut fournie par Odoo (pas la tienne) : modifiable si besoin.">
-                <Info className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              </span>
+              <HintTooltip text="Mot de passe maître d'Odoo, « odoo » par défaut. Rien à changer : garde-le tel quel ou remplace-le si tu le souhaites." />
             </span>
             <Input value={masterPwd} onChange={(event) => setMasterPwd(event.target.value)} type="password" />
           </label>
@@ -8008,9 +8006,7 @@ function CreateDatabaseDialog({
           <label className="grid gap-1.5 text-sm font-medium">
             <span className="inline-flex items-center gap-1">
               Mot de passe admin
-              <span title="Valeur par défaut fournie par Odoo (pas la tienne) : modifiable si besoin.">
-                <Info className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              </span>
+              <HintTooltip text="Mot de passe du compte admin de la nouvelle base, « admin » par défaut. Rien à changer : garde-le tel quel ou remplace-le si tu le souhaites." />
             </span>
             <Input value={password} onChange={(event) => setPassword(event.target.value)} type="password" />
           </label>
@@ -8023,6 +8019,10 @@ function CreateDatabaseDialog({
             <Input value={country} onChange={(event) => setCountry(event.target.value.toUpperCase())} />
           </label>
         </div>
+        <p className="flex items-start gap-2 text-xs text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          Les mots de passe sont pré-remplis avec les valeurs par défaut d'Odoo : rien à changer, mais tu peux les modifier.
+        </p>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={demo} onCheckedChange={(checked) => setDemo(checked === true)} />
           Charger les données de démonstration
@@ -8047,6 +8047,26 @@ function CreateDatabaseDialog({
         </Button>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function HintTooltip({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex" onClick={(event) => event.preventDefault()}>
+      <span
+        tabIndex={0}
+        aria-label={text}
+        className="inline-flex cursor-help rounded-full text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Info className="h-3.5 w-3.5" />
+      </span>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-1/2 top-full z-50 mt-1.5 w-64 -translate-x-1/2 rounded-md border bg-card px-3 py-2 text-xs font-normal leading-snug text-card-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        {text}
+      </span>
+    </span>
   );
 }
 
