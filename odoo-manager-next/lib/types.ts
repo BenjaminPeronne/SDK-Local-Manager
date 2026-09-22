@@ -238,6 +238,14 @@ export type RepositoryInspection =
   | { status: "ready"; key: string; modules: RepositoryModule[]; commit: string; odooVersion: string; manifestsRead: boolean }
   | { status: "error"; key: string; error: string };
 
+/** Journal affiché hors d'une action : sortie d'un import ZIP, logs bruts d'un projet. */
+export type ExternalLogView = {
+  title: string;
+  content: string;
+  project: string;
+  logs?: "summary" | "full";
+};
+
 export type Toast = {
   id: number;
   kind: "success" | "error" | "info";

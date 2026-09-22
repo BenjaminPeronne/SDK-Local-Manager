@@ -1,6 +1,6 @@
 import { jobCompletionTitle } from "@/lib/jobs";
 import type { Job } from "@/lib/types";
-import packageMetadata from "../package.json";
+import packageMetadata from "@/package.json";
 
 export const FALLBACK_APP_VERSION = packageMetadata.version;
 

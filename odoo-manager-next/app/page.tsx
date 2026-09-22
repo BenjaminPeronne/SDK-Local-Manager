@@ -24,10 +24,7 @@ import {
   Database,
   ExternalLink,
   FileArchive,
-  FolderOpen,
   FolderPlus,
-  GitBranch,
-  Heart,
   Info,
   KeyRound,
   Languages,
@@ -66,11 +63,10 @@ import {
   isDesktopRuntime,
   openDockerDesktopNative,
   openExternalUrl,
-  pickDirectory,
   requestTaskNotificationPermission,
   sendTaskNotification,
 } from "@/lib/desktop-runtime";
-import { compactWorkspacePath, normalizeSearchText, statusLabel, statusVariant } from "@/lib/format";
+import { compactWorkspacePath, statusLabel, statusVariant } from "@/lib/format";
 import { type JobOutputCache, mergeIncrementalJobOutput } from "@/lib/job-output";
 import {
   isJobActive,
@@ -94,6 +90,7 @@ import type {
   BackendDiagnostics,
   BootstrapSnapshot,
   DatabaseMenuAction,
+  ExternalLogView,
   FilestoreStatus,
   Job,
   ManagerErrorEntry,
@@ -105,15 +102,12 @@ import type {
   Project,
   ProjectCreationPrerequisites,
   ProjectDiagnostics,
-  RepositoryInspection,
-  RepositoryModule,
   RestoreDatabasePayload,
   SocleCatalog,
   SocleInstallPlan,
   SshPublicKey,
   SystemStatus,
   Toast,
-  ZipInspection,
 } from "@/lib/types";
 import { cn, delay } from "@/lib/utils";
 import { isWslSetupPending } from "@/lib/wsl-setup";
@@ -121,12 +115,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, InteractiveCard } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { FilePicker } from "@/components/ui/file-picker";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { Notice } from "@/components/common/notice";
 import {
   REFINED_FOCUS_RING,
@@ -138,52 +129,40 @@ import {
   RefinedRow,
   RefinedSectionHeader,
 } from "@/components/common/refined-layout";
+import { AdminPasswordDialog } from "@/components/databases/admin-password-dialog";
+import { AllTranslationsResetDialog } from "@/components/databases/all-translations-reset-dialog";
 import { CreateDatabaseDialog } from "@/components/databases/create-database-dialog";
 import { DropDatabaseDialog } from "@/components/databases/drop-database-dialog";
 import { FirstDatabaseCallout } from "@/components/databases/first-database-callout";
+import { NeutralizeDatabaseDialog } from "@/components/databases/neutralize-database-dialog";
 import { RestoreDatabaseDialog } from "@/components/databases/restore-database-dialog";
-import {
-  defaultRepositorySource,
-  GitLabRepositoryPicker,
-  type RepositorySource,
-  RepositorySourceToggle,
-} from "@/components/gitlab-repository-picker";
+import { CancelJobDialog } from "@/components/jobs/cancel-job-dialog";
 import { JobCancelState, JobProgressPanel, JobStopButton } from "@/components/jobs/job-controls";
 import { JobOutputPre, OdooLogsModeBar } from "@/components/jobs/job-output";
-import {
-  ModuleStateBadge,
-  PlanModuleChips,
-  RepositoryModuleStatus,
-  RepositoryModuleVersion,
-} from "@/components/modules/module-badges";
-import { CreateProjectDialog, PrerequisiteRow } from "@/components/projects/create-project-dialog";
+import { DeleteModuleCodeDialog } from "@/components/modules/delete-module-code-dialog";
+import { ModuleStateBadge } from "@/components/modules/module-badges";
+import { RepositoryImportDialog } from "@/components/modules/repository-import-dialog";
+import { SocleDialog } from "@/components/modules/socle-dialog";
+import { TranslationResetDialog } from "@/components/modules/translation-reset-dialog";
+import { UninstallModulesDialog } from "@/components/modules/uninstall-modules-dialog";
+import { UpdateAllModulesDialog } from "@/components/modules/update-all-modules-dialog";
+import { ZipImportDialog } from "@/components/modules/zip-import-dialog";
+import { OnboardingDialog } from "@/components/onboarding/onboarding-dialog";
+import { SshKeyDialog } from "@/components/onboarding/ssh-key-dialog";
+import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
+import { DeleteProjectDialog } from "@/components/projects/delete-project-dialog";
 import { MigrationProposal } from "@/components/projects/migration-proposal";
-import {
-  SETTINGS_SAVED_KEYS,
-  SETTINGS_SECTIONS,
-  SettingsGroup,
-  SettingsSection,
-  type SettingsSectionId,
-} from "@/components/settings/settings-section";
+import { SettingsDialog } from "@/components/settings/settings-dialog";
+import { type SettingsSectionId } from "@/components/settings/settings-section";
+import { AboutDialog } from "@/components/shell/about-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { WelcomeScreen } from "@/components/welcome/welcome-screen";
 import { WslSetupDialog } from "@/components/wsl-setup";
 import appIcon from "./icon.png";
 import localIcon from "./local-icon.png";
 
-// Au-delà, le rendu des lignes ralentit la fenêtre (dépôts complets de 1 500 modules) : on filtre.
-const REPOSITORY_PICKER_MAX_ROWS = 200;
-
-const GITLAB_TOKEN_URL = "https://gitlab.sudokeys.com/-/user_settings/personal_access_tokens?name=SDK%20Local%20Manager&scopes=read_api";
-
-const REPOSITORY_ACTION_ORDER = { update: 0, add: 1, blocked: 2 } as const;
-
 // Distance de défilement sur laquelle le bandeau des onglets collés passe de transparent à opaque.
 const TABS_BACKDROP_FADE_PX = 96;
-
-const APP_BUILD = process.env.NEXT_PUBLIC_APP_BUILD || "";
-
-const APP_COMMIT = process.env.NEXT_PUBLIC_APP_COMMIT || "";
 
 const BOOTSTRAP_RETRY_DELAYS_MS = [0, 500, 1000, 2000];
 
@@ -218,12 +197,9 @@ export default function Home() {
   const [sshKeys, setSshKeys] = useState<SshPublicKey[]>([]);
   const [selectedSshKeyName, setSelectedSshKeyName] = useState("");
   const [sshComment, setSshComment] = useState("");
-  const [generatingSshKey, setGeneratingSshKey] = useState(false);
   const [sshRegenerateMode, setSshRegenerateMode] = useState(false);
   const [sshRegenerateConfirmed, setSshRegenerateConfirmed] = useState(false);
   const [sshKeyBackup, setSshKeyBackup] = useState("");
-  const [savingSettings, setSavingSettings] = useState(false);
-  const [selectingWorkspace, setSelectingWorkspace] = useState(false);
   const [projectsFilter, setProjectsFilter] = useState("");
   // Vide tant que l'utilisateur n'a pas choisi de projet : l'application s'ouvre sur l'accueil,
   // et Échap sur un projet éteint y revient en le refermant.
@@ -251,13 +227,11 @@ export default function Home() {
   const [loadingSocleCatalog, setLoadingSocleCatalog] = useState(false);
   const [socleSearch, setSocleSearch] = useState("");
   const [soclePlan, setSoclePlan] = useState<SocleInstallPlan | null>(null);
-  const [loadingSoclePlan, setLoadingSoclePlan] = useState(false);
-  const [soclePlanError, setSoclePlanError] = useState("");
   const [jobs, setJobs] = useState<Job[]>([]);
   const jobOutputCache = useRef<JobOutputCache>(new Map());
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [logDescriptionExpanded, setLogDescriptionExpanded] = useState(false);
-  const [externalLogView, setExternalLogView] = useState<{ title: string; content: string; project: string; logs?: "summary" | "full" } | null>(null);
+  const [externalLogView, setExternalLogView] = useState<ExternalLogView | null>(null);
   const [loading, setLoading] = useState(false);
   const [openingOdoo, setOpeningOdoo] = useState(false);
   const [openingPostgresql, setOpeningPostgresql] = useState(false);
@@ -270,17 +244,9 @@ export default function Home() {
   const [desktopRuntime, setDesktopRuntime] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [repositoryOpen, setRepositoryOpen] = useState(false);
-  const [repositorySubmitting, setRepositorySubmitting] = useState(false);
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [repositoryBranch, setRepositoryBranch] = useState("");
-  const [repositoryInspection, setRepositoryInspection] = useState<RepositoryInspection>({ status: "idle" });
-  const [repositorySelection, setRepositorySelection] = useState<Set<string>>(new Set());
-  const [repositoryFilter, setRepositoryFilter] = useState("");
-  const [repositoryInspectionAttempt, setRepositoryInspectionAttempt] = useState(0);
   const [gitlabStatus, setGitlabStatus] = useState<GitLabStatus | null>(null);
-  const [gitlabTokenDraft, setGitlabTokenDraft] = useState("");
-  const [gitlabConnecting, setGitlabConnecting] = useState(false);
-  const [repositorySource, setRepositorySource] = useState<RepositorySource>("ssh");
   const repositoryUrlError = moduleRepositoryUrlError(repositoryUrl);
   const [zipDialogOpen, setZipDialogOpen] = useState(false);
   const [createDbOpen, setCreateDbOpen] = useState(false);
@@ -306,22 +272,14 @@ export default function Home() {
   const [allTranslationsOpen, setAllTranslationsOpen] = useState(false);
   const [translationLanguages, setTranslationLanguages] = useState<{ code: string; name: string }[] | null>(null);
   const [selectedTranslationLanguages, setSelectedTranslationLanguages] = useState<Set<string>>(new Set());
-  const [adminPassword, setAdminPassword] = useState("admin");
   const [deleteCodeDialogOpen, setDeleteCodeDialogOpen] = useState(false);
-  const [replaceZipModules, setReplaceZipModules] = useState(true);
-  const [zipFile, setZipFile] = useState<File | null>(null);
-  const [zipModuleCandidates, setZipModuleCandidates] = useState<string[]>([]);
-  const [selectedZipModules, setSelectedZipModules] = useState<Set<string>>(new Set());
-  const [inspectingZip, setInspectingZip] = useState(false);
   const [deleteCodeUninstallFirst, setDeleteCodeUninstallFirst] = useState(true);
-  const [deleteConfirm, setDeleteConfirm] = useState("");
   const [pendingUninstallModules, setPendingUninstallModules] = useState<string[]>([]);
   const [jobToCancelId, setJobToCancelId] = useState<number | null>(null);
   const [pendingDeleteCodeModules, setPendingDeleteCodeModules] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("bases");
   const [pendingCreatedProjectName, setPendingCreatedProjectName] = useState("");
   const [pendingCreatedDatabase, setPendingCreatedDatabase] = useState<{ jobId: number; project: string; database: string } | null>(null);
-  const zipInputRef = useRef<HTMLInputElement>(null);
   const toastId = useRef(1);
   const lastDockerState = useRef<string | null>(null);
   const pendingDockerState = useRef<{ state: string; count: number } | null>(null);
@@ -336,7 +294,6 @@ export default function Home() {
   const jobNotificationsInitialized = useRef(false);
   const lastSynchronizedJobCompletion = useRef("");
   const modulesRequestGeneration = useRef(0);
-  const zipInspectionGeneration = useRef(0);
   const scheduledTimeouts = useRef<Set<number>>(new Set());
   const onboardingPrompted = useRef(false);
   const wslSetupPrompted = useRef(false);
@@ -427,7 +384,6 @@ export default function Home() {
     }
     return runningJobs;
   }, [jobs]);
-  const gitInstallRunning = jobs.some((job) => isJobUnfinished(job) && job.title === "Installer Git pour Windows");
   const traefikInstallRunning = jobs.some((job) => isJobUnfinished(job) && job.title === "Installer Traefik");
   const selectedSshKey = useMemo(
     () => sshKeys.find((key) => key.name === selectedSshKeyName) || sshKeys[0] || null,
@@ -555,21 +511,6 @@ export default function Home() {
     () => Array.from(selectedSoclePresets).filter((presetId) => !installedSoclePresetIds.has(presetId)).sort(),
     [selectedSoclePresets, installedSoclePresetIds],
   );
-  const visibleSocleApps = useMemo(() => {
-    const query = normalizeSearchText(socleSearch.trim());
-    const apps = socleCatalog?.apps ?? [];
-    if (!query) return apps;
-    return apps.filter((app) => normalizeSearchText(`${app.label} ${app.modules.join(" ")}`).includes(query));
-  }, [socleCatalog, socleSearch]);
-  const soclePlanBlocked = Boolean(soclePlan && (soclePlan.missing.length || soclePlan.uninstallable.length));
-  const pendingModulesWithMissingCode = useMemo(
-    () => updatePendingModules.filter((module) => !module.code_available),
-    [updatePendingModules],
-  );
-  const pendingModulesWithAvailableCode = useMemo(
-    () => updatePendingModules.filter((module) => module.code_available),
-    [updatePendingModules],
-  );
   const detectedImportedModules = useMemo(() => {
     const relevantJobs = jobs
       .filter((job) => job.project === selectedProject?.name && job.status === "done")
@@ -580,11 +521,6 @@ export default function Home() {
     }
     return [];
   }, [jobs, selectedProject?.name]);
-  const allMissingPendingModulesSelected =
-    pendingModulesWithMissingCode.length > 0 &&
-    pendingModulesWithMissingCode.every((module) => missingModulesToIgnore.has(module.name));
-  const someMissingPendingModulesSelected =
-    pendingModulesWithMissingCode.some((module) => missingModulesToIgnore.has(module.name)) && !allMissingPendingModulesSelected;
   const filteredModuleNames = useMemo(() => filteredModules.map((module) => module.name), [filteredModules]);
   const selectedFilteredModuleCount = useMemo(
     () => filteredModuleNames.filter((name) => selectedModules.has(name)).length,
@@ -838,12 +774,6 @@ export default function Home() {
       setLoadingCreationPrerequisites(false);
     }
   }, [markApiFailure, markApiSuccess, pushToast]);
-
-  const reopenInitialConfiguration = useCallback(() => {
-    setSettingsOpen(false);
-    setOnboardingOpen(true);
-    void loadCreationPrerequisites();
-  }, [loadCreationPrerequisites]);
 
   const openCreateProjectDialog = useCallback(() => {
     setCreateProjectOpen(true);
@@ -1145,15 +1075,6 @@ export default function Home() {
     }
   }
 
-  function toggleSoclePreset(presetId: string, checked: boolean) {
-    setSelectedSoclePresets((current) => {
-      const next = new Set(current);
-      if (checked) next.add(presetId);
-      else next.delete(presetId);
-      return next;
-    });
-  }
-
   async function loadSocleCatalog() {
     if (!selectedProject) return;
     setLoadingSocleCatalog(true);
@@ -1175,51 +1096,10 @@ export default function Home() {
     void loadSocleCatalog();
   }
 
-  async function installSelectedSocle() {
-    if (!selectedProject || !selectedDb || !soclePresetsToInstall.length || soclePlanBlocked) return;
-    const job = await createJob("install_socle", {
-      project: selectedProject.name,
-      db: selectedDb,
-      presets: soclePresetsToInstall.join(","),
-    });
-    if (job) {
-      setSocleDialogOpen(false);
-      setActiveTab("logs");
-      schedule(refreshModules, 2500);
-    }
-  }
-
   async function convertWslAddonLinks() {
     if (!selectedProject) return;
     const job = await createJob("convert_wsl_addon_links", { project: selectedProject.name });
     if (job) setActiveTab("logs");
-  }
-
-  async function repairEnterpriseLinks() {
-    if (!selectedProject) return;
-    const job = await createJob("repair_enterprise_links", { project: selectedProject.name });
-    if (job) {
-      setSocleDialogOpen(false);
-      setActiveTab("logs");
-      schedule(refreshModules, 1500);
-    }
-  }
-
-  async function waitForJob(jobId: number, timeoutMilliseconds = 960000) {
-    const deadline = Date.now() + timeoutMilliseconds;
-    while (Date.now() < deadline) {
-      const payload = await api<{ jobs: Job[] }>("/api/jobs");
-      applyJobs(payload.jobs);
-      const current = payload.jobs.find((job) => job.id === jobId);
-      if (!current) throw new Error("L'action de démarrage est introuvable dans l'historique.");
-      if (current.status === "done") return current;
-      if (current.status === "error") {
-        const detail = current.lines.filter(Boolean).at(-1) || "Le projet n'a pas pu démarrer.";
-        throw new Error(detail);
-      }
-      await delay(800);
-    }
-    throw new Error("Le démarrage d'Odoo prend trop de temps. Consulte les logs de l'action.");
   }
 
   async function requestDockerStart() {
@@ -1365,24 +1245,6 @@ export default function Home() {
     }
   }
 
-  // La clé GitLab déjà déclarée reste côté Windows : sans elle, l'environnement Linux ne clone rien.
-  async function requestSshKeyImport() {
-    try {
-      const result = await desktopBridge()?.wslImportSshKey?.();
-      pushToast(
-        "success",
-        result?.alreadyPresent
-          ? `La clé ${result.key} est déjà en place dans l’environnement Linux.`
-          : `Clé ${result?.key || "SSH"} copiée dans l’environnement Linux.`,
-      );
-    } catch (err) {
-      pushToast("error", desktopErrorMessage(err, "Impossible de copier la clé SSH."));
-    } finally {
-      // L'assistant a pu être ouvert avant un autre changement : son état est relu dans tous les cas.
-      await loadCreationPrerequisites();
-    }
-  }
-
   // Sous WSL, le Traefik de Docker Desktop occupe le port 80 du réseau partagé de la VM.
   async function requestLegacyTraefikStop() {
     setLoading(true);
@@ -1401,16 +1263,6 @@ export default function Home() {
   async function requestStagingCleanup() {
     const job = await createJob("cleanup_staging");
     if (job) schedule(refreshSystemStatus, 2500);
-  }
-
-  async function requestGitInstall() {
-    if (gitInstallRunning) return;
-    const job = await createJob("install_git");
-    if (!job) return;
-    const refreshPrerequisites = async () => { await loadCreationPrerequisites(); };
-    schedule(refreshPrerequisites, 3000);
-    schedule(refreshPrerequisites, 10000);
-    schedule(refreshPrerequisites, 25000);
   }
 
   async function loadSshKeys() {
@@ -1441,30 +1293,6 @@ export default function Home() {
     }
   }
 
-  async function copyManagerErrors() {
-    const content = managerErrors.map((entry) => [
-      `[${entry.timestamp}] ${entry.source}${entry.project ? ` · ${entry.project}` : ""}`,
-      entry.message,
-      entry.details || "",
-    ].filter(Boolean).join("\n")).join("\n\n");
-    try {
-      await navigator.clipboard.writeText(content);
-      pushToast("success", "Journal d’erreurs copié.");
-    } catch {
-      pushToast("error", "Impossible de copier le journal d’erreurs.");
-    }
-  }
-
-  async function clearManagerErrors() {
-    try {
-      await api<{ ok: boolean }>("/api/errors", { method: "DELETE" });
-      setManagerErrors([]);
-      pushToast("success", "Journal d’erreurs effacé.");
-    } catch (err) {
-      pushToast("error", err instanceof Error ? err.message : "Impossible d’effacer le journal d’erreurs.");
-    }
-  }
-
   async function openSshAssistant(regenerate = false) {
     setSshRegenerateMode(false);
     setSshRegenerateConfirmed(false);
@@ -1483,38 +1311,6 @@ export default function Home() {
     setSshRegenerateMode(true);
   }
 
-  async function requestSshKeyGeneration(replace = false) {
-    setGeneratingSshKey(true);
-    try {
-      const key = await api<SshPublicKey & { created: boolean; message: string; backup?: string }>("/api/system/ssh-key/generate", {
-        method: "POST",
-        body: JSON.stringify({ comment: sshComment, replace }),
-      });
-      pushToast("success", key.message);
-      setSshRegenerateMode(false);
-      setSshRegenerateConfirmed(false);
-      setSshKeyBackup(key.backup || "");
-      await loadSshKeys();
-      setSelectedSshKeyName(key.name);
-      await loadCreationPrerequisites();
-    } catch (err) {
-      pushToast("error", err instanceof Error ? err.message : "Impossible de générer la clé SSH.");
-    } finally {
-      setGeneratingSshKey(false);
-    }
-  }
-
-  async function copySshPublicKey() {
-    const key = sshKeys.find((item) => item.name === selectedSshKeyName);
-    if (!key) return;
-    try {
-      await navigator.clipboard.writeText(key.public_key);
-      pushToast("success", "Clé publique copiée.");
-    } catch {
-      pushToast("error", "Impossible de copier la clé publique.");
-    }
-  }
-
   async function requestProjectCreation(payload: Record<string, unknown>) {
     const projectName = String(payload.name || "").trim();
     const job = await createJob("create_project", payload);
@@ -1529,70 +1325,6 @@ export default function Home() {
     if (!settings?.onboarding_completed) await completeOnboarding();
     schedule(refreshOverview, 2500);
     return true;
-  }
-
-  async function submitRepositoryModules() {
-    if (!selectedProject || repositorySubmitting) return;
-    setRepositorySubmitting(true);
-    try {
-      const job = await createJob("repository_modules", {
-        project: selectedProject.name,
-        url: repositoryUrl.trim(),
-        branch: repositoryBranch.trim(),
-        modules: repositorySelectedModules.map((module) => module.name).join(","),
-        // Le serveur refuse l'import si la branche a bougé depuis l'aperçu validé ici.
-        commit: repositoryInspection.status === "ready" ? repositoryInspection.commit : "",
-      });
-      if (!job) return;
-      setRepositoryOpen(false);
-      setActiveTab("logs");
-    } finally {
-      setRepositorySubmitting(false);
-    }
-  }
-
-  async function saveSettings() {
-    if (!settingsDraft) return;
-    const apiPortChanged = settings?.api_port !== settingsDraft.api_port;
-    setSavingSettings(true);
-    try {
-      const payload = await api<{ settings: ManagerSettings }>("/api/settings", {
-        method: "POST",
-        body: JSON.stringify({ ...settingsDraft, execution_mode: "native", create_workspace: true }),
-      });
-      // Réafficher la proposition depuis les réglages la ramène tout de suite, sans attendre
-      // le redémarrage que demande la simple fermeture du bandeau.
-      if (settings?.migration_banner_dismissed && !payload.settings.migration_banner_dismissed) {
-        setMigrationBannerClosed(false);
-      }
-      setSettings(payload.settings);
-      setSettingsDraft(payload.settings);
-      setSettingsOpen(false);
-      setSelectedProjectName("");
-      setSelectedDb("");
-      setModules([]);
-      pushToast("success", apiPortChanged ? "Paramètres enregistrés. Redémarre le gestionnaire pour appliquer le nouveau port." : "Paramètres enregistrés.");
-      await Promise.all([refreshOverview(), refreshSystemStatus(), refreshMigration()]);
-    } catch (err) {
-      pushToast("error", err instanceof Error ? err.message : "Enregistrement impossible.");
-    } finally {
-      setSavingSettings(false);
-    }
-  }
-
-  async function selectWorkspaceDirectory() {
-    if (!settingsDraft || !desktopRuntime) return;
-    setSelectingWorkspace(true);
-    try {
-      const selected = await pickDirectory(settingsDraft.workspace);
-      if (selected) {
-        setSettingsDraft({ ...settingsDraft, workspace: selected });
-      }
-    } catch (err) {
-      pushToast("error", err instanceof Error ? err.message : "Impossible d’ouvrir le sélecteur de dossier.");
-    } finally {
-      setSelectingWorkspace(false);
-    }
   }
 
   function selectedDatabaseOrNotify(action: string) {
@@ -1631,72 +1363,6 @@ export default function Home() {
     } finally {
       setCheckingUpdatePrerequisites(false);
       setUpdateAllDialogOpen(true);
-    }
-  }
-
-  function toggleMissingModuleToIgnore(moduleName: string, checked: boolean) {
-    setMissingModulesToIgnore((current) => {
-      const next = new Set(current);
-      if (checked) next.add(moduleName);
-      else next.delete(moduleName);
-      return next;
-    });
-  }
-
-  function toggleAllMissingModulesToIgnore(checked: boolean) {
-    setMissingModulesToIgnore(checked ? new Set(pendingModulesWithMissingCode.map((module) => module.name)) : new Set());
-  }
-
-  async function ignoreSelectedMissingModulesLocally() {
-    const db = selectedDatabaseOrNotify("l'annulation locale des opérations module");
-    if (!db || !selectedProject || !missingModulesToIgnore.size) return;
-    const modulesToIgnore = Array.from(missingModulesToIgnore).sort();
-    const job = await createJob("ignore_missing_modules_locally", {
-      project: selectedProject.name,
-      db,
-      modules: modulesToIgnore.join(","),
-    });
-    if (job) {
-      setUpdateAllDialogOpen(false);
-      try {
-        await waitForJob(job.id);
-        pushToast("success", "Les opérations locales ont été annulées. Le précontrôle est actualisé.");
-        await refreshModules();
-        await requestUpdateAllOdooModules();
-      } catch (err) {
-        pushToast("error", err instanceof Error ? err.message : "Impossible d’actualiser le précontrôle.");
-        setActiveTab("logs");
-      }
-    }
-  }
-
-  async function restoreLocalModuleExclusions() {
-    const db = selectedDatabaseOrNotify("la réactivation des mises à jour module");
-    if (!db || !selectedProject || !updateLocalExcludedModules.length) return;
-    const job = await createJob("restore_module_update_exclusions", {
-      project: selectedProject.name,
-      db,
-      modules: updateLocalExcludedModules.join(","),
-    });
-    if (job) {
-      setUpdateAllDialogOpen(false);
-      schedule(refreshModules, 1500);
-    }
-  }
-
-  async function confirmUpdateAllOdooModules() {
-    const db = selectedDatabaseOrNotify("la MAJ complète Odoo");
-    if (!db || !selectedProject) return;
-    const targeted = updateScope === "imported" && detectedImportedModules.length > 0;
-    const job = await createJob(
-      targeted ? "update_imported_modules" : "update_all_modules",
-      targeted
-        ? { project: selectedProject.name, db, modules: detectedImportedModules.join(",") }
-        : { project: selectedProject.name, db, allow_missing_filestore: allowMissingFilestore },
-    );
-    if (job) {
-      setUpdateAllDialogOpen(false);
-      schedule(refreshModules, 2500);
     }
   }
 
@@ -1782,23 +1448,6 @@ export default function Home() {
     }
   }
 
-  async function confirmCancelJob() {
-    const job = jobs.find((item) => item.id === jobToCancelId);
-    setJobToCancelId(null);
-    if (!job) return;
-    try {
-      const result = await api<{ job: Job }>(`/api/jobs/${job.id}/cancel`, { method: "POST", body: "{}" });
-      pushToast(
-        "info",
-        result.job.status === "cancelled" ? `Action retirée de la file d'attente : ${job.title}` : `Arrêt demandé : ${job.title}`,
-      );
-      await refreshJobs(job.id);
-    } catch (err) {
-      pushToast("error", err instanceof Error ? err.message : "Arrêt de l'action impossible.");
-      void refreshJobs(job.id);
-    }
-  }
-
   async function deleteJob(jobId: number) {
     try {
       await api<{ ok: boolean }>(`/api/jobs/${jobId}`, { method: "DELETE" });
@@ -1833,21 +1482,6 @@ export default function Home() {
     setUninstallDialogOpen(true);
   }
 
-  async function confirmUninstall() {
-    if (!selectedProject || !selectedDb || !pendingUninstallModules.length) return;
-    const job = await createJob("uninstall_module", {
-      project: selectedProject.name,
-      db: selectedDb,
-      modules: pendingUninstallModules.join(","),
-    });
-    if (job) {
-      setUninstallDialogOpen(false);
-      setPendingUninstallModules([]);
-      setSelectedModules(new Set());
-      schedule(refreshModules, 2500);
-    }
-  }
-
   function requestTranslationReset(moduleNames: string[]) {
     const installed = moduleNames.filter((name) => modules.find((module) => module.name === name)?.state === "installed");
     if (!installed.length) {
@@ -1855,17 +1489,6 @@ export default function Home() {
       return;
     }
     setPendingTranslationResetModules(installed);
-  }
-
-  async function confirmTranslationReset() {
-    const db = selectedDatabaseOrNotify("la réinitialisation des traductions");
-    if (!db || !selectedProject || !pendingTranslationResetModules.length) return;
-    const job = await createJob("reset_module_translations", {
-      project: selectedProject.name,
-      db,
-      modules: pendingTranslationResetModules.join(","),
-    });
-    if (job) setPendingTranslationResetModules([]);
   }
 
   async function openAllTranslationsReset() {
@@ -1885,18 +1508,6 @@ export default function Home() {
       setTranslationLanguages([]);
       pushToast("error", err instanceof Error ? err.message : "Impossible de lire les langues installées.");
     }
-  }
-
-  async function confirmAllTranslationsReset() {
-    const db = selectedDatabaseOrNotify("la réinitialisation des traductions");
-    if (!db || !selectedProject || !selectedTranslationLanguages.size) return;
-    const allSelected = selectedTranslationLanguages.size === translationLanguages?.length;
-    const job = await createJob("reset_all_translations", {
-      project: selectedProject.name,
-      db,
-      languages: allSelected ? "" : Array.from(selectedTranslationLanguages).join(","),
-    });
-    if (job) setAllTranslationsOpen(false);
   }
 
   /** Choix explicite d'une base : affiché tout de suite et retenu pour ce projet pendant la session. */
@@ -1951,13 +1562,6 @@ export default function Home() {
     await createJob("regenerate_assets", { project: selectedProject.name, db });
   }
 
-  async function confirmAdminPasswordReset() {
-    const db = selectedDatabaseOrNotify("la réinitialisation du mot de passe admin");
-    if (!db || !selectedProject || !adminPassword.trim()) return;
-    const job = await createJob("reset_admin_password", { project: selectedProject.name, db, password: adminPassword });
-    if (job) setAdminPasswordOpen(false);
-  }
-
   function requestDeleteCode(moduleNames: string[]) {
     const removable = moduleNames.filter((name) => {
       const module = modules.find((candidate) => candidate.name === name);
@@ -1973,58 +1577,6 @@ export default function Home() {
     setPendingDeleteCodeModules(removable);
     setDeleteCodeUninstallFirst(Boolean(canUseDb));
     setDeleteCodeDialogOpen(true);
-  }
-
-  async function confirmDeleteCode() {
-    if (!selectedProject || !pendingDeleteCodeModules.length) return;
-    const job = await createJob("delete_module_code", {
-      project: selectedProject.name,
-      db: deleteCodeUninstallFirst ? selectedDb : "",
-      modules: pendingDeleteCodeModules.join(","),
-      uninstall_first: deleteCodeUninstallFirst,
-    });
-    if (job) {
-      setDeleteCodeDialogOpen(false);
-      setPendingDeleteCodeModules([]);
-      setSelectedModules(new Set());
-      schedule(refreshModules, 2500);
-    }
-  }
-
-  async function importZip() {
-    if (!selectedProject) return;
-    const file = zipInputRef.current?.files?.[0];
-    if (!file) {
-      pushToast("error", "Sélectionne un fichier ZIP.");
-      return;
-    }
-    const selected = Array.from(selectedZipModules).sort();
-    if (!selected.length) {
-      pushToast("error", "Sélectionne au moins un module à importer.");
-      return;
-    }
-    const form = new FormData();
-    form.append("zip", file);
-    form.append("replace_existing", replaceZipModules ? "1" : "0");
-    form.append("modules", selected.join(","));
-    setLoading(true);
-    try {
-      const result = await api<{ job: Job }>(`/api/projects/${encodeURIComponent(selectedProject.name)}/module-zip`, {
-        method: "POST",
-        body: form,
-      });
-      setSelectedJobId(result.job.id);
-      setExternalLogView(null);
-      setZipDialogOpen(false);
-      resetZipImport();
-      pushToast("success", `Import de ${selected.length} module(s) lancé.`);
-      schedule(refreshModules, 1800);
-      await refreshJobs();
-    } catch (err) {
-      pushToast("error", err instanceof Error ? err.message : "Import ZIP impossible.");
-    } finally {
-      setLoading(false);
-    }
   }
 
   async function restoreDatabaseBackup(
@@ -2052,65 +1604,6 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }
-
-  function resetZipImport() {
-    zipInspectionGeneration.current += 1;
-    setZipFile(null);
-    setZipModuleCandidates([]);
-    setSelectedZipModules(new Set());
-    setInspectingZip(false);
-    if (zipInputRef.current) zipInputRef.current.value = "";
-  }
-
-  async function inspectZipFile(file?: File) {
-    const generation = ++zipInspectionGeneration.current;
-    setZipFile(file || null);
-    setZipModuleCandidates([]);
-    setSelectedZipModules(new Set());
-    if (!file || !selectedProject) {
-      setInspectingZip(false);
-      return;
-    }
-
-    const form = new FormData();
-    form.append("zip", file);
-    setInspectingZip(true);
-    try {
-      const result = await api<ZipInspection>(
-        `/api/projects/${encodeURIComponent(selectedProject.name)}/module-zip/inspect`,
-        { method: "POST", body: form },
-      );
-      if (generation !== zipInspectionGeneration.current) return;
-      setZipModuleCandidates(result.modules);
-      setSelectedZipModules(new Set(result.modules));
-      if (!result.modules.length) {
-        pushToast("error", "Aucun module Odoo détecté dans cette archive.");
-      } else if (result.ignored_symlinks) {
-        pushToast(
-          "info",
-          `${result.modules.length} module(s) détecté(s). ${result.ignored_symlinks} lien(s) de packaging ignoré(s).`,
-        );
-      }
-    } catch (err) {
-      if (generation !== zipInspectionGeneration.current) return;
-      pushToast("error", err instanceof Error ? err.message : "Analyse du ZIP impossible.");
-    } finally {
-      if (generation === zipInspectionGeneration.current) setInspectingZip(false);
-    }
-  }
-
-  function toggleZipModule(moduleName: string, checked: boolean) {
-    setSelectedZipModules((current) => {
-      const next = new Set(current);
-      if (checked) next.add(moduleName);
-      else next.delete(moduleName);
-      return next;
-    });
-  }
-
-  function toggleAllZipModules(checked: boolean) {
-    setSelectedZipModules(checked ? new Set(zipModuleCandidates) : new Set());
   }
 
   const selectedModuleList = useMemo(() => Array.from(selectedModules), [selectedModules]);
@@ -2197,171 +1690,7 @@ export default function Home() {
   const repositoryInspectionKey = repositoryOpen && repositoryUrl.trim() && !repositoryUrlError && repositoryBranch.trim()
     ? `${selectedProject?.name || ""}|${repositoryUrl.trim()}|${repositoryBranch.trim()}`
     : "";
-  const repositoryReadyModules = useMemo(
-    () =>
-      repositoryInspection.status === "ready"
-        ? [...repositoryInspection.modules].sort(
-            (left, right) => REPOSITORY_ACTION_ORDER[left.action] - REPOSITORY_ACTION_ORDER[right.action] || left.name.localeCompare(right.name),
-          )
-        : [],
-    [repositoryInspection],
-  );
-  const repositorySelectableModules = repositoryReadyModules.filter((module) => module.action !== "blocked");
-  const repositorySelectedModules = repositorySelectableModules.filter((module) => repositorySelection.has(module.name));
-  const repositorySelectedAdds = repositorySelectedModules.filter((module) => module.action === "add").length;
-  const repositorySelectedUpdates = repositorySelectedModules.length - repositorySelectedAdds;
-  const repositoryUpdatableModules = repositorySelectableModules.filter((module) => module.action === "update");
-  function repositoryModuleRow(module: RepositoryModule) {
-    const blocked = module.action === "blocked";
-    const selected = !blocked && repositorySelection.has(module.name);
-    const note = module.reason || module.warning;
-    const detail = [module.title, module.path !== module.name && module.path !== "." ? module.path : ""].filter(Boolean).join(" · ");
-    return (
-      <label
-        key={`${module.path}:${module.name}`}
-        className={cn(
-          "grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 px-3 py-2.5 text-sm sm:grid-cols-[auto_minmax(0,1fr)_9rem_6.5rem] sm:items-center",
-          blocked ? "cursor-default" : "cursor-pointer hover:bg-hover",
-          selected && "bg-selected",
-        )}
-      >
-        <Checkbox
-          className="mt-0.5 sm:mt-0"
-          checked={selected}
-          disabled={blocked}
-          aria-label={`Importer ${module.name}`}
-          onCheckedChange={(checked) =>
-            setRepositorySelection((current) => {
-              const next = new Set(current);
-              if (checked === true) next.add(module.name);
-              else next.delete(module.name);
-              return next;
-            })
-          }
-        />
-        <span className="min-w-0">
-          <span className={cn("block truncate font-mono text-[13px] font-medium", blocked && "text-muted-foreground")}>{module.name}</span>
-          {detail && <span className="block truncate text-xs text-muted-foreground">{detail}</span>}
-          {note && (
-            <span className={cn("mt-0.5 block text-xs", module.reason ? "text-muted-foreground" : "text-amber-700 dark:text-amber-300")}>
-              {note}
-            </span>
-          )}
-        </span>
-        <span className="col-start-2 sm:col-start-auto sm:text-right">
-          <RepositoryModuleVersion module={module} />
-        </span>
-        <span className="col-start-3 row-start-1 flex justify-end sm:col-start-auto sm:row-start-auto">
-          <RepositoryModuleStatus module={module} />
-        </span>
-      </label>
-    );
-  }
-
-  const repositoryVisibleModules = useMemo(() => {
-    const query = normalizeSearchText(repositoryFilter.trim());
-    return query
-      ? repositoryReadyModules.filter((module) => normalizeSearchText(`${module.name} ${module.title} ${module.path}`).includes(query))
-      : repositoryReadyModules;
-  }, [repositoryFilter, repositoryReadyModules]);
-  const repositoryVisibleSelectable = repositoryVisibleModules.filter((module) => module.action !== "blocked");
-  const repositoryVisibleBlocked = repositoryVisibleModules.filter((module) => module.action === "blocked");
-
-  useEffect(() => {
-    if (!repositoryOpen) return;
-    setRepositorySource("ssh");
-    // Proposition par défaut : la branche qui porte le nom de la version Odoo du projet.
-    setRepositoryBranch((current) => current || selectedProject?.odoo_version || "");
-    // Compte GitLab connecté : la recherche remplace la saisie d'une URL.
-    window.sdkDesktop?.gitlabStatus()
-      .then((status) => {
-        setGitlabStatus(status);
-        setRepositorySource(defaultRepositorySource(status));
-      })
-      .catch(() => setGitlabStatus(null));
-  }, [repositoryOpen]);
-
-  useEffect(() => {
-    if (!repositoryOpen) {
-      setRepositoryInspection({ status: "idle" });
-      setRepositoryFilter("");
-      return;
-    }
-    if (!repositoryInspectionKey || !selectedProject) {
-      setRepositoryInspection({ status: "idle" });
-      return;
-    }
-    let cancelled = false;
-    // Attend la fin de la saisie : une branche tapée lettre par lettre n'existe pas encore.
-    const timer = window.setTimeout(() => {
-      setRepositoryInspection({ status: "loading", key: repositoryInspectionKey });
-      api<{ modules: RepositoryModule[]; commit: string; odoo_version: string; manifests_read: boolean }>(
-        `/api/projects/${encodeURIComponent(selectedProject.name)}/repository/inspect`,
-        {
-          method: "POST",
-          body: JSON.stringify({ url: repositoryUrl.trim(), branch: repositoryBranch.trim(), db: canUseDb ? selectedDb : "" }),
-        },
-      )
-        .then((result) => {
-          if (cancelled) return;
-          setRepositoryInspection({
-            status: "ready",
-            key: repositoryInspectionKey,
-            modules: result.modules,
-            commit: result.commit,
-            odooVersion: result.odoo_version,
-            manifestsRead: result.manifests_read,
-          });
-          setRepositorySelection(new Set());
-        })
-        .catch((err) => {
-          if (!cancelled) {
-            setRepositoryInspection({
-              status: "error",
-              key: repositoryInspectionKey,
-              error: err instanceof Error ? err.message : "Lecture du dépôt impossible.",
-            });
-          }
-        });
-    }, 900);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [repositoryInspectionKey, repositoryOpen, repositoryInspectionAttempt]);
   const soclePlanKey = socleDialogOpen && canUseDb ? soclePresetsToInstall.join(",") : "";
-
-  useEffect(() => {
-    if (!soclePlanKey || !selectedProject) {
-      setSoclePlan(null);
-      setSoclePlanError("");
-      setLoadingSoclePlan(false);
-      return;
-    }
-    let cancelled = false;
-    setLoadingSoclePlan(true);
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams({ db: selectedDb, presets: soclePlanKey });
-      api<SocleInstallPlan>(`/api/projects/${encodeURIComponent(selectedProject.name)}/socle/plan?${params}`)
-        .then((plan) => {
-          if (cancelled) return;
-          setSoclePlan(plan);
-          setSoclePlanError("");
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          setSoclePlan(null);
-          setSoclePlanError(err instanceof Error ? err.message : "Calcul des dépendances impossible.");
-        })
-        .finally(() => {
-          if (!cancelled) setLoadingSoclePlan(false);
-        });
-    }, 250);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [soclePlanKey, selectedProject, selectedDb]);
   const selectedOdooUrl = odooAccessUrl(selectedProject, selectedDb);
   const scopedExternalLogView = externalLogView?.project === selectedProject?.name ? externalLogView : null;
   const outputTitle = scopedExternalLogView?.title || selectedJob?.title || "Aucune action sélectionnée";
@@ -2379,7 +1708,6 @@ export default function Home() {
   // En mode affiné, un job terminé affiche d'abord son résultat ; la sortie brute se déplie à la demande.
   const finishedJobSummary =
     refinedInterface && !scopedExternalLogView && selectedJob && !isJobUnfinished(selectedJob) ? selectedJob : null;
-  const jobToCancel = jobs.find((job) => job.id === jobToCancelId) || null;
   const selectedJobStop =
     !scopedExternalLogView && selectedJob && isJobUnfinished(selectedJob) ? (
       <JobStopButton job={selectedJob} onRequest={setJobToCancelId} />
@@ -2724,10 +2052,6 @@ export default function Home() {
       </div>
     );
   }
-
-  const settingsDirty = Boolean(
-    settingsDraft && SETTINGS_SAVED_KEYS.some((key) => settingsDraft[key] !== (settings ? settings[key] : undefined)),
-  );
 
   const showFloatingModuleActions =
     activeTab === "modules" && selectedModuleList.length > 0 && Boolean(moduleSelectionBanner) && !moduleSelectionBannerVisible;
@@ -4526,271 +3850,49 @@ export default function Home() {
         }}
       />
 
-      <Dialog open={onboardingOpen} onOpenChange={setOnboardingOpen}>
-        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Préparer le gestionnaire Odoo</DialogTitle>
-            <DialogDescription>
-              Vérifie les prérequis une seule fois, puis crée ton premier environnement depuis l’application.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="divide-y overflow-hidden rounded-md border">
-            <PrerequisiteRow
-              ready={Boolean(creationPrerequisites?.workspace_ready)}
-              icon={FolderPlus}
-              title="Dossier des projets"
-              detail={creationPrerequisites?.workspace || overview?.workspace || "Vérification en cours…"}
-            />
-            <PrerequisiteRow
-              ready={Boolean(systemStatus?.docker.running)}
-              icon={Boxes}
-              title="Docker"
-              detail={systemStatus?.docker.message || "Vérification en cours…"}
-              action={
-                systemStatus?.docker.running ? undefined : (
-                  <Button size="sm" variant="outline" onClick={requestDockerStart} disabled={loading}>
-                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                    Ouvrir
-                  </Button>
-                )
-              }
-            />
-            <PrerequisiteRow
-              ready={Boolean(creationPrerequisites?.git_available)}
-              icon={GitBranch}
-              title="Git"
-              detail={[
-                creationPrerequisites?.git_version || creationPrerequisites?.git_install_message || "Git doit être disponible sur la machine.",
-                creationPrerequisites?.tool_environment,
-              ].filter(Boolean).join(" · ")}
-              action={
-                !creationPrerequisites?.git_available && creationPrerequisites?.git_install_supported ? (
-                  <Button size="sm" variant="outline" onClick={requestGitInstall} disabled={loading || gitInstallRunning}>
-                    {gitInstallRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
-                    {gitInstallRunning ? "Installation…" : "Installer"}
-                  </Button>
-                ) : undefined
-              }
-            />
-            <PrerequisiteRow
-              ready={Boolean(creationPrerequisites?.ssh_key_present)}
-              icon={KeyRound}
-              title="Clé SSH GitLab"
-              detail={
-                creationPrerequisites?.ssh_key_present
-                  ? `${creationPrerequisites.ssh_keys.join(", ")}${creationPrerequisites.tool_environment ? ` · ${creationPrerequisites.tool_environment}` : ""}`
-                  : `Ajoute ta clé publique dans ton profil GitLab avant la première création.${creationPrerequisites?.tool_environment ? ` · ${creationPrerequisites.tool_environment}` : ""}`
-              }
-              action={
-                creationPrerequisites?.ssh_keygen_available || creationPrerequisites?.ssh_key_present ? (
-                  <div className="flex flex-wrap gap-2">
-                    {!creationPrerequisites.ssh_key_present && desktopBridge()?.wslImportSshKey && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        title="Copie la clé GitLab déjà déclarée de %USERPROFILE%\.ssh dans l’environnement Linux. Elle ne quitte pas ce poste."
-                        onClick={requestSshKeyImport}
-                      >
-                        <KeyRound className="h-4 w-4" />
-                        Utiliser ma clé Windows
-                      </Button>
-                    )}
-                    <Button size="sm" variant="outline" onClick={() => openSshAssistant()}>
-                      <KeyRound className="h-4 w-4" />
-                      {creationPrerequisites.ssh_key_present ? "Voir la clé" : "Générer"}
-                    </Button>
-                  </div>
-                ) : undefined
-              }
-            />
-            <PrerequisiteRow
-              ready={Boolean(systemStatus?.traefik?.running)}
-              icon={Activity}
-              title="Traefik"
-              detail={systemStatus?.traefik?.message || "Vérification en cours…"}
-              action={
-                systemStatus?.traefik && !systemStatus.traefik.running && !systemStatus.traefik.requires_docker ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={requestTraefikInstall}
-                    disabled={!creationPrerequisites?.git_available || loading || traefikInstallRunning}
-                    title={!creationPrerequisites?.git_available ? "Installe Git avant Traefik" : undefined}
-                  >
-                    {traefikInstallRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : systemStatus.traefik.installed ? <Play className="h-4 w-4" /> : <CloudDownload className="h-4 w-4" />}
-                    {traefikInstallRunning ? "Installation…" : systemStatus.traefik.installed ? "Démarrer" : "Installer"}
-                  </Button>
-                ) : undefined
-              }
-            />
-          </div>
-          {loadingCreationPrerequisites && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Vérification de Git et de la clé SSH…
-            </div>
-          )}
-          <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
-            <Button
-              variant="outline"
-              onClick={async () => {
-                await completeOnboarding();
-                setOnboardingOpen(false);
-              }}
-            >
-              Configurer plus tard
-            </Button>
-            <Button
-              disabled={
-                loadingCreationPrerequisites ||
-                !creationPrerequisites?.workspace_ready ||
-                !creationPrerequisites.git_available ||
-                !creationPrerequisites.ssh_key_present
-              }
-              onClick={async () => {
-                await completeOnboarding();
-                setOnboardingOpen(false);
-                openCreateProjectDialog();
-              }}
-            >
-              <FolderPlus className="h-4 w-4" />
-              Créer mon premier projet
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <OnboardingDialog
+        completeOnboarding={completeOnboarding}
+        createJob={createJob}
+        creationPrerequisites={creationPrerequisites}
+        jobs={jobs}
+        loadCreationPrerequisites={loadCreationPrerequisites}
+        loading={loading}
+        loadingCreationPrerequisites={loadingCreationPrerequisites}
+        onOpenChange={setOnboardingOpen}
+        open={onboardingOpen}
+        openCreateProjectDialog={openCreateProjectDialog}
+        openSshAssistant={openSshAssistant}
+        overview={overview}
+        pushToast={pushToast}
+        requestDockerStart={requestDockerStart}
+        requestTraefikInstall={requestTraefikInstall}
+        schedule={schedule}
+        systemStatus={systemStatus}
+        traefikInstallRunning={traefikInstallRunning}
+      />
 
-      <Dialog open={sshDialogOpen} onOpenChange={setSshDialogOpen}>
-        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Clé SSH GitLab</DialogTitle>
-            <DialogDescription>
-              Le gestionnaire génère la clé sur cette machine. Seule la clé publique est affichée et peut être copiée.
-            </DialogDescription>
-          </DialogHeader>
-          {sshKeys.length === 0 ? (
-            <div className="space-y-4">
-              <div className="grid gap-1.5">
-                <label className="text-sm font-medium" htmlFor="ssh-key-comment">E-mail professionnel ou commentaire</label>
-                <Input
-                  id="ssh-key-comment"
-                  value={sshComment}
-                  onChange={(event) => setSshComment(event.target.value)}
-                  placeholder="prenom.nom@sudokeys.com"
-                  autoComplete="email"
-                />
-                <p className="text-xs text-muted-foreground">Ce texte sert uniquement à identifier la clé dans GitLab.</p>
-              </div>
-              <Button className="w-full" onClick={() => requestSshKeyGeneration()} disabled={generatingSshKey}>
-                {generatingSshKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-                Générer une clé Ed25519
-              </Button>
-            </div>
-          ) : sshRegenerateMode ? (
-            <div className="space-y-4">
-              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100">
-                <div className="font-medium">Régénérer la clé id_ed25519</div>
-                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5">
-                  <li>Une nouvelle paire de clés remplace <code>~/.ssh/id_ed25519</code> sur cette machine.</li>
-                  <li>
-                    L’ancienne paire n’est pas supprimée : elle est déplacée dans <code>~/.ssh/odoo-manager-backups</code>.
-                  </li>
-                  <li>
-                    Tant que la nouvelle clé publique n’est pas ajoutée dans GitLab, les imports et mises à jour de dépôts échoueront.
-                    Les autres services qui utilisaient l’ancienne clé (serveurs, GitHub…) devront aussi être mis à jour.
-                  </li>
-                </ul>
-              </div>
-              <div className="grid gap-1.5">
-                <label className="text-sm font-medium" htmlFor="ssh-key-regenerate-comment">E-mail professionnel ou commentaire</label>
-                <Input
-                  id="ssh-key-regenerate-comment"
-                  value={sshComment}
-                  onChange={(event) => setSshComment(event.target.value)}
-                  placeholder="prenom.nom@sudokeys.com"
-                  autoComplete="email"
-                />
-              </div>
-              <label className="flex cursor-pointer items-start gap-2 text-sm">
-                <Checkbox
-                  className="mt-0.5"
-                  checked={sshRegenerateConfirmed}
-                  onCheckedChange={(checked) => setSshRegenerateConfirmed(checked === true)}
-                />
-                J’ai compris que je devrai ajouter la nouvelle clé publique dans GitLab.
-              </label>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button variant="outline" onClick={() => setSshRegenerateMode(false)} disabled={generatingSshKey}>
-                  Annuler
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => requestSshKeyGeneration(true)}
-                  disabled={!sshRegenerateConfirmed || generatingSshKey}
-                >
-                  {generatingSshKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-                  Régénérer la clé
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {sshKeyBackup && (
-                <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/45 dark:text-emerald-100">
-                  <div className="font-medium">Nouvelle clé générée</div>
-                  <p className="mt-1 text-xs leading-5">
-                    Copie-la puis ajoute-la dans GitLab. Pense à retirer l’ancienne clé de GitLab ensuite.
-                    Ancienne clé conservée dans : <code className="break-all">{sshKeyBackup}</code>
-                  </p>
-                </div>
-              )}
-              {sshKeys.length > 1 && (
-                <div className="grid gap-1.5">
-                  <label className="text-sm font-medium" htmlFor="ssh-public-key-select">Clé publique</label>
-                  <Select value={selectedSshKey?.name || ""} onValueChange={setSelectedSshKeyName}>
-                    <SelectTrigger id="ssh-public-key-select"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {sshKeys.map((key) => <SelectItem key={key.name} value={key.name}>{key.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              <div className="grid gap-1.5">
-                <label className="text-sm font-medium" htmlFor="ssh-public-key">Clé publique à ajouter dans GitLab</label>
-                <Textarea
-                  id="ssh-public-key"
-                  className="min-h-32 resize-y break-all font-mono text-xs"
-                  readOnly
-                  value={selectedSshKey?.public_key || ""}
-                />
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <Button variant="outline" onClick={copySshPublicKey} disabled={!selectedSshKey}>
-                  <Copy className="h-4 w-4" />
-                  Copier la clé
-                </Button>
-                <Button
-                  onClick={() => openUrl(creationPrerequisites?.gitlab_ssh_keys_url)}
-                  disabled={!creationPrerequisites?.gitlab_ssh_keys_url}
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  Ouvrir GitLab
-                </Button>
-              </div>
-              <p className="text-xs leading-5 text-muted-foreground">
-                Dans GitLab, colle cette valeur dans le champ Clé SSH, donne-lui un titre correspondant à cet ordinateur, puis valide.
-              </p>
-              <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs text-muted-foreground">Clé compromise, perdue ou à renouveler ?</p>
-                <Button variant="outline" onClick={() => startSshKeyRegeneration()} disabled={generatingSshKey}>
-                  <RefreshCcw className="h-4 w-4" />
-                  Régénérer la clé
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      <SshKeyDialog
+        creationPrerequisites={creationPrerequisites}
+        loadCreationPrerequisites={loadCreationPrerequisites}
+        loadSshKeys={loadSshKeys}
+        onOpenChange={setSshDialogOpen}
+        open={sshDialogOpen}
+        openUrl={openUrl}
+        pushToast={pushToast}
+        selectedSshKey={selectedSshKey}
+        selectedSshKeyName={selectedSshKeyName}
+        setSelectedSshKeyName={setSelectedSshKeyName}
+        setSshComment={setSshComment}
+        setSshKeyBackup={setSshKeyBackup}
+        setSshRegenerateConfirmed={setSshRegenerateConfirmed}
+        setSshRegenerateMode={setSshRegenerateMode}
+        sshComment={sshComment}
+        sshKeyBackup={sshKeyBackup}
+        sshKeys={sshKeys}
+        sshRegenerateConfirmed={sshRegenerateConfirmed}
+        sshRegenerateMode={sshRegenerateMode}
+        startSshKeyRegeneration={startSshKeyRegeneration}
+      />
 
       <CreateProjectDialog
         open={createProjectOpen}
@@ -4806,1057 +3908,109 @@ export default function Home() {
         }}
       />
 
-      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent className="flex h-[min(820px,calc(100dvh-4rem))] max-h-[calc(100dvh-4rem)] max-w-5xl flex-col gap-0 overflow-hidden !p-0">
-          <DialogHeader className="border-b px-5 py-4 sm:px-6">
-            <DialogTitle>Paramètres du gestionnaire</DialogTitle>
-            <DialogDescription>Réglages communs à tous les projets du workspace.</DialogDescription>
-          </DialogHeader>
-          {settingsDraft ? (
-            <>
-              <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-                <nav
-                  className="flex shrink-0 gap-1 overflow-x-auto border-b p-2 md:w-60 md:flex-col md:overflow-x-visible md:border-b-0 md:border-r md:p-3"
-                  aria-label="Sections des paramètres"
-                >
-                  {SETTINGS_SECTIONS.map((section) => {
-                    const Icon = section.icon;
-                    const active = settingsSection === section.id;
-                    return (
-                      <button
-                        key={section.id}
-                        type="button"
-                        aria-current={active ? "page" : undefined}
-                        className={cn(
-                          "flex shrink-0 items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          active ? "bg-selected font-medium text-primary" : "text-muted-foreground hover:bg-hover hover:text-foreground",
-                        )}
-                        onClick={() => setSettingsSection(section.id)}
-                      >
-                        <Icon className="h-4 w-4 shrink-0" />
-                        <span className="min-w-0 flex-1 whitespace-nowrap">{section.label}</span>
-                        {section.id === "diagnostic" && managerErrors.length > 0 && (
-                          <Badge variant="warning" className="shrink-0">{managerErrors.length}</Badge>
-                        )}
-                      </button>
-                    );
-                  })}
-                </nav>
+      <SettingsDialog
+        desktopRuntime={desktopRuntime}
+        gitlabStatus={gitlabStatus}
+        loadCreationPrerequisites={loadCreationPrerequisites}
+        loading={loading}
+        loadingManagerErrors={loadingManagerErrors}
+        loadManagerErrors={loadManagerErrors}
+        managerErrorLogPath={managerErrorLogPath}
+        managerErrors={managerErrors}
+        migration={migration}
+        migrationCandidates={migrationCandidates}
+        onOpenChange={setSettingsOpen}
+        open={settingsOpen}
+        openSshAssistant={openSshAssistant}
+        pushToast={pushToast}
+        refreshMigration={refreshMigration}
+        refreshOverview={refreshOverview}
+        refreshSystemStatus={refreshSystemStatus}
+        requestProjectMigration={requestProjectMigration}
+        selectedSshKey={selectedSshKey}
+        setGitlabStatus={setGitlabStatus}
+        setManagerErrors={setManagerErrors}
+        setMigrationBannerClosed={setMigrationBannerClosed}
+        setModules={setModules}
+        setOnboardingOpen={setOnboardingOpen}
+        setSelectedDb={setSelectedDb}
+        setSelectedProjectName={setSelectedProjectName}
+        setSettings={setSettings}
+        setSettingsDraft={setSettingsDraft}
+        setSettingsSection={setSettingsSection}
+        setStoredRikaCredentials={setStoredRikaCredentials}
+        settings={settings}
+        settingsDraft={settingsDraft}
+        settingsSection={settingsSection}
+        storedRikaCredentials={storedRikaCredentials}
+        systemStatus={systemStatus}
+      />
 
-                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
-                  {settingsSection === "general" && (
-                    <SettingsSection title="Général" description="Emplacement des projets et configuration de base du poste.">
-                      <SettingsGroup>
-                        <div className="grid min-w-0 gap-1.5 text-sm font-medium">
-                          <label htmlFor="projects-workspace">Dossier des projets</label>
-                          <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-                            <Input
-                              id="projects-workspace"
-                              className="min-w-0 flex-1"
-                              value={settingsDraft.workspace}
-                              onChange={(event) => setSettingsDraft({ ...settingsDraft, workspace: event.target.value })}
-                              placeholder="/chemin/vers/Odoo-projects"
-                            />
-                            <Button
-                              className="shrink-0"
-                              type="button"
-                              variant="outline"
-                              disabled={!desktopRuntime || selectingWorkspace}
-                              title={desktopRuntime ? "Choisir un dossier" : "Disponible dans l’application installée"}
-                              onClick={selectWorkspaceDirectory}
-                            >
-                              {selectingWorkspace ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderOpen className="h-4 w-4" />}
-                              Choisir
-                            </Button>
-                          </div>
-                          <span className="text-xs font-normal leading-relaxed text-muted-foreground">
-                            Le dossier est créé s’il n’existe pas encore. Dans l’application installée, « Choisir » ouvre le sélecteur du système.
-                          </span>
-                        </div>
+      <AboutDialog
+        appVersion={appVersion}
+        onOpenChange={setAboutOpen}
+        open={aboutOpen}
+        pushToast={pushToast}
+        selectedAppIcon={selectedAppIcon}
+        settings={settings}
+      />
 
-                      </SettingsGroup>
-                      <div className="rounded-md border bg-muted/40 p-3">
-                        <div className="text-sm font-medium">Exécution automatique</div>
-                        <p className="mt-1 text-xs font-normal leading-relaxed text-muted-foreground">
-                          Le gestionnaire choisit automatiquement les outils adaptés au système. Sous Windows, Docker,
-                          Git et les chemins sont exécutés dans l’environnement compatible avec le workspace. Les chemins Windows
-                          sont traduits automatiquement lorsque Docker ou Git passe par WSL.
-                        </p>
-                      </div>
+      <SocleDialog
+        createJob={createJob}
+        loading={loading}
+        loadingSocleCatalog={loadingSocleCatalog}
+        onOpenChange={setSocleDialogOpen}
+        open={socleDialogOpen}
+        refreshModules={refreshModules}
+        schedule={schedule}
+        selectedDb={selectedDb}
+        selectedProject={selectedProject}
+        selectedSoclePresets={selectedSoclePresets}
+        setActiveTab={setActiveTab}
+        setSelectedSoclePresets={setSelectedSoclePresets}
+        setSoclePlan={setSoclePlan}
+        setSocleSearch={setSocleSearch}
+        socleCatalog={socleCatalog}
+        soclePlan={soclePlan}
+        soclePlanKey={soclePlanKey}
+        soclePresetsToInstall={soclePresetsToInstall}
+        socleSearch={socleSearch}
+      />
 
-                      <SettingsGroup>
-                        {migration?.available && migrationCandidates.length > 0 && (
-                          <div className="grid gap-3">
-                            <div>
-                              <div className="text-sm font-medium">Projets restés sur le disque Windows</div>
-                              <p className="mt-1 text-xs leading-relaxed text-muted-foreground" title={migration.source}>
-                                Les copier ici fait démarrer Odoo en quelques secondes au lieu d’une minute. Le dossier
-                                d’origine n’est pas modifié : tant qu’il est là, la proposition reste disponible.
-                              </p>
-                            </div>
-                            <div className="grid gap-2 text-sm">
-                              <MigrationProposal
-                                candidates={migrationCandidates}
-                                loading={loading}
-                                onMigrate={(project, force) => {
-                                  setSettingsOpen(false);
-                                  void requestProjectMigration(project, force);
-                                }}
-                              />
-                            </div>
-                            <label className="flex cursor-pointer items-start gap-3 text-sm">
-                              <Checkbox
-                                className="mt-0.5"
-                                checked={!settingsDraft.migration_banner_dismissed}
-                                onCheckedChange={(checked) =>
-                                  setSettingsDraft({ ...settingsDraft, migration_banner_dismissed: checked !== true })
-                                }
-                              />
-                              <span className="min-w-0">
-                                <span className="block font-medium">Proposer la copie sur l’écran d’accueil</span>
-                                <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
-                                  Décoché, le bandeau ne revient plus. La copie reste possible depuis ici.
-                                </span>
-                              </span>
-                            </label>
-                          </div>
-                        )}
+      <RepositoryImportDialog
+        canUseDb={canUseDb}
+        createJob={createJob}
+        gitlabStatus={gitlabStatus}
+        onOpenChange={setRepositoryOpen}
+        open={repositoryOpen}
+        openAccountSettings={openAccountSettings}
+        openSshAssistant={openSshAssistant}
+        repositoryBranch={repositoryBranch}
+        repositoryInspectionKey={repositoryInspectionKey}
+        repositoryUrl={repositoryUrl}
+        repositoryUrlError={repositoryUrlError}
+        selectedDb={selectedDb}
+        selectedProject={selectedProject}
+        selectedProjectReady={selectedProjectReady}
+        setActiveTab={setActiveTab}
+        setGitlabStatus={setGitlabStatus}
+        setRepositoryBranch={setRepositoryBranch}
+        setRepositoryUrl={setRepositoryUrl}
+      />
 
-                        <div className="grid gap-3">
-                          <div>
-                            <div className="text-sm font-medium">Configuration initiale</div>
-                            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                              Rouvre l’assistant du premier démarrage pour vérifier le workspace, Docker, Git, SSH et Traefik.
-                            </p>
-                          </div>
-                          <Button type="button" variant="outline" onClick={reopenInitialConfiguration}>
-                            <Settings className="h-4 w-4" />
-                            Ouvrir l’assistant de configuration
-                          </Button>
-                        </div>
-
-                      </SettingsGroup>
-                    </SettingsSection>
-                  )}
-
-                  {settingsSection === "appearance" && (
-                    <SettingsSection title="Apparence" description="Organisation des écrans et éléments affichés.">
-                      <SettingsGroup>
-                        <div className="grid gap-3">
-                          <div>
-                          <div className="text-sm font-medium">Mise en page</div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            L’interface affinée réorganise Bases, Modules, Activité et Réglages du projet : moins de vide, colonnes
-                            alignées, survols et focus plus visibles, sortie technique dépliée à la demande. Aucune action ni
-                            information n’est retirée.
-                          </p>
-                          </div>
-                          <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Interface">
-                            {([
-                              ["classic", "Classique", "Interface actuelle, inchangée."],
-                              ["refined", "Affinée (bêta)", "Nouvelle organisation des écrans Bases, Modules, Activité et Réglages."],
-                            ] as const).map(([value, title, description]) => (
-                              <InteractiveCard
-                                key={value}
-                                role="radio"
-                                aria-checked={(settingsDraft.interface_layout ?? "classic") === value}
-                                className={cn("p-3 text-left", (settingsDraft.interface_layout ?? "classic") === value && "border-primary bg-selected")}
-                                onClick={() => setSettingsDraft({ ...settingsDraft, interface_layout: value })}
-                              >
-                                <span className="block text-sm font-medium">{title}</span>
-                                <span className="mt-1 block text-xs text-muted-foreground">{description}</span>
-                              </InteractiveCard>
-                            ))}
-                          </div>
-                        </div>
-
-                      </SettingsGroup>
-                      <SettingsGroup>
-                        <div className="grid gap-2">
-                          <div>
-                            <div className="text-sm font-medium">Icône affichée</div>
-                            <p className="mt-1 text-xs font-normal text-muted-foreground">
-                              Choisis l’identité visuelle utilisée dans le gestionnaire.
-                            </p>
-                          </div>
-                          <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Icône affichée">
-                            <InteractiveCard
-                              className={cn(
-                                "flex min-h-24 items-center gap-3 p-3",
-                                settingsDraft.interface_icon === "manager" && "border-primary bg-selected ring-1 ring-primary/25",
-                              )}
-                              role="radio"
-                              aria-checked={settingsDraft.interface_icon === "manager"}
-                              onClick={() => setSettingsDraft({ ...settingsDraft, interface_icon: "manager" })}
-                            >
-                              <img src={appIcon.src} alt="" aria-hidden="true" className="h-14 w-14 shrink-0 rounded-[13px] object-cover" />
-                              <span className="min-w-0 flex-1">
-                                <span className="block text-sm font-semibold">SDK Local Manager</span>
-                                <span className="mt-1 block text-xs text-muted-foreground">Logo Sudokeys</span>
-                              </span>
-                              {settingsDraft.interface_icon === "manager" && <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />}
-                            </InteractiveCard>
-                            <InteractiveCard
-                              className={cn(
-                                "flex min-h-24 items-center gap-3 p-3",
-                                settingsDraft.interface_icon === "local" && "border-primary bg-selected ring-1 ring-primary/25",
-                              )}
-                              role="radio"
-                              aria-checked={settingsDraft.interface_icon === "local"}
-                              onClick={() => setSettingsDraft({ ...settingsDraft, interface_icon: "local" })}
-                            >
-                              <img src={localIcon.src} alt="" aria-hidden="true" className="h-14 w-14 shrink-0 rounded-full object-cover" />
-                              <span className="min-w-0 flex-1">
-                                <span className="block text-sm font-semibold">Logo Local</span>
-                                <span className="mt-1 block text-xs text-muted-foreground">Nouvelle icône</span>
-                              </span>
-                              {settingsDraft.interface_icon === "local" && <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />}
-                            </InteractiveCard>
-                          </div>
-                        </div>
-
-                      </SettingsGroup>
-                      <div className="divide-y overflow-hidden rounded-md border bg-card">
-                      <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-hover">
-                        <Checkbox
-                          className="mt-0.5"
-                          checked={settingsDraft.show_technical_details}
-                          onCheckedChange={(checked) =>
-                            setSettingsDraft({ ...settingsDraft, show_technical_details: checked === true })
-                          }
-                        />
-                        <span className="min-w-0">
-                          <span className="block font-medium">Afficher les détails techniques</span>
-                          <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
-                            Affiche les états Odoo et PostgreSQL ainsi que le nombre de bases dans la liste des projets,
-                            les emplacements des modules, et les actions de mise à jour du code et des images Docker.
-                            Désactivé, le gestionnaire présente uniquement le voyant d’état des projets et une liste de modules compacte.
-                          </span>
-                        </span>
-                      </label>
-
-                      <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-hover">
-                        <Checkbox
-                          className="mt-0.5"
-                          checked={settingsDraft.sticky_header}
-                          onCheckedChange={(checked) =>
-                            setSettingsDraft({ ...settingsDraft, sticky_header: checked === true })
-                          }
-                        />
-                        <span className="min-w-0">
-                          <span className="block font-medium">En-tête fixe</span>
-                          <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
-                            Garde le nom du projet, les actions et les onglets visibles pendant le défilement.
-                            L’en-tête se compacte dès que la page défile. Sur les fenêtres étroites, il reste non fixe pour préserver la place.
-                          </span>
-                        </span>
-                      </label>
-
-                      </div>
-                    </SettingsSection>
-                  )}
-
-                  {settingsSection === "accounts" && (
-                    <SettingsSection
-                      title="Comptes et accès"
-                      description="Clé SSH, GitLab et identifiants mémorisés. Ces réglages s’appliquent immédiatement, sans enregistrement."
-                    >
-                      <div className="grid gap-3 rounded-md border p-3">
-                        <div className="flex min-w-0 items-start gap-3">
-                          <KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-                          <div className="min-w-0 flex-1">
-                            <div className="text-sm font-medium">Clé SSH GitLab</div>
-                            <p className="mt-1 break-words text-xs leading-relaxed text-muted-foreground">
-                              {selectedSshKey
-                                ? `${selectedSshKey.name} · ${selectedSshKey.public_key}`
-                                : "Aucune clé publique détectée dans l’environnement Git utilisé par le gestionnaire."}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <Button type="button" variant="outline" className={cn(!selectedSshKey && "sm:col-span-2")} onClick={() => openSshAssistant()}>
-                            <KeyRound className="h-4 w-4" />
-                            {selectedSshKey ? "Gérer la clé SSH" : "Configurer une clé"}
-                          </Button>
-                          {selectedSshKey && (
-                            <Button type="button" variant="outline" onClick={() => openSshAssistant(true)}>
-                              <RefreshCcw className="h-4 w-4" />
-                              Régénérer la clé
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-
-                      {gitlabStatus && (
-                        <div className="grid gap-3 rounded-md border p-3">
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium">Recherche de dépôts GitLab</div>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {gitlabStatus.connected
-                                  ? `Connecté à gitlab.sudokeys.com${gitlabStatus.username ? ` en tant que @${gitlabStatus.username}` : ""}. « Dépôt SSH » propose la recherche de dépôts et de branches ; le lien SSH reste le mode par défaut.`
-                                  : "Désactivée : « Dépôt SSH » utilise le lien SSH. Connecte un jeton personnel en lecture seule (portée read_api) pour chercher un dépôt et choisir sa branche."}
-                              </p>
-                            </div>
-                            {gitlabStatus.connected && (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="shrink-0"
-                                onClick={async () => {
-                                  try {
-                                    setGitlabStatus(await window.sdkDesktop!.gitlabDisconnect());
-                                    pushToast("success", "GitLab déconnecté.");
-                                  } catch {
-                                    pushToast("error", "Impossible de déconnecter GitLab.");
-                                  }
-                                }}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                                Déconnecter
-                              </Button>
-                            )}
-                          </div>
-                          {!gitlabStatus.available && <p className="text-xs text-amber-700 dark:text-amber-300">{gitlabStatus.reason}</p>}
-                          {gitlabStatus.available && !gitlabStatus.connected && (
-                            <form
-                              className="flex flex-col gap-2 sm:flex-row"
-                              onSubmit={async (event) => {
-                                event.preventDefault();
-                                if (!gitlabTokenDraft.trim()) return;
-                                setGitlabConnecting(true);
-                                try {
-                                  setGitlabStatus(await window.sdkDesktop!.gitlabConnect(gitlabTokenDraft));
-                                  setGitlabTokenDraft("");
-                                  pushToast("success", "GitLab connecté : la recherche de dépôts est activée.");
-                                } catch (err) {
-                                  pushToast("error", desktopErrorMessage(err, "Connexion GitLab impossible."));
-                                } finally {
-                                  setGitlabConnecting(false);
-                                }
-                              }}
-                            >
-                              <Input
-                                type="password"
-                                autoComplete="off"
-                                value={gitlabTokenDraft}
-                                onChange={(event) => setGitlabTokenDraft(event.target.value)}
-                                placeholder="Jeton personnel GitLab (glpat-…)"
-                                aria-label="Jeton personnel GitLab"
-                              />
-                              <Button type="submit" className="shrink-0" disabled={gitlabConnecting || !gitlabTokenDraft.trim()}>
-                                {gitlabConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-                                Activer
-                              </Button>
-                              <Button type="button" variant="ghost" className="shrink-0" onClick={() => void openExternalUrl(GITLAB_TOKEN_URL)}>
-                                <ExternalLink className="h-4 w-4" />
-                                Créer un jeton
-                              </Button>
-                            </form>
-                          )}
-                        </div>
-                      )}
-
-                      {storedRikaCredentials?.available && (
-                        <div className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium">Identifiants RIKA</div>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {storedRikaCredentials.login
-                                ? `${storedRikaCredentials.login} · ${storedRikaCredentials.password ? "identifiant et mot de passe" : "identifiant seul"} dans le coffre-fort du système.`
-                                : "Aucun identifiant mémorisé sur cet ordinateur."}
-                            </p>
-                          </div>
-                          {storedRikaCredentials.login && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={async () => {
-                                try {
-                                  await window.sdkDesktop?.clearRikaCredentials();
-                                  setStoredRikaCredentials({ ...storedRikaCredentials, login: "", password: "" });
-                                  pushToast("success", "Identifiants RIKA oubliés.");
-                                } catch {
-                                  pushToast("error", "Impossible d’effacer les identifiants RIKA.");
-                                }
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Oublier
-                            </Button>
-                          )}
-                        </div>
-                      )}
-
-                    </SettingsSection>
-                  )}
-
-                  {settingsSection === "advanced" && (
-                    <SettingsSection title="Avancé" description="Outils système, détection de Docker et réseau local.">
-                      <SettingsGroup className="items-start sm:grid-cols-2">
-                        <label className="grid gap-1.5 text-sm font-medium">
-                          Commande Docker
-                          <Input
-                            value={settingsDraft.docker_executable}
-                            onChange={(event) => setSettingsDraft({ ...settingsDraft, docker_executable: event.target.value })}
-                            placeholder="docker"
-                          />
-                        </label>
-
-                        <label className="grid min-w-0 gap-1.5 text-sm font-medium">
-                          Dossier Traefik
-                          <Input
-                            value={settingsDraft.traefik_directory}
-                            onChange={(event) => setSettingsDraft({ ...settingsDraft, traefik_directory: event.target.value })}
-                            placeholder="Détection automatique si vide"
-                          />
-                        </label>
-
-                        <label className="grid gap-1.5 text-sm font-medium">
-                          Vérification Docker (secondes)
-                          <Input
-                            type="number"
-                            min={3}
-                            max={60}
-                            value={settingsDraft.docker_poll_interval}
-                            onChange={(event) => setSettingsDraft({ ...settingsDraft, docker_poll_interval: Number(event.target.value) })}
-                          />
-                        </label>
-
-                        <label className="grid gap-1.5 text-sm font-medium">
-                          Port local du gestionnaire
-                          <Input
-                            type="number"
-                            min={1024}
-                            max={65535}
-                            value={settingsDraft.api_port}
-                            onChange={(event) => setSettingsDraft({ ...settingsDraft, api_port: Number(event.target.value) })}
-                          />
-                          <span className="text-xs font-normal leading-relaxed text-muted-foreground">
-                            Port préféré de l’API locale. Un redémarrage est nécessaire après modification. S’il est occupé, notamment par Docker, le gestionnaire choisit automatiquement un port libre.
-                          </span>
-                        </label>
-
-                      </SettingsGroup>
-                      <div className="grid gap-3 rounded-md border bg-muted/40 p-3 text-sm">
-                        <div>
-                          <div className="font-medium">Ports utilisés ou contactés</div>
-                          <p className="mt-1 text-xs text-muted-foreground">Les ports internes Docker ne sont pas réservés sur Windows sauf publication explicite du projet.</p>
-                        </div>
-                        <div className="grid gap-x-4 gap-y-2 text-xs sm:grid-cols-[100px_minmax(0,1fr)]">
-                          <code>{settingsDraft.api_port_actual || settingsDraft.api_port}</code><span>API locale du gestionnaire, sur <code>127.0.0.1</code> uniquement</span>
-                          <code>{systemStatus?.traefik?.http_port ?? 80}</code>
-                          <span>
-                            Traefik, accès HTTP aux projets
-                            {systemStatus?.traefik?.external && systemStatus.traefik.container ? ` (instance existante : ${systemStatus.traefik.container})` : ""}
-                          </span>
-                          <code>8069</code><span>Odoo à l’intérieur de chaque conteneur</span>
-                          <code>5432</code><span>PostgreSQL à l’intérieur de chaque conteneur</span>
-                          <code>10022</code><span>Connexion SSH sortante vers GitLab Sudokeys</span>
-                          <code>3000</code><span>Interface Next.js, uniquement en mode développement</span>
-                        </div>
-                        {settingsDraft.api_port_actual && settingsDraft.api_port_actual !== settingsDraft.api_port && (
-                          <p className="text-xs text-amber-700 dark:text-amber-300">
-                            Le port {settingsDraft.api_port} était occupé au démarrage. Cette session utilise automatiquement le port {settingsDraft.api_port_actual}.
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
-                        <div>Plateforme : {settingsDraft.platform || systemStatus?.docker.platform || "-"}</div>
-                        <div className="mt-1 break-all">Configuration : {settingsDraft.config_file || "-"}</div>
-                      </div>
-
-                    </SettingsSection>
-                  )}
-
-                  {settingsSection === "diagnostic" && (
-                    <SettingsSection title="Diagnostic" description="Erreurs enregistrées localement pour le support.">
-                      <div className="grid gap-3 rounded-md border p-3">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium">Journal d’erreurs du gestionnaire</div>
-                            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                              Les erreurs d’API, de jobs et d’interface sont conservées localement. Les mots de passe, jetons et secrets détectés sont masqués.
-                            </p>
-                            {managerErrorLogPath && <p className="mt-1 break-all text-xs text-muted-foreground">Fichier : {managerErrorLogPath}</p>}
-                          </div>
-                          <Badge className="shrink-0" variant={managerErrors.length ? "warning" : "secondary"}>
-                            {managerErrors.length} erreur(s)
-                          </Badge>
-                        </div>
-                        <div className="max-h-72 space-y-2 overflow-y-auto rounded-md border bg-muted/30 p-2">
-                          {loadingManagerErrors ? (
-                            <div className="flex items-center gap-2 p-2 text-xs text-muted-foreground">
-                              <Loader2 className="h-4 w-4 animate-spin" /> Chargement…
-                            </div>
-                          ) : managerErrors.length ? managerErrors.map((entry) => (
-                            <details key={entry.id} className="rounded-md border bg-card p-2 text-xs">
-                              <summary className="cursor-pointer break-words font-medium">
-                                {entry.timestamp} · {entry.source}{entry.project ? ` · ${entry.project}` : ""}
-                              </summary>
-                              <p className="mt-2 whitespace-pre-wrap break-words text-destructive">{entry.message}</p>
-                              {entry.details && <pre className="log-terminal mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-2 text-[11px] text-slate-100">{entry.details}</pre>}
-                            </details>
-                          )) : (
-                            <p className="p-2 text-xs text-muted-foreground">Aucune erreur enregistrée.</p>
-                          )}
-                        </div>
-                        <div className="grid gap-2 sm:grid-cols-3">
-                          <Button type="button" variant="outline" onClick={loadManagerErrors} disabled={loadingManagerErrors}>
-                            <RefreshCcw className="h-4 w-4" /> Actualiser
-                          </Button>
-                          <Button type="button" variant="outline" onClick={copyManagerErrors} disabled={!managerErrors.length}>
-                            <Copy className="h-4 w-4" /> Copier
-                          </Button>
-                          <Button type="button" variant="outline" onClick={clearManagerErrors} disabled={!managerErrors.length}>
-                            <Trash2 className="h-4 w-4" /> Effacer
-                          </Button>
-                        </div>
-                      </div>
-
-                    </SettingsSection>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col-reverse gap-3 border-t px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-                <p className={cn("text-xs", settingsDirty ? "font-medium text-amber-700 dark:text-amber-300" : "text-muted-foreground")}>
-                  {settingsDirty ? "Modifications non enregistrées." : "Aucune modification en attente."}
-                </p>
-                <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                  <Button variant="outline" onClick={() => setSettingsOpen(false)}>Annuler</Button>
-                  <Button
-                    disabled={savingSettings || !settingsDirty || !settingsDraft.workspace.trim() || settingsDraft.api_port < 1024 || settingsDraft.api_port > 65535}
-                    onClick={saveSettings}
-                  >
-                    {savingSettings && <Loader2 className="h-4 w-4 animate-spin" />}
-                    Enregistrer
-                  </Button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="m-5 flex items-center gap-2 rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Chargement des paramètres...
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={aboutOpen} onOpenChange={setAboutOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>À propos d’SDK Local Manager</DialogTitle>
-            <DialogDescription>
-              Gestionnaire local pour créer, administrer et maintenir des environnements Odoo.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div className="overflow-hidden rounded-md border">
-              <div className="flex min-w-0 items-center gap-3 bg-muted/35 p-4">
-                <img
-                  src={selectedAppIcon.src}
-                  alt=""
-                  aria-hidden="true"
-                  className={cn(
-                    "h-12 w-12 shrink-0 object-cover",
-                    settings?.interface_icon === "local" ? "rounded-full" : "rounded-[11px]",
-                  )}
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold">SDK Local Manager</div>
-                  <div className="mt-0.5 text-sm text-muted-foreground">Application desktop multi-plateforme</div>
-                </div>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="shrink-0"
-                  title="Copier les informations de version"
-                  aria-label="Copier les informations de version"
-                  onClick={async () => {
-                    const details = [`Build ${APP_BUILD || "local"}`, APP_COMMIT && `commit ${APP_COMMIT}`].filter(Boolean).join(", ");
-                    try {
-                      await navigator.clipboard.writeText(`SDK Local Manager ${appVersion} (${details})`);
-                      pushToast("success", "Informations de version copiées.");
-                    } catch {
-                      pushToast("error", "Impossible de copier les informations de version.");
-                    }
-                  }}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-              <dl className={cn("grid divide-x border-t text-sm", APP_COMMIT ? "grid-cols-3" : "grid-cols-2")}>
-                <div className="min-w-0 px-4 py-3">
-                  <dt className={REFINED_LABEL}>Version</dt>
-                  <dd className="mt-1 font-medium tabular-nums">{appVersion}</dd>
-                </div>
-                <div className="min-w-0 px-4 py-3">
-                  <dt className={REFINED_LABEL}>Build</dt>
-                  <dd className={cn("mt-1 font-medium tabular-nums", !APP_BUILD && "text-muted-foreground")}>
-                    {APP_BUILD || "Local"}
-                  </dd>
-                </div>
-                {APP_COMMIT && (
-                  <div className="min-w-0 px-4 py-3">
-                    <dt className={REFINED_LABEL}>Commit</dt>
-                    <dd className="mt-1 truncate font-mono text-[13px]" title={APP_COMMIT}>{APP_COMMIT}</dd>
-                  </div>
-                )}
-              </dl>
-            </div>
-            <div className="rounded-md border p-4">
-              <div className="text-sm font-semibold">À propos du créateur</div>
-              <div className="mt-3 flex items-start gap-2 text-sm leading-relaxed text-muted-foreground">
-                <Heart className="mt-0.5 h-4 w-4 shrink-0 fill-current text-red-500" aria-hidden="true" />
-                <p>Fait avec amour par Aymerick Benjamin LAURETTA-PERONNE</p>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={socleDialogOpen} onOpenChange={setSocleDialogOpen}>
-        <DialogContent className="flex max-w-5xl flex-col gap-4 overflow-hidden">
-          <DialogHeader>
-            <DialogTitle>Installer un socle Odoo</DialogTitle>
-            <DialogDescription>
-              Sélectionne les applications à installer dans {selectedDb || "la base choisie"}. Les dépendances et les modules
-              qu’Odoo installe automatiquement sont calculés à partir des manifestes du projet.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              value={socleSearch}
-              onChange={(event) => setSocleSearch(event.target.value)}
-              placeholder="Rechercher une application ou un module technique"
-              aria-label="Rechercher une application"
-            />
-          </div>
-          <div className="-mx-1 min-h-0 flex-1 space-y-5 overflow-y-auto px-1">
-            {!socleCatalog && loadingSocleCatalog && (
-              <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Lecture des manifestes du projet…
-              </div>
-            )}
-            {socleCatalog && !socleCatalog.states_available && (
-              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100">
-                État des modules de la base indisponible : les modules déjà installés ne peuvent pas être détectés.
-              </div>
-            )}
-            {socleCatalog?.sections.map((section) => {
-              const apps = visibleSocleApps.filter((app) => app.section === section.id);
-              if (!apps.length) return null;
-              return (
-                <section key={section.id} aria-labelledby={`socle-section-${section.id}`}>
-                  <h3 id={`socle-section-${section.id}`} className="mb-2 text-sm font-semibold">{section.label}</h3>
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {apps.map((app) => {
-                      const unavailable = app.missing.length > 0;
-                      const alreadyInstalled = socleAppInstalled(app);
-                      return (
-                        <label
-                          key={app.id}
-                          className={cn(
-                            "flex min-w-0 items-start gap-3 rounded-md border p-2.5 text-sm transition-colors",
-                            unavailable || alreadyInstalled ? "cursor-not-allowed bg-muted/35 opacity-60" : "cursor-pointer hover:bg-hover",
-                            selectedSoclePresets.has(app.id) && !alreadyInstalled && "border-primary bg-selected",
-                          )}
-                        >
-                          <Checkbox
-                            className="mt-0.5"
-                            checked={alreadyInstalled || selectedSoclePresets.has(app.id)}
-                            disabled={unavailable || alreadyInstalled || loading}
-                            onCheckedChange={(checked) => toggleSoclePreset(app.id, checked === true)}
-                          />
-                          <img src={`/odoo-apps/${app.id}.svg`} alt="" aria-hidden="true" className="h-9 w-9 shrink-0 object-contain" />
-                          <span className="min-w-0">
-                            <span className="block font-medium">{app.label}</span>
-                            <span className="mt-0.5 block break-all font-mono text-[11px] text-muted-foreground">{app.modules.join(" + ")}</span>
-                            {unavailable ? (
-                              <span className="mt-0.5 block text-xs text-destructive">Absent de cette version : {app.missing.join(", ")}</span>
-                            ) : alreadyInstalled ? (
-                              <span className="mt-0.5 block text-xs text-muted-foreground">Déjà installé</span>
-                            ) : app.extra_count > 0 ? (
-                              <span className="mt-0.5 block text-xs text-muted-foreground">+ {app.extra_count} module(s) installé(s) avec</span>
-                            ) : null}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </section>
-              );
-            })}
-            {socleCatalog && !visibleSocleApps.length && (
-              <p className="py-6 text-center text-sm text-muted-foreground">Aucune application ne correspond à la recherche.</p>
-            )}
-          </div>
-          <div className="space-y-3 border-t pt-3">
-            <div className="max-h-[20dvh] overflow-y-auto rounded-md border bg-muted/35 p-3 text-sm sm:max-h-[30dvh]" aria-live="polite">
-              {!soclePresetsToInstall.length ? (
-                <p className="text-muted-foreground">Sélectionne des applications pour voir tout ce qui sera installé.</p>
-              ) : loadingSoclePlan && !soclePlan ? (
-                <p className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Calcul des dépendances…
-                </p>
-              ) : soclePlanError ? (
-                <p className="text-destructive">{soclePlanError}</p>
-              ) : soclePlan ? (
-                <div className={cn("space-y-2", loadingSoclePlan && "opacity-60")}>
-                  <div className="font-medium">
-                    {soclePlan.total} module(s) seront installés
-                    <span className="font-normal text-muted-foreground">
-                      {" "}· {soclePlan.requested.length} demandé(s), {soclePlan.dependencies.length} dépendance(s),
-                      {" "}{soclePlan.auto_installed.length} automatique(s)
-                    </span>
-                  </div>
-                  {soclePlan.applications.length > 0 && (
-                    <div className="text-xs">
-                      <span className="font-medium">Applications ajoutées en plus :</span>{" "}
-                      {soclePlan.applications.map((item) => item.title).join(", ")}
-                    </div>
-                  )}
-                  {(soclePlan.missing.length > 0 || soclePlan.uninstallable.length > 0) && (
-                    <div className="text-xs text-destructive">
-                      Installation impossible, dépendances introuvables ou non installables :{" "}
-                      {[...soclePlan.missing, ...soclePlan.uninstallable].map((item) => `${item.name} (requis par ${item.required_by})`).join(", ")}
-                    </div>
-                  )}
-                  {soclePlan.dependencies.length > 0 && (
-                    <details>
-                      <summary className="cursor-pointer text-xs font-medium">Dépendances ({soclePlan.dependencies.length})</summary>
-                      <PlanModuleChips items={soclePlan.dependencies} />
-                    </details>
-                  )}
-                  {soclePlan.auto_installed.length > 0 && (
-                    <details>
-                      <summary className="cursor-pointer text-xs font-medium">
-                        Installés automatiquement par Odoo ({soclePlan.auto_installed.length})
-                      </summary>
-                      <PlanModuleChips items={soclePlan.auto_installed} />
-                    </details>
-                  )}
-                </div>
-              ) : null}
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Button variant="outline" disabled={!selectedProject || loading} onClick={repairEnterpriseLinks}>
-                <RefreshCcw className="h-4 w-4" />
-                Vérifier / créer les liens uniquement
-              </Button>
-              <Button
-                disabled={!selectedDb || loading || !soclePresetsToInstall.length || loadingSoclePlan || soclePlanBlocked}
-                onClick={installSelectedSocle}
-              >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Boxes className="h-4 w-4" />}
-                Installer la sélection{soclePlan && soclePresetsToInstall.length ? ` (${soclePlan.total} modules)` : ""}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={repositoryOpen} onOpenChange={setRepositoryOpen}>
-        <DialogContent className="flex max-w-3xl flex-col gap-0 overflow-hidden p-0">
-          <DialogHeader className="border-b px-6 pb-4 pt-6">
-            <DialogTitle>Importer des modules depuis Git</DialogTitle>
-            <DialogDescription>
-              Le code est copié dans {selectedProject?.name}. Un module absent est ajouté, une copie déjà gérée est mise à jour.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
-            <section className="space-y-3" aria-labelledby="repository-source-title">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 id="repository-source-title" className="text-sm font-semibold">Dépôt et branche</h3>
-                <RepositorySourceToggle value={repositorySource} onChange={setRepositorySource} status={gitlabStatus} />
-              </div>
-              {repositorySource === "gitlab" && (gitlabStatus?.available || gitlabStatus?.unreadable) ? (
-                <GitLabRepositoryPicker
-                  status={gitlabStatus}
-                  url={repositoryUrl}
-                  branch={repositoryBranch}
-                  preferredBranches={selectedProject?.odoo_version ? [selectedProject.odoo_version] : []}
-                  onChange={({ url, branch }) => {
-                    setRepositoryUrl(url);
-                    setRepositoryBranch(branch);
-                  }}
-                  onManageAccount={() => {
-                    setRepositoryOpen(false);
-                    openAccountSettings();
-                  }}
-                />
-              ) : (
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
-                  <label className="grid gap-1.5 text-sm font-medium">
-                    URL SSH du dépôt
-                    <Input
-                      value={repositoryUrl}
-                      onChange={(event) => setRepositoryUrl(event.target.value)}
-                      placeholder="ssh://git@gitlab.sudokeys.com:10022/equipe/depot.git"
-                      aria-invalid={Boolean(repositoryUrlError)}
-                      aria-describedby={repositoryUrlError ? "repository-url-error" : undefined}
-                    />
-                    {repositoryUrlError && <span id="repository-url-error" className="text-xs font-normal text-destructive">{repositoryUrlError}</span>}
-                  </label>
-                  <label className="grid content-start gap-1.5 text-sm font-medium">
-                    Branche ou tag
-                    <Input
-                      value={repositoryBranch}
-                      onChange={(event) => setRepositoryBranch(event.target.value)}
-                      placeholder={selectedProject?.odoo_version || "18.0"}
-                      className="font-mono"
-                    />
-                  </label>
-                </div>
-              )}
-              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                <KeyRound className="h-3.5 w-3.5" />
-                Accès par la clé SSH de cet ordinateur, sans jeton stocké.
-                <button type="button" className="font-medium text-primary underline-offset-2 hover:underline" onClick={() => openSshAssistant()}>
-                  Gérer la clé SSH
-                </button>
-              </p>
-            </section>
-
-            <section className="space-y-3 border-t pt-5" aria-labelledby="repository-modules-title">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h3 id="repository-modules-title" className="text-sm font-semibold">Modules</h3>
-                {repositoryInspection.status === "ready" && (
-                  <span className="font-mono text-xs text-muted-foreground" title={repositoryInspection.commit}>
-                    {repositoryBranch.trim()} · {repositoryInspection.commit.slice(0, 10)}
-                    {repositoryInspection.odooVersion ? ` · projet Odoo ${repositoryInspection.odooVersion}` : ""}
-                  </span>
-                )}
-              </div>
-
-              {repositoryInspection.status === "idle" && (
-                <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                  Choisis un dépôt et une branche : ses modules s’afficheront ici avec leur version et l’action prévue.
-                </p>
-              )}
-              {repositoryInspection.status === "loading" && (
-                <p className="flex items-center gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Lecture des modules et de leurs versions…
-                </p>
-              )}
-              {repositoryInspection.status === "error" && (
-                <div className="flex flex-col gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
-                  <span className="text-destructive">{repositoryInspection.error}</span>
-                  <Button type="button" size="sm" variant="outline" onClick={() => setRepositoryInspectionAttempt((attempt) => attempt + 1)}>
-                    <RefreshCcw className="h-4 w-4" />
-                    Réessayer
-                  </Button>
-                </div>
-              )}
-              {repositoryInspection.status === "ready" && (
-                <>
-                  {!repositoryInspection.manifestsRead && repositoryReadyModules.length > 0 && (
-                    <p className="text-xs text-amber-700 dark:text-amber-300">
-                      Versions illisibles pour ce dépôt : la compatibilité Odoo sera vérifiée pendant l’import.
-                    </p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="relative min-w-48 flex-1">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        className="pl-9"
-                        value={repositoryFilter}
-                        onChange={(event) => setRepositoryFilter(event.target.value)}
-                        placeholder={`Filtrer les ${repositoryReadyModules.length} modules`}
-                        aria-label="Filtrer les modules du dépôt"
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={!repositorySelectableModules.length}
-                      onClick={() => setRepositorySelection(new Set(repositorySelectableModules.map((module) => module.name)))}
-                    >
-                      Tout sélectionner ({repositorySelectableModules.length})
-                    </Button>
-                    {repositoryUpdatableModules.length > 0 && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setRepositorySelection(new Set(repositoryUpdatableModules.map((module) => module.name)))}
-                      >
-                        Seulement les mises à jour ({repositoryUpdatableModules.length})
-                      </Button>
-                    )}
-                    {repositorySelection.size > 0 && (
-                      <Button type="button" size="sm" variant="ghost" onClick={() => setRepositorySelection(new Set())}>
-                        <X className="h-4 w-4" />
-                        Désélectionner
-                      </Button>
-                    )}
-                  </div>
-
-                  {repositoryVisibleModules.length ? (
-                    <>
-                      {repositoryVisibleSelectable.length > 0 && (
-                        <div className="divide-y rounded-md border">
-                          {repositoryVisibleSelectable.slice(0, REPOSITORY_PICKER_MAX_ROWS).map((module) => repositoryModuleRow(module))}
-                          {repositoryVisibleSelectable.length > REPOSITORY_PICKER_MAX_ROWS && (
-                            <p className="px-3 py-2 text-xs text-muted-foreground">
-                              {REPOSITORY_PICKER_MAX_ROWS} modules affichés sur {repositoryVisibleSelectable.length} : affine le filtre pour voir les autres.
-                            </p>
-                          )}
-                        </div>
-                      )}
-                      {repositoryVisibleBlocked.length > 0 && (
-                        // Replié par défaut : ces modules ne demandent aucune décision.
-                        <details className="group rounded-md border" open={!repositoryVisibleSelectable.length}>
-                          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm hover:bg-hover">
-                            <span className="font-medium">Non importables ({repositoryVisibleBlocked.length})</span>
-                            <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                              Déjà fournis par le projet ou incompatibles
-                              <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
-                            </span>
-                          </summary>
-                          <div className="divide-y border-t">
-                            {repositoryVisibleBlocked.slice(0, REPOSITORY_PICKER_MAX_ROWS).map((module) => repositoryModuleRow(module))}
-                          </div>
-                        </details>
-                      )}
-                    </>
-                  ) : (
-                    <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-                      {repositoryReadyModules.length ? "Aucun module ne correspond au filtre." : "Aucun module Odoo trouvé dans ce dépôt."}
-                    </p>
-                  )}
-                </>
-              )}
-            </section>
-          </div>
-
-          <div className="flex flex-col gap-3 border-t bg-muted/30 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs text-muted-foreground">
-              {repositorySelectedModules.length > 0 && (
-                <span className="block font-medium text-foreground">
-                  {[
-                    repositorySelectedAdds && `${repositorySelectedAdds} ajout(s)`,
-                    repositorySelectedUpdates && `${repositorySelectedUpdates} mise(s) à jour`,
-                  ].filter(Boolean).join(" · ")}
-                </span>
-              )}
-              {repositorySelectedUpdates > 0 ? "Les versions remplacées sont sauvegardées ; " : ""}
-              {repositorySelectedUpdates > 0 ? "tout est annulé si un module échoue." : "Tout est annulé si un module échoue."}
-            </p>
-            <div className="flex shrink-0 justify-end gap-2">
-              <Button variant="outline" onClick={() => setRepositoryOpen(false)}>Annuler</Button>
-              <Button
-                disabled={repositorySubmitting || !selectedProjectReady || repositoryInspection.status !== "ready" || !repositorySelectedModules.length}
-                onClick={submitRepositoryModules}
-              >
-                {repositorySubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
-                {repositorySubmitting
-                  ? "Lancement…"
-                  : repositorySelectedModules.length
-                    ? `Importer ${repositorySelectedModules.length} module(s)`
-                    : "Importer"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
+      <ZipImportDialog
+        loading={loading}
+        onOpenChange={setZipDialogOpen}
         open={zipDialogOpen}
-        onOpenChange={(open) => {
-          setZipDialogOpen(open);
-          if (!open) resetZipImport();
-        }}
-      >
-        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Importer un ZIP de modules</DialogTitle>
-            <DialogDescription>
-              Analyse l’archive, choisis les modules à copier dans addons-store, puis confirme l’import.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <FilePicker
-              ref={zipInputRef}
-              accept=".zip"
-              file={zipFile}
-              buttonLabel="Choisir un ZIP"
-              disabled={loading || inspectingZip}
-              onChange={(event) => void inspectZipFile(event.target.files?.[0])}
-            />
-            {inspectingZip && (
-              <div className="flex items-center gap-2 rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Analyse sécurisée de l’archive…
-              </div>
-            )}
-            {!inspectingZip && zipModuleCandidates.length > 0 && (
-              <div className="min-w-0 rounded-md border">
-                <label className="flex cursor-pointer items-start gap-3 border-b bg-muted/40 p-3 text-sm">
-                  <Checkbox
-                    className="mt-0.5"
-                    checked={
-                      selectedZipModules.size > 0 && selectedZipModules.size < zipModuleCandidates.length
-                        ? "indeterminate"
-                        : selectedZipModules.size === zipModuleCandidates.length
-                    }
-                    onCheckedChange={(checked) => toggleAllZipModules(checked === true)}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-medium">Sélectionner tous les modules détectés</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {selectedZipModules.size}/{zipModuleCandidates.length} module(s) sélectionné(s)
-                    </span>
-                  </span>
-                </label>
-                <div className="max-h-64 overflow-y-auto p-2">
-                  {zipModuleCandidates.map((moduleName) => (
-                    <label
-                      key={moduleName}
-                      className="flex min-w-0 cursor-pointer items-start gap-3 rounded-md p-2 text-sm hover:bg-hover"
-                    >
-                      <Checkbox
-                        className="mt-0.5"
-                        checked={selectedZipModules.has(moduleName)}
-                        onCheckedChange={(checked) => toggleZipModule(moduleName, checked === true)}
-                      />
-                      <span className="min-w-0 break-all font-mono">{moduleName}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            <label className="flex items-start gap-2 rounded-md border bg-muted/40 p-3 text-sm">
-              <Checkbox
-                className="mt-1"
-                checked={replaceZipModules}
-                onCheckedChange={(checked) => setReplaceZipModules(checked === true)}
-              />
-              <span>
-                <span className="block font-medium">Remplacer les modules existants</span>
-                <span className="block text-xs text-muted-foreground">
-                  L’ancien dossier ou lien est sauvegardé dans `.odoo_manager_backups` avant remplacement.
-                </span>
-              </span>
-            </label>
-            <Button onClick={importZip} disabled={loading || inspectingZip || !selectedZipModules.size}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />}
-              Importer {selectedZipModules.size || ""} module(s)
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+        pushToast={pushToast}
+        refreshJobs={refreshJobs}
+        refreshModules={refreshModules}
+        schedule={schedule}
+        selectedProject={selectedProject}
+        setExternalLogView={setExternalLogView}
+        setLoading={setLoading}
+        setSelectedJobId={setSelectedJobId}
+      />
 
       <CreateDatabaseDialog
         open={createDbOpen}
@@ -5883,38 +4037,15 @@ export default function Home() {
         onSubmit={restoreDatabaseBackup}
       />
 
-      <Dialog open={neutralizeDbOpen} onOpenChange={setNeutralizeDbOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Neutraliser {selectedDb || "la base"}</DialogTitle>
-            <DialogDescription>
-              Odoo sera arrêté brièvement. Tous les crons métier, dont le contrôle d’abonnement,
-              ainsi que les serveurs de messagerie entrants et sortants seront désactivés.
-              Sur les versions récentes, Odoo efface aussi les identifiants SMTP. Cette opération
-              n’est pas réversible automatiquement.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100">
-            À utiliser uniquement sur une copie locale ou une base de test, jamais sur la production.
-          </div>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="outline" onClick={() => setNeutralizeDbOpen(false)}>Annuler</Button>
-            <Button
-              disabled={!selectedProject || !canUseDb || loading}
-              onClick={async () => {
-                const job = await createJob("neutralize_database", {
-                  project: selectedProject?.name,
-                  db: selectedDb,
-                });
-                if (job) setNeutralizeDbOpen(false);
-              }}
-            >
-              <ShieldCheck className="h-4 w-4" />
-              Confirmer la neutralisation
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <NeutralizeDatabaseDialog
+        canUseDb={canUseDb}
+        createJob={createJob}
+        loading={loading}
+        onOpenChange={setNeutralizeDbOpen}
+        open={neutralizeDbOpen}
+        selectedDb={selectedDb}
+        selectedProject={selectedProject}
+      />
 
       <DropDatabaseDialog
         open={dropDbOpen}
@@ -5933,429 +4064,119 @@ export default function Home() {
         }}
       />
 
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Supprimer {selectedProject?.name}</DialogTitle>
-            <DialogDescription>Le projet sera déplacé dans `.odoo_manager_deleted`. Saisis le nom du projet pour confirmer.</DialogDescription>
-          </DialogHeader>
-          <Input value={deleteConfirm} onChange={(event) => setDeleteConfirm(event.target.value)} placeholder={selectedProject?.name} />
-          <Button
-            variant="destructive"
-            disabled={!selectedProject || deleteConfirm !== selectedProject.name}
-            onClick={async () => {
-              await createJob("delete_project", { project: selectedProject?.name });
-              setDeleteConfirm("");
-              setDeleteDialogOpen(false);
-            }}
-          >
-            <Trash2 className="h-4 w-4" />
-            Supprimer
-          </Button>
-        </DialogContent>
-      </Dialog>
+      <DeleteProjectDialog
+        createJob={createJob}
+        onOpenChange={setDeleteDialogOpen}
+        open={deleteDialogOpen}
+        selectedProject={selectedProject}
+      />
 
-      <Dialog
+      <UpdateAllModulesDialog
+        allowMissingFilestore={allowMissingFilestore}
+        applyJobs={applyJobs}
+        canUseDb={canUseDb}
+        checkingUpdatePrerequisites={checkingUpdatePrerequisites}
+        createJob={createJob}
+        detectedImportedModules={detectedImportedModules}
+        loading={loading}
+        missingModulesToIgnore={missingModulesToIgnore}
+        onOpenChange={setUpdateAllDialogOpen}
         open={updateAllDialogOpen}
-        onOpenChange={(open) => {
-          setUpdateAllDialogOpen(open);
-          if (!open) {
-            setAllowMissingFilestore(false);
-            setUpdateFilestoreStatus(null);
-            setUpdatePendingModules([]);
-            setUpdateLocalExcludedModules([]);
-            setMissingModulesToIgnore(new Set());
-          }
-        }}
-      >
-        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>MAJ complète Odoo</DialogTitle>
-            <DialogDescription>
-              Choisis la portée de l’opération. Les modules détectés après le dernier import SSH sont proposés en priorité.
-            </DialogDescription>
-          </DialogHeader>
-          {detectedImportedModules.length ? (
-            <div className="grid gap-3 rounded-md border bg-muted/35 p-3 sm:grid-cols-2">
-              <button
-                type="button"
-                className={cn(
-                  "rounded-md border p-3 text-left text-sm transition-colors",
-                  updateScope === "imported" ? "border-primary bg-selected ring-1 ring-primary/25" : "bg-background hover:bg-hover",
-                )}
-                onClick={() => setUpdateScope("imported")}
-              >
-                <span className="block font-medium">Modules importés détectés</span>
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  Installer ou mettre à jour uniquement {detectedImportedModules.length} module(s).
-                </span>
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  "rounded-md border p-3 text-left text-sm transition-colors",
-                  updateScope === "all" ? "border-primary bg-selected ring-1 ring-primary/25" : "bg-background hover:bg-hover",
-                )}
-                onClick={() => setUpdateScope("all")}
-              >
-                <span className="block font-medium">Forcer la MAJ complète</span>
-                <span className="mt-1 block text-xs text-muted-foreground">Exécuter la mise à jour de l’ensemble des modules installés.</span>
-              </button>
-              {updateScope === "imported" && (
-                <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto sm:col-span-2">
-                  {detectedImportedModules.map((moduleName) => (
-                    <Badge key={moduleName} variant="outline" className="bg-background font-mono">{moduleName}</Badge>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : null}
-          <div className="grid gap-3 rounded-md border bg-muted/40 p-3 text-sm">
-            <div className="grid gap-1">
-              <span className="text-xs font-medium uppercase text-muted-foreground">Projet</span>
-              <span className="break-words font-medium">{selectedProject?.name || "-"}</span>
-            </div>
-            <div className="grid gap-1">
-              <span className="text-xs font-medium uppercase text-muted-foreground">Base</span>
-              <span className="break-words font-medium">{selectedDb || "-"}</span>
-            </div>
-            <div className="grid gap-1">
-              <span className="text-xs font-medium uppercase text-muted-foreground">Commande</span>
-              <code className="break-all rounded bg-slate-950 px-2 py-1 text-xs text-emerald-100">
-                {updateScope === "imported" && detectedImportedModules.length
-                  ? `odoo -d ${selectedDb || "BASE"} -i/-u ${detectedImportedModules.join(",")} --stop-after-init`
-                  : `odoo -d ${selectedDb || "BASE"} -u ${updateLocalExcludedModules.length ? "<modules disponibles non exclus>" : "all"} --stop-after-init`}
-              </code>
-            </div>
-          </div>
-          {updateScope === "all" && updateLocalExcludedModules.length ? (
-            <div className="grid gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950 dark:border-blue-800 dark:bg-blue-950/45 dark:text-blue-100">
-              <div className="font-medium">Mode avec exceptions locales</div>
-              <p>
-                Le gestionnaire utilisera une liste explicite des modules dont le code est disponible. Les modules suivants ne seront pas remis en
-                attente par un nouvel appel à <code>-u all</code> :
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {updateLocalExcludedModules.map((moduleName) => (
-                  <Badge key={moduleName} variant="outline" className="border-blue-300 bg-white font-mono text-blue-950 dark:border-blue-700 dark:bg-blue-950/70 dark:text-blue-100">
-                    {moduleName}
-                  </Badge>
-                ))}
-              </div>
-              <Button variant="outline" className="border-blue-300 bg-white hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/70 dark:hover:bg-blue-900/70" onClick={restoreLocalModuleExclusions} disabled={loading}>
-                <RefreshCcw className="h-4 w-4" />
-                Réactiver toutes les exclusions
-              </Button>
-            </div>
-          ) : null}
-          {updateScope === "all" && pendingModulesWithAvailableCode.length ? (
-            <div className="grid gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950 dark:border-blue-800 dark:bg-blue-950/45 dark:text-blue-100">
-              <div className="flex items-start gap-2">
-                <Info className="mt-0.5 h-4 w-4 shrink-0" />
-                <div className="grid gap-1">
-                  <span className="font-medium">Opérations Odoo à terminer</span>
-                  <span>
-                    Une installation ou une mise à jour précédente a laissé {pendingModulesWithAvailableCode.length} module(s) en attente. Leur code est présent : la mise à jour complète peut les reprendre automatiquement.
-                  </span>
-                </div>
-              </div>
-              <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
-                {pendingModulesWithAvailableCode.map((module) => (
-                  <Badge key={module.name} variant="outline" className="border-blue-300 bg-white font-mono text-blue-950 dark:border-blue-700 dark:bg-blue-950/70 dark:text-blue-100">
-                    {module.name} · {module.state}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          {updateScope === "all" && pendingModulesWithMissingCode.length ? (
-            <div className="grid gap-3 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-950 dark:border-red-800 dark:bg-red-950/45 dark:text-red-100">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
-                <div className="grid gap-1">
-                  <span className="font-medium">Code source manquant pour {pendingModulesWithMissingCode.length} module(s)</span>
-                  <span>
-                    Odoo avait prévu de les installer, mettre à jour ou supprimer, mais leur dossier n’existe plus dans le projet. Restaure leur code si tu veux conserver l’opération. Sur une copie locale de test, tu peux aussi annuler leur opération sans désinstaller les modules déjà actifs.
-                  </span>
-                  <span>
-                    Les modules qui en dépendent seront détectés et exclus automatiquement de cette mise à jour locale afin de conserver un ensemble cohérent.
-                  </span>
-                </div>
-              </div>
-              <label className="flex cursor-pointer items-center gap-3 rounded-md border border-red-200 bg-white px-3 py-2 font-medium dark:border-red-800 dark:bg-red-950/55">
-                <Checkbox
-                  color="red"
-                  checked={someMissingPendingModulesSelected ? "indeterminate" : allMissingPendingModulesSelected}
-                  disabled={loading}
-                  onCheckedChange={(checked) => toggleAllMissingModulesToIgnore(checked === true)}
-                />
-                Tout sélectionner ({pendingModulesWithMissingCode.length})
-              </label>
-              <div className="max-h-48 space-y-2 overflow-y-auto rounded-md border border-red-200 bg-white p-2 dark:border-red-800 dark:bg-red-950/55">
-                {pendingModulesWithMissingCode.map((module) => (
-                  <label key={module.name} className="flex cursor-pointer items-center gap-3 rounded px-2 py-2 hover:bg-red-50 dark:hover:bg-red-900/50">
-                    <Checkbox
-                      color="red"
-                      checked={missingModulesToIgnore.has(module.name)}
-                      onCheckedChange={(checked) => toggleMissingModuleToIgnore(module.name, checked === true)}
-                    />
-                    <span className="min-w-0 flex-1 break-all font-mono text-xs">{module.name}</span>
-                    <Badge className="shrink-0" variant="destructive">{module.state} · code absent</Badge>
-                  </label>
-                ))}
-              </div>
-              <Button
-                variant="destructive"
-                disabled={!missingModulesToIgnore.size || loading}
-                onClick={ignoreSelectedMissingModulesLocally}
-              >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageX className="h-4 w-4" />}
-                Annuler localement {missingModulesToIgnore.size || "la sélection"} opération(s)
-              </Button>
-              <p className="text-xs text-red-800 dark:text-red-200">
-                Cette action ne désinstalle aucun module et ne supprime aucune donnée. Le détail des exclusions automatiques apparaîtra dans les logs.
-              </p>
-            </div>
-          ) : null}
-          {updateScope === "all" && updateFilestoreStatus && updateFilestoreStatus.missing > 0 ? (
-            <div className="grid gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <div className="grid gap-1">
-                  <span className="font-medium">Filestore incomplet</span>
-                  <span>
-                    {updateFilestoreStatus.missing.toLocaleString("fr-FR")} fichier(s) manquent. Leur téléchargement n&apos;est pas nécessaire pour
-                    mettre à jour les modules : aucune référence ne sera supprimée, mais les médias absents resteront indisponibles.
-                  </span>
-                </div>
-              </div>
-              <label className="flex cursor-pointer items-start gap-3 rounded-md border border-amber-300 bg-white p-3 hover:bg-amber-100/60 dark:border-amber-800 dark:bg-amber-950/55 dark:hover:bg-amber-900/50">
-                <Checkbox
-                  className="mt-0.5"
-                  checked={allowMissingFilestore}
-                  onCheckedChange={(checked) => setAllowMissingFilestore(checked === true)}
-                />
-                <span className="font-medium">Continuer sans télécharger le filestore</span>
-              </label>
-            </div>
-          ) : null}
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="outline" onClick={() => setUpdateAllDialogOpen(false)}>
-              Annuler
-            </Button>
-            <Button
-              disabled={
-                !selectedProjectReady ||
-                !canUseDb ||
-                loading ||
-                checkingUpdatePrerequisites ||
-                Boolean(updateScope === "all" && pendingModulesWithMissingCode.length) ||
-                Boolean(updateScope === "all" && updateFilestoreStatus?.missing && !allowMissingFilestore)
-              }
-              onClick={confirmUpdateAllOdooModules}
-            >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              {updateScope === "imported" && detectedImportedModules.length ? "Traiter les modules importés" : "Lancer la MAJ complète"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+        pushToast={pushToast}
+        refreshModules={refreshModules}
+        requestUpdateAllOdooModules={requestUpdateAllOdooModules}
+        schedule={schedule}
+        selectedDatabaseOrNotify={selectedDatabaseOrNotify}
+        selectedDb={selectedDb}
+        selectedProject={selectedProject}
+        selectedProjectReady={selectedProjectReady}
+        setActiveTab={setActiveTab}
+        setAllowMissingFilestore={setAllowMissingFilestore}
+        setMissingModulesToIgnore={setMissingModulesToIgnore}
+        setUpdateFilestoreStatus={setUpdateFilestoreStatus}
+        setUpdateLocalExcludedModules={setUpdateLocalExcludedModules}
+        setUpdatePendingModules={setUpdatePendingModules}
+        setUpdateScope={setUpdateScope}
+        updateFilestoreStatus={updateFilestoreStatus}
+        updateLocalExcludedModules={updateLocalExcludedModules}
+        updatePendingModules={updatePendingModules}
+        updateScope={updateScope}
+      />
 
-      <Dialog
-        open={pendingTranslationResetModules.length > 0}
-        onOpenChange={(open) => {
-          if (!open) setPendingTranslationResetModules([]);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Réinitialiser les traductions</DialogTitle>
-            <DialogDescription>
-              Les modules sont mis à jour sur {selectedDb || "la base sélectionnée"} avec <code className="text-xs">--i18n-overwrite</code> :
-              les traductions sont rechargées depuis les fichiers <code className="text-xs">.po</code> du code.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100">
-            Les traductions modifiées à la main dans Odoo pour ces modules seront écrasées.
-          </div>
-          <div className="max-h-52 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs">
-            {pendingTranslationResetModules.map((name) => (
-              <div key={name}>{name}</div>
-            ))}
-          </div>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="outline" onClick={() => setPendingTranslationResetModules([])}>Annuler</Button>
-            <Button disabled={!canUseDb || loading} onClick={confirmTranslationReset}>
-              <Languages className="h-4 w-4" />
-              Réinitialiser ({pendingTranslationResetModules.length})
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <TranslationResetDialog
+        canUseDb={canUseDb}
+        createJob={createJob}
+        loading={loading}
+        pendingTranslationResetModules={pendingTranslationResetModules}
+        selectedDatabaseOrNotify={selectedDatabaseOrNotify}
+        selectedDb={selectedDb}
+        selectedProject={selectedProject}
+        setPendingTranslationResetModules={setPendingTranslationResetModules}
+      />
 
-      <Dialog open={allTranslationsOpen} onOpenChange={setAllTranslationsOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Réinitialiser les traductions · {selectedDb || "base"}</DialogTitle>
-            <DialogDescription>
-              Recharge les termes de <strong>tous les modules installés</strong> depuis leurs fichiers <code className="text-xs">.po</code>,
-              comme l’option « Écraser les termes existants » de Paramètres › Traductions › Langues. Les données et les vues ne sont
-              pas mises à jour. Odoo sera arrêté brièvement.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <div className="text-sm font-medium">Langues</div>
-            {translationLanguages === null ? (
-              <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Lecture des langues installées…
-              </p>
-            ) : translationLanguages.length ? (
-              <div className="grid gap-2 sm:grid-cols-2">
-                {translationLanguages.map((language) => (
-                  <label key={language.code} className="flex cursor-pointer items-center gap-2 rounded-md border p-2.5 text-sm hover:bg-hover">
-                    <Checkbox
-                      checked={selectedTranslationLanguages.has(language.code)}
-                      onCheckedChange={(checked) =>
-                        setSelectedTranslationLanguages((current) => {
-                          const next = new Set(current);
-                          if (checked === true) next.add(language.code);
-                          else next.delete(language.code);
-                          return next;
-                        })
-                      }
-                    />
-                    <span className="min-w-0">
-                      <span className="block truncate">{language.name}</span>
-                      <span className="block font-mono text-xs text-muted-foreground">{language.code}</span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Aucune langue active trouvée dans la base.</p>
-            )}
-          </div>
-          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100">
-            Les traductions modifiées à la main dans Odoo seront écrasées pour les langues sélectionnées.
-          </div>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="outline" onClick={() => setAllTranslationsOpen(false)}>Annuler</Button>
-            <Button disabled={!canUseDb || loading || !selectedTranslationLanguages.size} onClick={confirmAllTranslationsReset}>
-              <Languages className="h-4 w-4" />
-              Réinitialiser ({selectedTranslationLanguages.size} langue{selectedTranslationLanguages.size > 1 ? "s" : ""})
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <AllTranslationsResetDialog
+        canUseDb={canUseDb}
+        createJob={createJob}
+        loading={loading}
+        onOpenChange={setAllTranslationsOpen}
+        open={allTranslationsOpen}
+        selectedDatabaseOrNotify={selectedDatabaseOrNotify}
+        selectedDb={selectedDb}
+        selectedProject={selectedProject}
+        selectedTranslationLanguages={selectedTranslationLanguages}
+        setSelectedTranslationLanguages={setSelectedTranslationLanguages}
+        translationLanguages={translationLanguages}
+      />
 
-      <Dialog open={adminPasswordOpen} onOpenChange={setAdminPasswordOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Mot de passe administrateur · {selectedDb || "base"}</DialogTitle>
-            <DialogDescription>
-              Remplace le mot de passe de l’utilisateur <code className="text-xs">base.user_admin</code> et le réactive si besoin.
-              Odoo sera arrêté brièvement. L’identifiant de connexion est affiché dans les logs de la tâche.
-            </DialogDescription>
-          </DialogHeader>
-          <label className="block space-y-2 text-sm">
-            <span>Nouveau mot de passe</span>
-            <Input
-              value={adminPassword}
-              autoComplete="off"
-              maxLength={128}
-              onChange={(event) => setAdminPassword(event.target.value)}
-            />
-          </label>
-          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100">
-            À utiliser uniquement sur une copie locale ou une base de test.
-          </div>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="outline" onClick={() => setAdminPasswordOpen(false)}>Annuler</Button>
-            <Button disabled={!canUseDb || loading || !adminPassword.trim()} onClick={confirmAdminPasswordReset}>
-              <KeyRound className="h-4 w-4" />
-              Réinitialiser
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <AdminPasswordDialog
+        canUseDb={canUseDb}
+        createJob={createJob}
+        loading={loading}
+        onOpenChange={setAdminPasswordOpen}
+        open={adminPasswordOpen}
+        selectedDatabaseOrNotify={selectedDatabaseOrNotify}
+        selectedDb={selectedDb}
+        selectedProject={selectedProject}
+      />
 
-      <Dialog open={Boolean(jobToCancel)} onOpenChange={(open) => { if (!open) setJobToCancelId(null); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{jobToCancel?.status === "queued" ? "Retirer l'action de la file d'attente" : "Arrêter l'action"}</DialogTitle>
-            <DialogDescription className="break-words">{jobToCancel?.title}</DialogDescription>
-          </DialogHeader>
-          <div className="rounded-md border bg-muted/40 p-3 text-sm">
-            {jobToCancel?.status === "queued"
-              ? "L'action n'a pas encore démarré : elle est simplement retirée, rien n'est modifié."
-              : jobToCancel?.cancel_hint}
-          </div>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="outline" onClick={() => setJobToCancelId(null)}>Laisser continuer</Button>
-            <Button variant="destructive" disabled={!jobToCancel?.cancellable} onClick={confirmCancelJob}>
-              {jobToCancel?.status === "queued" ? <X className="h-4 w-4" /> : <Square className="h-3.5 w-3.5 fill-current" />}
-              {jobToCancel?.status === "queued" ? "Retirer" : "Arrêter"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <CancelJobDialog
+        jobs={jobs}
+        jobToCancelId={jobToCancelId}
+        pushToast={pushToast}
+        refreshJobs={refreshJobs}
+        setJobToCancelId={setJobToCancelId}
+      />
 
-      <Dialog open={uninstallDialogOpen} onOpenChange={setUninstallDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Désinstaller les modules</DialogTitle>
-            <DialogDescription>
-              Cette action désinstalle les modules de la base {selectedDb || "sélectionnée"}. Les dossiers addons et les liens symboliques ne seront pas
-              supprimés.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="max-h-52 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs">
-            {pendingUninstallModules.map((name) => (
-              <div key={name}>{name}</div>
-            ))}
-          </div>
-          <Button variant="destructive" disabled={!pendingUninstallModules.length || loading} onClick={confirmUninstall}>
-            <Trash2 className="h-4 w-4" />
-            Confirmer la désinstallation
-          </Button>
-        </DialogContent>
-      </Dialog>
+      <UninstallModulesDialog
+        createJob={createJob}
+        loading={loading}
+        onOpenChange={setUninstallDialogOpen}
+        open={uninstallDialogOpen}
+        pendingUninstallModules={pendingUninstallModules}
+        refreshModules={refreshModules}
+        schedule={schedule}
+        selectedDb={selectedDb}
+        selectedProject={selectedProject}
+        setPendingUninstallModules={setPendingUninstallModules}
+        setSelectedModules={setSelectedModules}
+      />
 
-      <Dialog open={deleteCodeDialogOpen} onOpenChange={setDeleteCodeDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Supprimer les modules du projet</DialogTitle>
-            <DialogDescription>
-              Cette action retire les modules de `odoo/addons` et supprime le dossier géré dans `odoo/addons-store`.
-              Les anciens imports encore liés depuis `.odoo_manager_imports` restent aussi nettoyés.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="max-h-52 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs">
-            {pendingDeleteCodeModules.map((name) => (
-              <div key={name}>{name}</div>
-            ))}
-          </div>
-          <label className="flex items-start gap-2 rounded-md border bg-muted/40 p-3 text-sm">
-            <Checkbox
-              className="mt-1"
-              checked={deleteCodeUninstallFirst}
-              disabled={!canUseDb}
-              onCheckedChange={(checked) => setDeleteCodeUninstallFirst(checked === true)}
-            />
-            <span>
-              <span className="block font-medium">Désinstaller de la base avant suppression</span>
-              <span className="block text-xs text-muted-foreground">
-                Recommandé si la base sélectionnée contient encore le module installé.
-              </span>
-            </span>
-          </label>
-          <Button variant="destructive" disabled={!pendingDeleteCodeModules.length || loading} onClick={confirmDeleteCode}>
-            <PackageX className="h-4 w-4" />
-            Confirmer la suppression du projet
-          </Button>
-        </DialogContent>
-      </Dialog>
+      <DeleteModuleCodeDialog
+        canUseDb={canUseDb}
+        createJob={createJob}
+        deleteCodeUninstallFirst={deleteCodeUninstallFirst}
+        loading={loading}
+        onOpenChange={setDeleteCodeDialogOpen}
+        open={deleteCodeDialogOpen}
+        pendingDeleteCodeModules={pendingDeleteCodeModules}
+        refreshModules={refreshModules}
+        schedule={schedule}
+        selectedDb={selectedDb}
+        selectedProject={selectedProject}
+        setDeleteCodeUninstallFirst={setDeleteCodeUninstallFirst}
+        setPendingDeleteCodeModules={setPendingDeleteCodeModules}
+        setSelectedModules={setSelectedModules}
+      />
 
       {showFloatingModuleActions && (
         <div
