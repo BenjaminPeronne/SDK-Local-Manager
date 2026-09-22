@@ -15,6 +15,7 @@ import {
 import { api } from "@/lib/api";
 import { desktopErrorMessage, type GitLabStatus, type StoredRikaCredentials } from "@/lib/desktop";
 import { openExternalUrl, pickDirectory } from "@/lib/desktop-runtime";
+import { windowsPathFromMount } from "@/lib/projects";
 import type {
   ManagerErrorEntry,
   ManagerSettings,
@@ -83,6 +84,8 @@ type SettingsDialogProps = {
   settingsSection: "general" | "appearance" | "accounts" | "advanced" | "diagnostic";
   storedRikaCredentials: StoredRikaCredentials | null;
   systemStatus: SystemStatus | null;
+  /** Backend dans l'environnement Linux sous Windows : la migration des anciens projets s'y applique. */
+  wslBackend: boolean;
 };
 
 export function SettingsDialog({
@@ -121,9 +124,11 @@ export function SettingsDialog({
   settingsSection,
   storedRikaCredentials,
   systemStatus,
+  wslBackend,
 }: SettingsDialogProps) {
   const [savingSettings, setSavingSettings] = useState(false);
   const [selectingWorkspace, setSelectingWorkspace] = useState(false);
+  const [savingLegacyWorkspace, setSavingLegacyWorkspace] = useState(false);
   const [gitlabTokenDraft, setGitlabTokenDraft] = useState("");
   const [gitlabConnecting, setGitlabConnecting] = useState(false);
   const reopenInitialConfiguration = useCallback(() => {
@@ -204,6 +209,38 @@ export function SettingsDialog({
       pushToast("error", err instanceof Error ? err.message : "Impossible d’ouvrir le sélecteur de dossier.");
     } finally {
       setSelectingWorkspace(false);
+    }
+  }
+  /**
+   * Enregistre tout de suite le dossier des anciens projets Windows, puis relit les projets à
+   * copier. Une chaîne vide rétablit la détection automatique. Le brouillon garde les autres
+   * modifications en cours.
+   */
+  async function saveLegacyWorkspace(value: string) {
+    setSavingLegacyWorkspace(true);
+    try {
+      const payload = await api<{ settings: ManagerSettings }>("/api/settings", {
+        method: "POST",
+        body: JSON.stringify({ legacy_workspace: value }),
+      });
+      setSettings(payload.settings);
+      setSettingsDraft((draft) =>
+        draft ? { ...draft, legacy_workspace: payload.settings.legacy_workspace } : payload.settings,
+      );
+      await refreshMigration();
+      pushToast("success", value ? "Dossier des anciens projets enregistré." : "Détection automatique rétablie.");
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : "Enregistrement du dossier impossible.");
+    } finally {
+      setSavingLegacyWorkspace(false);
+    }
+  }
+  async function chooseLegacyWorkspace() {
+    try {
+      const selected = await pickDirectory(windowsPathFromMount(migration?.source || ""));
+      if (selected) await saveLegacyWorkspace(selected);
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : "Impossible d’ouvrir le sélecteur de dossier.");
     }
   }
   const settingsDirty = Boolean(
@@ -299,6 +336,60 @@ export function SettingsDialog({
                         Windows sont traduits automatiquement lorsque Docker ou Git passe par WSL.
                       </p>
                     </div>
+
+                    {wslBackend && (
+                      <SettingsGroup>
+                        <div className="grid min-w-0 gap-3">
+                          <div>
+                            <div className="text-sm font-medium">Anciens projets Windows</div>
+                            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                              Dossier où l’ancienne version rangeait les projets. Il est détecté automatiquement ;
+                              choisis-le si tes projets sont ailleurs, sur un autre disque ou dans un dossier déplacé.
+                            </p>
+                          </div>
+                          <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+                            <code className="min-w-0 break-all rounded bg-muted px-2 py-1 font-mono text-xs">
+                              {migration?.source ? windowsPathFromMount(migration.source) : "Aucun dossier trouvé"}
+                            </code>
+                            <Badge variant="outline">
+                              {settings?.legacy_workspace ? "Choisi manuellement" : "Détecté automatiquement"}
+                            </Badge>
+                          </div>
+                          {migration?.available && migrationCandidates.length === 0 && (
+                            <p className="text-xs text-muted-foreground">Aucun projet à copier dans ce dossier.</p>
+                          )}
+                          {migration?.source && !migration.available && (
+                            <p className="text-xs text-muted-foreground">Ce dossier n’est plus accessible.</p>
+                          )}
+                          <div className="flex flex-col gap-2 sm:flex-row">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={savingLegacyWorkspace}
+                              onClick={() => void chooseLegacyWorkspace()}
+                            >
+                              {savingLegacyWorkspace ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <FolderOpen className="h-4 w-4" />
+                              )}
+                              Choisir le dossier…
+                            </Button>
+                            {settings?.legacy_workspace && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                disabled={savingLegacyWorkspace}
+                                onClick={() => void saveLegacyWorkspace("")}
+                              >
+                                <RefreshCcw className="h-4 w-4" />
+                                Revenir à la détection automatique
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </SettingsGroup>
+                    )}
 
                     <SettingsGroup>
                       {migration?.available && migrationCandidates.length > 0 && (

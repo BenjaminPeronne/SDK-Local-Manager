@@ -9,6 +9,7 @@ from odoo_manager_core.config import (
     SettingsStore,
     default_config_dir,
     expand_home_reference,
+    normalize_legacy_workspace,
 )
 
 
@@ -140,6 +141,61 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.execution_mode, "native")
         self.assertEqual(settings.wsl_distribution, "")
+
+
+class LegacyWorkspaceTests(unittest.TestCase):
+    """Dossier des anciens projets Windows, choisi à la main pour la migration."""
+
+    def test_windows_path_is_read_through_the_linux_mount(self):
+        self.assertEqual(normalize_legacy_workspace(r"D:\Projets\Odoo", "Linux"), "/mnt/d/Projets/Odoo")
+        self.assertEqual(
+            normalize_legacy_workspace("C:/Users/a/Odoo-projects/", "Linux"), "/mnt/c/Users/a/Odoo-projects"
+        )
+        self.assertEqual(normalize_legacy_workspace("E:\\", "Linux"), "/mnt/e")
+
+    def test_other_values_are_kept(self):
+        self.assertEqual(normalize_legacy_workspace(r"D:\Projets", "Windows"), r"D:\Projets")
+        self.assertEqual(normalize_legacy_workspace("/mnt/d/Projets", "Linux"), "/mnt/d/Projets")
+        self.assertEqual(normalize_legacy_workspace("  ", "Linux"), "")
+
+    def test_a_chosen_folder_is_saved_and_can_be_reset(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "anciens").mkdir()
+            store = SettingsStore(root / "workspace", root / "config.json")
+            saved = store.update({"legacy_workspace": str(root / "anciens")}, create_workspace=True)
+            self.assertEqual(saved.legacy_workspace, str(root / "anciens"))
+            self.assertEqual(store.load().legacy_workspace, str(root / "anciens"))
+            # Chaîne vide : retour à la détection automatique.
+            self.assertEqual(store.update({"legacy_workspace": ""}).legacy_workspace, "")
+
+    def test_a_missing_folder_is_refused_without_saving(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = SettingsStore(root / "workspace", root / "config.json")
+            with self.assertRaisesRegex(ValueError, "introuvable"):
+                store.update({"legacy_workspace": str(root / "absent")}, create_workspace=True)
+            self.assertFalse((root / "config.json").exists())
+
+    def test_an_unchanged_folder_that_disappeared_does_not_block_other_settings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "anciens").mkdir()
+            store = SettingsStore(root / "workspace", root / "config.json")
+            store.update({"legacy_workspace": str(root / "anciens")}, create_workspace=True)
+            (root / "anciens").rmdir()
+            saved = store.update({"legacy_workspace": str(root / "anciens"), "sticky_header": True})
+            self.assertTrue(saved.sticky_header)
+
+    def test_the_linux_environment_itself_is_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = SettingsStore(root / "workspace", root / "config.json")
+            with self.assertRaisesRegex(ValueError, "déjà dans l’environnement Linux"):
+                store.update(
+                    {"legacy_workspace": r"\\wsl.localhost\SDK-Manager\home\sdk\Odoo-projects"},
+                    create_workspace=True,
+                )
 
 
 if __name__ == "__main__":

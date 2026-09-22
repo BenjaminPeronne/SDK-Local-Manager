@@ -1,6 +1,7 @@
 import json
 import os
 import platform
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -10,6 +11,7 @@ CONFIG_VERSION = 1
 INTERFACE_ICONS = {"manager", "local"}
 INTERFACE_LAYOUTS = {"classic", "refined"}
 DEFAULT_API_PORT = 18765
+WINDOWS_DRIVE_PATH = re.compile(r"^([A-Za-z]):(?:[\\/](.*))?$")
 
 
 def normalize_workspace_path(value):
@@ -17,6 +19,22 @@ def normalize_workspace_path(value):
     if context:
         return context.windows_path
     return str(Path(value).expanduser().resolve())
+
+
+def normalize_legacy_workspace(value, system_name=None):
+    """Ancien dossier de projets Windows, tel que le backend le lit.
+
+    Le sélecteur de dossier renvoie un chemin Windows (`D:\\Projets`) ; le backend de
+    l'environnement Linux le lit par le montage `/mnt/d/Projets`. Le backend Windows de
+    secours, lui, garde le chemin tel quel.
+    """
+    value = str(value or "").strip()
+    match = WINDOWS_DRIVE_PATH.match(value)
+    if not match or (system_name or platform.system()) == "Windows":
+        return value
+    drive, rest = match.groups()
+    rest = (rest or "").replace("\\", "/").strip("/")
+    return f"/mnt/{drive.lower()}/{rest}" if rest else f"/mnt/{drive.lower()}"
 
 
 def expand_home_reference(value, home=None):
@@ -118,7 +136,7 @@ class ManagerSettings:
             interface_icon=interface_icon,
             interface_layout=interface_layout,
             onboarding_completed=bool(payload.get("onboarding_completed", False)),
-            legacy_workspace=str(payload.get("legacy_workspace", "") or "").strip(),
+            legacy_workspace=normalize_legacy_workspace(payload.get("legacy_workspace", "")),
             migration_banner_dismissed=bool(payload.get("migration_banner_dismissed", False)),
             beta_interface_banner_dismissed=bool(payload.get("beta_interface_banner_dismissed", False)),
         )
@@ -167,11 +185,26 @@ class SettingsStore:
 
     def update(self, payload, create_workspace=False):
         current = self.load().to_dict()
-        current.update(payload if isinstance(payload, dict) else {})
-        settings = ManagerSettings.from_dict(self.normalize_runtime_payload(current), self.default_workspace)
+        merged = {**current, **(payload if isinstance(payload, dict) else {})}
+        settings = ManagerSettings.from_dict(self.normalize_runtime_payload(merged), self.default_workspace)
         workspace = Path(settings.workspace)
         if create_workspace:
             workspace.mkdir(parents=True, exist_ok=True)
         if not workspace.exists() or not workspace.is_dir():
             raise ValueError(f"Dossier workspace introuvable: {workspace}")
+        # Seul un nouveau choix est vérifié : un disque débranché ne doit pas bloquer les autres réglages.
+        previous = normalize_legacy_workspace(current.get("legacy_workspace", ""))
+        if isinstance(payload, dict) and payload.get("legacy_workspace") and settings.legacy_workspace != previous:
+            self.validate_legacy_workspace(payload["legacy_workspace"], settings.legacy_workspace)
         return self.save(settings)
+
+    @staticmethod
+    def validate_legacy_workspace(chosen, resolved):
+        """Refuse un dossier d'anciens projets illisible, avec la raison la plus probable."""
+        if str(chosen).replace("/", "\\").lower().startswith(("\\\\wsl.localhost\\", "\\\\wsl$\\")):
+            raise ValueError(
+                "Ce dossier est déjà dans l’environnement Linux : choisis le dossier du disque Windows "
+                "où l’ancienne version rangeait les projets."
+            )
+        if not Path(resolved).is_dir():
+            raise ValueError(f"Dossier des anciens projets introuvable : {chosen}")

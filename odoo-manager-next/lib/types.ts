@@ -114,6 +114,8 @@ export type ManagerSettings = {
   interface_icon: InterfaceIcon;
   interface_layout: "classic" | "refined";
   onboarding_completed: boolean;
+  /** Ancien dossier de projets Windows choisi à la main ; vide : détection automatique. */
+  legacy_workspace: string;
   migration_banner_dismissed: boolean;
   beta_interface_banner_dismissed: boolean;
   config_file?: string;

@@ -148,6 +148,7 @@ export default function Home() {
   const [selectedProjectName, setSelectedProjectName] = useState("");
   // Environnement Linux installé mais impossible à démarrer : le backend Windows a pris le relais.
   const [degradedBackendReason, setDegradedBackendReason] = useState("");
+  const [wslBackend, setWslBackend] = useState(false);
 
   const [selectedDb, setSelectedDb] = useState("");
   // Base choisie pour chaque projet pendant la session : un rafraîchissement, une sonde Postgres
@@ -760,7 +761,10 @@ export default function Home() {
     if (initializing || !bridge?.backendMode) return;
     bridge
       .backendMode()
-      .then((mode) => setDegradedBackendReason(mode?.degradedReason || ""))
+      .then((mode) => {
+        setDegradedBackendReason(mode?.degradedReason || "");
+        setWslBackend(Boolean(mode?.wsl));
+      })
       .catch(() => setDegradedBackendReason(""));
   }, [initializing]);
 
@@ -2042,6 +2046,7 @@ export default function Home() {
         settingsSection={settingsSection}
         storedRikaCredentials={storedRikaCredentials}
         systemStatus={systemStatus}
+        wslBackend={wslBackend}
       />
 
       <AboutDialog

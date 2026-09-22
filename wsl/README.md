@@ -44,7 +44,7 @@ Pour la figer : relever l'empreinte depuis GitLab ou une machine déjà appairé
 
 ## Migrer un projet déjà présent sur `C:\`
 
-L'application liste les projets restés sur le disque Windows et propose de les copier dans l'environnement Linux. La copie prend le projet entier : code, liens d'addons, base PostgreSQL et filestore. Les liens sont recréés à l'identique, sans être suivis.
+L'application liste les projets restés sur le disque Windows et propose de les copier dans l'environnement Linux. Le dossier source est celui que l'ancienne version utilisait (réglage `workspace` de son `config.json`, sinon `Documents\Developer\Odoo-projects`, `Documents\Odoo-projects` ou `Odoo-projects`). Si les projets sont ailleurs, **Paramètres › Général › Anciens projets Windows** permet de choisir le dossier, sur n'importe quel disque. La copie prend le projet entier : code, liens d'addons, base PostgreSQL et filestore. Les liens sont recréés à l'identique, sans être suivis.
 
 - **Le projet doit être arrêté.** Copier `postgresql_data` pendant que PostgreSQL écrit donnerait une base incohérente : l'application refuse tant que son fichier de verrou est présent.
 - **L'original n'est jamais modifié.** Il reste sur `C:\` après la migration, jusqu'à ce que vous le supprimiez vous-même.

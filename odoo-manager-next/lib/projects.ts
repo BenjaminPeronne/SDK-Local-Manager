@@ -112,10 +112,18 @@ export function fallbackManagerSettings(
     interface_icon: current?.interface_icon === "local" ? "local" : "manager",
     interface_layout: current?.interface_layout === "refined" ? "refined" : "classic",
     onboarding_completed: current?.onboarding_completed ?? false,
+    legacy_workspace: current?.legacy_workspace || "",
     migration_banner_dismissed: current?.migration_banner_dismissed ?? false,
     beta_interface_banner_dismissed: current?.beta_interface_banner_dismissed ?? false,
     config_file: current?.config_file,
     platform: current?.platform || systemStatus?.docker.platform || "",
     workspace_exists: current?.workspace_exists ?? systemStatus?.workspace_exists,
   };
+}
+
+/** `/mnt/d/Projets` → `D:\\Projets` : un chemin du disque Windows, affiché comme Windows l'écrit. */
+export function windowsPathFromMount(path: string) {
+  const match = /^\/mnt\/([a-z])(?:\/(.*))?$/i.exec(path);
+  if (!match) return path;
+  return `${match[1].toUpperCase()}:\\${(match[2] || "").replace(/\//g, "\\")}`;
 }
