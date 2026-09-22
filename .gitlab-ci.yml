@@ -88,7 +88,7 @@ build-linux:
   needs: []
   script:
     - apt-get update
-    - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libfuse2 libnss3 libgtk-3-0 libasound2 xvfb xauth
+    - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libfuse2 libnss3 libgtk-3-0 libasound2 libgbm1 xvfb xauth
     - cd odoo-manager-next && npm ci && cd ..
     - python -m pip install pyinstaller
     - python -m unittest discover -s tests -v
