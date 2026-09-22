@@ -4,9 +4,6 @@
 !/.gitignore
 !/.gitattributes
 !/.github/
-!/.vscode/
-!/.vscode/tasks.json
-!/.vscode/extensions.json
 !/archive/
 !/docs/
 !/odoo-manager-next/

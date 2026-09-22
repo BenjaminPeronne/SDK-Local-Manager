@@ -372,7 +372,7 @@ Corriger la mise en forme :
 cd odoo-manager-next && npm run format && cd .. && ruff check --fix . && ruff format .
 ```
 
-ruff s'installe avec `brew install ruff` (ou `pipx install ruff`). Dans VS Code, les extensions recommandées par `.vscode/extensions.json` appliquent ces réglages à l'enregistrement.
+ruff s'installe avec `brew install ruff` (ou `pipx install ruff`). Dans VS Code, les extensions ESLint, Prettier et Ruff appliquent ces réglages à l'enregistrement.
 
 ---
 
