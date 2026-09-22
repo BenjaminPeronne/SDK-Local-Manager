@@ -534,9 +534,6 @@ def settings_snapshot():
 BROWSER_ORIGINS = frozenset({
     "http://127.0.0.1:3000",
     "http://localhost:3000",
-    "http://tauri.localhost",
-    "tauri://localhost",
-    "https://tauri.localhost",
     "app://sdk",
 })
 LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -5770,7 +5767,7 @@ INDEX_HTML = """<!doctype html>
   <main>
     <h1>Odoo Manager API</h1>
     <p>L'ancienne vue Bootstrap a été retirée et n'est plus exposée par le backend.</p>
-    <p>L'interface active est maintenant l'application Next/Tauri. En développement, lance <code>./odoo_next_gui.sh</code>.</p>
+    <p>L'interface active est maintenant l'application de bureau Electron. En développement, lance <code>./odoo_next_gui.sh</code>.</p>
   </main>
 </body>
 </html>

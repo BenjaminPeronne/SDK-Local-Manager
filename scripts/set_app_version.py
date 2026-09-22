@@ -34,20 +34,8 @@ def set_app_version(root: Path, version: str) -> None:
         raise ValueError("La version doit respecter le format MAJEUR.MINEUR.CORRECTIF, par exemple 0.1.2")
 
     frontend = root / "odoo-manager-next"
-    tauri = frontend / "src-tauri"
     write_json_version(frontend / "package.json", version)
     write_json_version(frontend / "package-lock.json", version, package_lock=True)
-    write_json_version(tauri / "tauri.conf.json", version)
-    replace_once(
-        tauri / "Cargo.toml",
-        r'(^\[package\]\n(?:.*\n)*?version = ")[^"]+("$)',
-        rf"\g<1>{version}\g<2>",
-    )
-    replace_once(
-        tauri / "Cargo.lock",
-        r'(^\[\[package\]\]\nname = "odoo-manager"\nversion = ")[^"]+("$)',
-        rf"\g<1>{version}\g<2>",
-    )
     # Le backend publie cette version sur /api/version : elle doit suivre les manifestes.
     replace_once(
         root / "odoo_manager_core" / "version.py",

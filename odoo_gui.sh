@@ -15,5 +15,5 @@ case "${1:-}" in
 esac
 
 echo "La vue Bootstrap a ete retiree."
-echo "Lancement de l'interface Next/Tauri avec ./odoo_next_gui.sh --background"
+echo "Lancement de l'interface Next avec ./odoo_next_gui.sh --background"
 exec "$SCRIPT_DIR/odoo_next_gui.sh" --background

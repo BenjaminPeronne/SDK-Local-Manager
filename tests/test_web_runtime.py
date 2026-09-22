@@ -44,16 +44,6 @@ class CorsTests(unittest.TestCase):
         web.add_cors_headers(handler)
         handler.send_header.assert_any_call("Access-Control-Allow-Origin", "app://sdk")
 
-    def test_allows_windows_tauri_webview_origin(self):
-        handler = Mock()
-        handler.headers = {"Origin": "http://tauri.localhost"}
-
-        web.add_cors_headers(handler)
-
-        handler.send_header.assert_any_call(
-            "Access-Control-Allow-Origin", "http://tauri.localhost"
-        )
-
     def test_rejects_unknown_origin(self):
         handler = Mock()
         handler.headers = {"Origin": "https://example.invalid"}

@@ -3,9 +3,6 @@ node_modules/
 electron/binaries/
 release/
 out/
-src-tauri/target/
-src-tauri/binaries/*
-!src-tauri/binaries/README.md
 tsconfig.tsbuildinfo
 *.log
 .DS_Store
