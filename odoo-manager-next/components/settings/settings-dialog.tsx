@@ -61,7 +61,7 @@ type SettingsDialogProps = {
   migrationCandidates: MigrationCandidate[];
   onOpenChange: (open: boolean) => void;
   open: boolean;
-  openSshAssistant: (regenerate?: boolean) => Promise<void>;
+  openSshAssistant: (regenerate?: boolean, provider?: "gitlab" | "github") => Promise<void>;
   pushToast: (kind: Toast["kind"], message: string) => void;
   refreshMigration: () => Promise<void>;
   refreshOverview: () => Promise<void>;
@@ -590,13 +590,13 @@ export function SettingsDialog({
                 {settingsSection === "accounts" && (
                   <SettingsSection
                     title="Comptes et accès"
-                    description="Clé SSH, GitLab et identifiants mémorisés. Ces réglages s’appliquent immédiatement, sans enregistrement."
+                    description="Clé SSH, GitLab, GitHub et identifiants mémorisés. Ces réglages s’appliquent immédiatement, sans enregistrement."
                   >
                     <div className="grid gap-3 rounded-md border p-3">
                       <div className="flex min-w-0 items-start gap-3">
                         <KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                         <div className="min-w-0 flex-1">
-                          <div className="text-sm font-medium">Clé SSH GitLab</div>
+                          <div className="text-sm font-medium">Clé SSH pour GitLab et GitHub</div>
                           <p className="mt-1 break-words text-xs leading-relaxed text-muted-foreground">
                             {selectedSshKey
                               ? `${selectedSshKey.name} · ${selectedSshKey.public_key}`
@@ -621,6 +621,20 @@ export function SettingsDialog({
                           </Button>
                         )}
                       </div>
+                    </div>
+
+                    <div className="grid gap-3 rounded-md border p-3">
+                      <div>
+                        <div className="text-sm font-medium">Accès SSH GitHub</div>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                          Utilise la clé publique de cet environnement Git pour accéder aux dépôts GitHub autorisés.
+                          Ajoute-la à ton compte comme clé d’authentification.
+                        </p>
+                      </div>
+                      <Button type="button" variant="outline" onClick={() => openSshAssistant(false, "github")}>
+                        <KeyRound className="h-4 w-4" />
+                        {selectedSshKey ? "Gérer la clé GitHub" : "Générer une clé pour GitHub"}
+                      </Button>
                     </div>
 
                     {gitlabStatus && (

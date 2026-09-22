@@ -136,6 +136,7 @@ export type ProjectCreationPrerequisites = {
   ssh_keygen_available: boolean;
   tool_environment?: string;
   gitlab_ssh_keys_url: string;
+  github_ssh_keys_url: string;
   supported_versions: string[];
 };
 

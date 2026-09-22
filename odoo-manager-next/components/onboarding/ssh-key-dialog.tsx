@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 type SshKeyDialogProps = {
   creationPrerequisites: ProjectCreationPrerequisites | null;
+  provider: "gitlab" | "github";
   loadCreationPrerequisites: () => Promise<ProjectCreationPrerequisites | null>;
   loadSshKeys: () => Promise<SshPublicKey[]>;
   onOpenChange: (open: boolean) => void;
@@ -36,6 +37,7 @@ type SshKeyDialogProps = {
 
 export function SshKeyDialog({
   creationPrerequisites,
+  provider,
   loadCreationPrerequisites,
   loadSshKeys,
   onOpenChange,
@@ -57,6 +59,10 @@ export function SshKeyDialog({
   startSshKeyRegeneration,
 }: SshKeyDialogProps) {
   const [generatingSshKey, setGeneratingSshKey] = useState(false);
+  const providerName = provider === "github" ? "GitHub" : "GitLab";
+  const keysUrl = provider === "github"
+    ? creationPrerequisites?.github_ssh_keys_url
+    : creationPrerequisites?.gitlab_ssh_keys_url;
   async function requestSshKeyGeneration(replace = false) {
     setGeneratingSshKey(true);
     try {
@@ -95,7 +101,7 @@ export function SshKeyDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Clé SSH GitLab</DialogTitle>
+          <DialogTitle>Clé SSH {providerName}</DialogTitle>
           <DialogDescription>
             Le gestionnaire génère la clé sur cette machine. Seule la clé publique est affichée et peut être copiée.
           </DialogDescription>
@@ -113,7 +119,7 @@ export function SshKeyDialog({
                 placeholder="prenom.nom@sudokeys.com"
                 autoComplete="email"
               />
-              <p className="text-xs text-muted-foreground">Ce texte sert uniquement à identifier la clé dans GitLab.</p>
+              <p className="text-xs text-muted-foreground">Ce texte sert à identifier la clé sur cet ordinateur.</p>
             </div>
             <Button className="w-full" onClick={() => requestSshKeyGeneration()} disabled={generatingSshKey}>
               {generatingSshKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
@@ -133,9 +139,8 @@ export function SshKeyDialog({
                   .
                 </li>
                 <li>
-                  Tant que la nouvelle clé publique n’est pas ajoutée dans GitLab, les imports et mises à jour de dépôts
-                  échoueront. Les autres services qui utilisaient l’ancienne clé (serveurs, GitHub…) devront aussi être
-                  mis à jour.
+                  Tant que la nouvelle clé publique n’est pas ajoutée dans GitLab et GitHub, les accès qui utilisaient
+                  l’ancienne clé peuvent échouer. Mets aussi à jour les autres services concernés.
                 </li>
               </ul>
             </div>
@@ -157,7 +162,7 @@ export function SshKeyDialog({
                 checked={sshRegenerateConfirmed}
                 onCheckedChange={(checked) => setSshRegenerateConfirmed(checked === true)}
               />
-              J’ai compris que je devrai ajouter la nouvelle clé publique dans GitLab.
+              J’ai compris que je devrai ajouter la nouvelle clé publique aux services concernés.
             </label>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button variant="outline" onClick={() => setSshRegenerateMode(false)} disabled={generatingSshKey}>
@@ -179,7 +184,7 @@ export function SshKeyDialog({
               <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/45 dark:text-emerald-100">
                 <div className="font-medium">Nouvelle clé générée</div>
                 <p className="mt-1 text-xs leading-5">
-                  Copie-la puis ajoute-la dans GitLab. Pense à retirer l’ancienne clé de GitLab ensuite. Ancienne clé
+                  Copie-la puis ajoute-la dans {providerName}. Pense à retirer l’ancienne clé des services concernés ensuite. Ancienne clé
                   conservée dans : <code className="break-all">{sshKeyBackup}</code>
                 </p>
               </div>
@@ -205,7 +210,7 @@ export function SshKeyDialog({
             )}
             <div className="grid gap-1.5">
               <label className="text-sm font-medium" htmlFor="ssh-public-key">
-                Clé publique à ajouter dans GitLab
+                Clé publique à ajouter dans {providerName}
               </label>
               <Textarea
                 id="ssh-public-key"
@@ -220,16 +225,16 @@ export function SshKeyDialog({
                 Copier la clé
               </Button>
               <Button
-                onClick={() => openUrl(creationPrerequisites?.gitlab_ssh_keys_url)}
-                disabled={!creationPrerequisites?.gitlab_ssh_keys_url}
+                onClick={() => openUrl(keysUrl)}
+                disabled={!keysUrl}
               >
                 <ExternalLink className="h-4 w-4" />
-                Ouvrir GitLab
+                Ouvrir {providerName}
               </Button>
             </div>
             <p className="text-xs leading-5 text-muted-foreground">
-              Dans GitLab, colle cette valeur dans le champ Clé SSH, donne-lui un titre correspondant à cet ordinateur,
-              puis valide.
+              Dans {providerName}, ajoute une clé SSH d’authentification, colle cette valeur dans le champ de la clé,
+              donne-lui un titre correspondant à cet ordinateur, puis valide.
             </p>
             <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-muted-foreground">Clé compromise, perdue ou à renouveler ?</p>

@@ -1017,6 +1017,7 @@ def project_creation_prerequisites():
         "ssh_keygen_available": ssh_keygen_available,
         "tool_environment": git_runtime["label"],
         "gitlab_ssh_keys_url": "https://gitlab.sudokeys.com/-/user_settings/ssh_keys",
+        "github_ssh_keys_url": "https://github.com/settings/keys",
         "supported_versions": list(SUPPORTED_ODOO_VERSIONS),
     }
 

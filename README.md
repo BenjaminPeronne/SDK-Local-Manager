@@ -30,7 +30,7 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 
 **Premier lancement**
 - Assistant de vérification : dossier des projets, Docker, Git, clé SSH et Traefik.
-- Génération d'une clé SSH Ed25519 (régénérable, l'ancienne paire est sauvegardée) et ouverture de la page GitLab pour y déposer la clé publique. La clé privée ne quitte jamais le poste.
+- Génération d'une clé SSH Ed25519 (régénérable, l'ancienne paire est sauvegardée) et ouverture des pages GitLab ou GitHub pour y déposer la clé publique. La même clé peut servir aux deux services ; la clé privée ne quitte jamais le poste.
 - Installation de Traefik (`docker-local-tools`) sans terminal.
 - Sous Windows : préparation du poste en un clic (WSL, puis environnement Linux « SDK-Manager » avec Docker, Git et le backend), reprise de la clé GitLab Windows, et proposition de copier les projets restés sur `C:\` dans cet environnement.
 

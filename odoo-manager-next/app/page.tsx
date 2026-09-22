@@ -137,6 +137,7 @@ export default function Home() {
   const [creationPrerequisites, setCreationPrerequisites] = useState<ProjectCreationPrerequisites | null>(null);
   const [loadingCreationPrerequisites, setLoadingCreationPrerequisites] = useState(false);
   const [sshDialogOpen, setSshDialogOpen] = useState(false);
+  const [sshProvider, setSshProvider] = useState<"gitlab" | "github">("gitlab");
   const [sshKeys, setSshKeys] = useState<SshPublicKey[]>([]);
   const [selectedSshKeyName, setSelectedSshKeyName] = useState("");
   const [sshComment, setSshComment] = useState("");
@@ -1161,7 +1162,8 @@ export default function Home() {
     }
   }
 
-  async function openSshAssistant(regenerate = false) {
+  async function openSshAssistant(regenerate = false, provider: "gitlab" | "github" = "gitlab") {
+    setSshProvider(provider);
     setSshRegenerateMode(false);
     setSshRegenerateConfirmed(false);
     setSshKeyBackup("");
@@ -1975,6 +1977,7 @@ export default function Home() {
 
       <SshKeyDialog
         creationPrerequisites={creationPrerequisites}
+        provider={sshProvider}
         loadCreationPrerequisites={loadCreationPrerequisites}
         loadSshKeys={loadSshKeys}
         onOpenChange={setSshDialogOpen}
