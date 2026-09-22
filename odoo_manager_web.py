@@ -90,7 +90,6 @@ from odoo_manager_core.system import (
     active_engine_client,
     docker_command,
     reset_docker_backend_cache,
-    shell_command,
 )
 from odoo_manager_core.windows_links import (
     MIGRATION_JOURNAL_NAME,
@@ -207,7 +206,6 @@ DEFAULT_WORKSPACE = Path(os.environ.get("ODOO_WORKSPACE", DEFAULT_WORKSPACE_FALL
 SETTINGS_STORE = SettingsStore(DEFAULT_WORKSPACE)
 SETTINGS = SETTINGS_STORE.load()
 WORKSPACE = Path(SETTINGS.workspace).resolve()
-MANAGER = Path(os.environ.get("ODOO_MANAGER_SCRIPT", ROOT / "odoo_manager.sh")).resolve()
 LOCAL_MODULE_OVERRIDES = SETTINGS_STORE.path.with_name("local_module_overrides.json")
 DELETED_PROJECTS = WORKSPACE / ".odoo_manager_deleted"
 DELETED_MODULES = WORKSPACE / ".odoo_manager_deleted_modules"
@@ -3029,40 +3027,6 @@ def run_stream(job, args, cwd=None):
     if code != 0 and job.status == "running":
         job.status = "error"
     return code
-
-
-def manager_job(job, *args):
-    if not MANAGER.exists():
-        raise RuntimeError(f"Script introuvable: {MANAGER}")
-    return run_stream(job, manager_command(*args))
-
-
-def manager_command(*args):
-    if platform_id() != "windows" or SETTINGS.execution_mode != "wsl":
-        return shell_command(SETTINGS, MANAGER, *args)
-
-    docker_host_path = resolve_host_executable(SETTINGS.docker_executable)
-    variables = [
-        f"ODOO_WORKSPACE={execution_path(WORKSPACE, SETTINGS)}",
-        f"ODOO_MANAGER_DOCKER={execution_path(docker_host_path, SETTINGS)}",
-        "ODOO_MANAGER_EXECUTION_MODE=wsl",
-    ]
-    traefik_dir = local_traefik_directory()
-    if traefik_dir:
-        variables.append(f"TRAEFIK_DIR={execution_path(traefik_dir, SETTINGS)}")
-    return [
-        *command_prefix(SETTINGS),
-        "env",
-        *variables,
-        "sh",
-        execution_path(MANAGER, SETTINGS),
-        *args,
-    ]
-
-
-def update_all_modules_manager_args(project, db_name, allow_missing_filestore=False):
-    command = "--update-all-modules-without-filestore" if allow_missing_filestore else "--update-all-modules"
-    return command, project, db_name
 
 
 def available_update_modules(project, db_name, states=None, available_names=None, excluded_names=None):
@@ -6603,8 +6567,6 @@ def address_is_already_in_use(error):
 
 
 def main():
-    if not MANAGER.exists():
-        raise SystemExit(f"Script introuvable: {MANAGER}")
     url = f"http://{HOST}:{PORT}/"
     try:
         server = ManagerHTTPServer((HOST, PORT), Handler)

@@ -3,7 +3,7 @@ from unittest import mock
 
 from odoo_manager_core.config import ManagerSettings
 from odoo_manager_core.docker_api import DockerEngineClient, EngineEndpoint, EngineUnavailable
-from odoo_manager_core.system import docker_command, docker_status, reset_docker_backend_cache, shell_command
+from odoo_manager_core.system import docker_command, docker_status, reset_docker_backend_cache
 
 
 class DockerStatusTests(unittest.TestCase):
@@ -113,18 +113,6 @@ class DockerStatusTests(unittest.TestCase):
 
         self.assertEqual("stopped", status["state"])
         self.assertFalse(status["running"])
-
-    @mock.patch("odoo_manager_core.system.execution_path", return_value="/mnt/c/tools/odoo_manager.sh")
-    def test_shell_command_uses_wsl_prefix(self, _execution_path):
-        settings = ManagerSettings.from_dict(
-            {"execution_mode": "wsl", "wsl_distribution": "Ubuntu"},
-            "/tmp/workspace",
-        )
-        command = shell_command(settings, "C:/tools/odoo_manager.sh", "--list")
-        self.assertEqual(
-            command,
-            ["wsl.exe", "-d", "Ubuntu", "--exec", "sh", "/mnt/c/tools/odoo_manager.sh", "--list"],
-        )
 
     @mock.patch("odoo_manager_core.system.resolve_host_executable", return_value=r"C:\Docker\docker.exe")
     @mock.patch("odoo_manager_core.system.platform_id", return_value="windows")

@@ -48,7 +48,6 @@ def main():
         output.unlink()
     if runtime.exists():
         shutil.rmtree(runtime)
-    data_separator = os.pathsep
     pyinstaller_args = [
         str(ROOT / "odoo_manager_web.py"),
         "--onedir",
@@ -66,8 +65,6 @@ def main():
         str(build_root / "work"),
         "--specpath",
         str(build_root),
-        "--add-data",
-        f"{ROOT / 'odoo_manager.sh'}{data_separator}.",
     ]
     if is_windows:
         pyinstaller_args.append("--noconsole")

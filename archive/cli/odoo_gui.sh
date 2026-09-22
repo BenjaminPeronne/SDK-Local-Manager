@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 
 case "${1:-}" in
   --restart)

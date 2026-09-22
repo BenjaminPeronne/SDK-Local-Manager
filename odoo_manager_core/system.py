@@ -163,11 +163,6 @@ def docker_command(settings, *arguments):
     return [*backend.command, *mark_docker_arguments(backend.command, arguments)]
 
 
-def shell_command(settings, script_path, *arguments):
-    script = execution_path(script_path, settings)
-    return [*command_prefix(settings), "sh", script, *arguments]
-
-
 def docker_install_guide(system, execution_mode="native"):
     guides = {
         "macos": {
