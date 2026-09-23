@@ -623,7 +623,7 @@ class ProjectCreator:
             candidate.write_text(content, encoding="utf-8")
 
     @staticmethod
-    def extract_rika_archive(archive, destination):
+    def extract_rika_archive(archive, destination, log=None):
         destination = Path(destination)
         destination.mkdir(parents=True, exist_ok=True)
         destination_root = destination.resolve()
@@ -635,6 +635,7 @@ class ProjectCreator:
             if total_size > MAX_RIKA_ARCHIVE_BYTES:
                 raise RuntimeError("La copie RIKA dépasse la taille maximale autorisée.")
             safe_entries = []
+            symlinks = []
             for entry in entries:
                 normalized = entry.filename.replace("\\", "/")
                 parts = Path(normalized).parts
@@ -647,8 +648,9 @@ class ProjectCreator:
                 ):
                     raise RuntimeError(f"La copie RIKA contient un chemin non sécurisé : {entry.filename!r}.")
                 if ((entry.external_attr >> 16) & 0o170000) == 0o120000:
-                    # Les liens symboliques (fréquents dans les dépôts Git) ne sont jamais recréés :
-                    # on les ignore au lieu d'écarter toute la copie.
+                    # Créés après l'extraction (jamais suivis par elle), et seulement si leur cible
+                    # reste dans la copie : ce sont les liens de odoo/addons vers addons-store.
+                    symlinks.append((entry, parts))
                     continue
                 target = (destination / Path(*parts)).resolve()
                 try:
@@ -657,6 +659,39 @@ class ProjectCreator:
                     raise RuntimeError("La copie RIKA tente d'écrire hors du projet temporaire.") from exc
                 safe_entries.append(entry)
             bundle.extractall(destination, members=safe_entries)
+            skipped = []
+            for entry, parts in symlinks:
+                link_target = bundle.read(entry).decode("utf-8", errors="replace").replace("\\", "/")
+                if not ProjectCreator.create_rika_symlink(destination, destination_root, parts, link_target):
+                    skipped.append("/".join(parts))
+            if skipped and log:
+                shown = ", ".join(skipped[:5]) + (f" et {len(skipped) - 5} autre(s)" if len(skipped) > 5 else "")
+                log(f"Liens de la copie RIKA non recréés ({len(skipped)}) : {shown}")
+
+    @staticmethod
+    def create_rika_symlink(destination, destination_root, parts, link_target):
+        """Recrée un lien symbolique de la copie RIKA ; False s'il est dangereux ou impossible."""
+        if (
+            not link_target
+            or "\0" in link_target
+            or link_target.startswith("/")
+            or Path(link_target).is_absolute()
+            or Path(link_target).parts[0].endswith(":")
+        ):
+            return False
+        link = destination / Path(*parts)
+        try:
+            (link.parent / link_target).resolve().relative_to(destination_root)
+        except ValueError:
+            return False
+        try:
+            if link.exists() or link.is_symlink():
+                return False
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.symlink_to(link_target)
+        except OSError:
+            return False
+        return True
 
     def download_rika_project(self, instance, login, password, temporary, log=None):
         instance = validate_rika_instance(instance)
@@ -758,7 +793,7 @@ class ProjectCreator:
         extracted = Path(temporary) / "rika"
         self.log(log, "Décompression et contrôle de la copie RIKA...")
         try:
-            self.extract_rika_archive(archive, extracted)
+            self.extract_rika_archive(archive, extracted, log=lambda line: self.log(log, line))
         except (OSError, zipfile.BadZipFile) as exc:
             raise RuntimeError("Le fichier reçu depuis RIKA n'est pas une sauvegarde ZIP exploitable.") from exc
         source_root = extracted / instance

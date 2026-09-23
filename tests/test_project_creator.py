@@ -193,18 +193,41 @@ class ProjectCreatorTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "chemin non sécurisé"):
             ProjectCreator.extract_rika_archive(archive, self.workspace / "extract")
 
-    def test_rika_archive_skips_symbolic_links(self):
+    def _rika_archive_with_links(self, links):
         archive = self.workspace / "links.zip"
         with zipfile.ZipFile(archive, "w") as bundle:
-            bundle.writestr("prod01/odoo/odoo/release.py", "version_info = (18, 0, 0)\n")
-            link = zipfile.ZipInfo("prod01/odoo/link")
-            link.external_attr = (0o120777 << 16)
-            bundle.writestr(link, "odoo/odoo")
+            bundle.writestr("prod01/odoo/addons-store/repo/mod/__manifest__.py", "{}")
+            for name, target in links.items():
+                link = zipfile.ZipInfo(name)
+                link.external_attr = 0o120777 << 16
+                bundle.writestr(link, target)
+        return archive
 
-        ProjectCreator.extract_rika_archive(archive, self.workspace / "extract")
+    def test_rika_archive_recreates_relative_symbolic_links_inside_the_copy(self):
+        archive = self._rika_archive_with_links({"prod01/odoo/addons/mod": "../addons-store/repo/mod"})
+        extract = self.workspace / "extract"
 
-        self.assertTrue((self.workspace / "extract" / "prod01" / "odoo" / "odoo" / "release.py").is_file())
-        self.assertFalse((self.workspace / "extract" / "prod01" / "odoo" / "link").exists())
+        ProjectCreator.extract_rika_archive(archive, extract)
+
+        link = extract / "prod01" / "odoo" / "addons" / "mod"
+        self.assertTrue(link.is_symlink())
+        self.assertTrue((link / "__manifest__.py").is_file())
+
+    def test_rika_archive_skips_symbolic_links_leaving_the_copy_and_reports_them(self):
+        archive = self._rika_archive_with_links(
+            {
+                "prod01/odoo/addons/absolute": "/etc",
+                "prod01/odoo/addons/escape": "../../../../outside",
+            }
+        )
+        logs = []
+
+        ProjectCreator.extract_rika_archive(archive, self.workspace / "extract", log=logs.append)
+
+        addons = self.workspace / "extract" / "prod01" / "odoo" / "addons"
+        self.assertFalse((addons / "absolute").exists() or (addons / "absolute").is_symlink())
+        self.assertFalse((addons / "escape").is_symlink())
+        self.assertTrue(any("non recréés (2)" in line for line in logs))
 
     @mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows")
     @mock.patch("odoo_manager_core.project_creator.host_executable_available", return_value=False)
