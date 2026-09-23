@@ -4722,21 +4722,35 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
     if flag not in ("--install-module", "--update-module"):
         raise ValueError("Action module Odoo inconnue.")
 
-    try:
-        project_service().run_odoo_module_command(
-            project,
-            db_name,
-            ",".join(module_names),
-            option="-i" if flag == "--install-module" else "-u",
-            log=job.add,
-            overwrite_translations=overwrite_translations,
-        )
-    except RuntimeError as exc:
-        hint = missing_code_failure_hint(project, db_name, str(exc)) or external_dependency_failure_hint(str(exc))
-        if hint:
-            job.add(hint)
-            raise RuntimeError(f"{exc} {hint}") from exc
-        raise
+    attempted_packages = set()
+    while True:
+        try:
+            project_service().run_odoo_module_command(
+                project,
+                db_name,
+                ",".join(module_names),
+                option="-i" if flag == "--install-module" else "-u",
+                log=job.add,
+                overwrite_translations=overwrite_translations,
+            )
+            return
+        except RuntimeError as exc:
+            import_name = missing_python_import(str(exc))
+            package = python_package_for_import(import_name) if import_name else ""
+            if not package or package in attempted_packages or len(attempted_packages) >= MAX_AUTO_PIP_INSTALLS:
+                hint = missing_code_failure_hint(project, db_name, str(exc)) or external_dependency_failure_hint(
+                    str(exc)
+                )
+                if hint:
+                    job.add(hint)
+                    raise RuntimeError(f"{exc} {hint}") from exc
+                raise
+            attempted_packages.add(package)
+            job.add(
+                f"Dépendance Python manquante détectée automatiquement : {package}. "
+                "Ajout à requirements_pip.txt et nouvelle tentative..."
+            )
+            project_service().record_python_requirement(project, package, log=job.add)
 
 
 # Erreurs Odoo typiques d'une base qui référence le code d'un module absent du projet.
@@ -4768,24 +4782,59 @@ def missing_code_failure_hint(project, db_name, message):
     )
 
 
-# Message Odoo quand un module déclare une dépendance Python (external_dependencies) absente du conteneur.
-EXTERNAL_DEPENDENCY_ERROR_RE = re.compile(
-    r"d[ée]pendance externe non trouv[ée]e\s*:\s*(?P<package_fr>[\w.\-]+)"
-    r"|external dependenc\w* (?:is |are )?not (?:met|found)\s*:\s*(?P<package_en>[\w.\-]+)",
+# Un module Python manquant se voit de deux façons : Odoo le détecte lui-même via
+# external_dependencies (quand le manifeste le déclare) et le dit en clair, ou il n'est
+# déclaré nulle part et casse au premier import réel, en français ou en anglais selon
+# le point d'échec — les deux formes portent le nom d'import, pas forcément le nom pip.
+MISSING_PYTHON_IMPORT_RE = re.compile(
+    r"d[ée]pendance externe non trouv[ée]e\s*:\s*(?P<name1>[\w.\-]+)"
+    r"|external dependenc\w* (?:is |are )?not (?:met|found)\s*:\s*(?P<name2>[\w.\-]+)"
+    r"|(?:ModuleNotFoundError|ImportError)\s*:\s*No module named ['\"]?(?P<name3>[\w.]+)",
     re.IGNORECASE,
 )
 
+# Cas connus où le nom importé diverge du nom du paquet PyPI qui le fournit.
+PIP_PACKAGE_ALIASES = {
+    "pil": "Pillow",
+    "cv2": "opencv-python",
+    "yaml": "PyYAML",
+    "crypto": "pycryptodome",
+    "usb": "pyusb",
+    "serial": "pyserial",
+    "bs4": "beautifulsoup4",
+    "dateutil": "python-dateutil",
+    "openssl": "pyOpenSSL",
+}
 
-def external_dependency_failure_hint(message):
-    """Signale qu'un paquet Python manque dans requirements_pip.txt, pas dans le module lui-même."""
-    match = EXTERNAL_DEPENDENCY_ERROR_RE.search(message)
+# Filet de sécurité contre une boucle infinie si l'erreur est mal interprétée en rafale : chaque
+# réessai refait tourner la commande Odoo en entier, le plafond doit donc rester bas.
+MAX_AUTO_PIP_INSTALLS = 3
+
+
+def missing_python_import(message):
+    """Nom d'import Python manquant, déduit d'une erreur Odoo ou d'un traceback brut."""
+    match = MISSING_PYTHON_IMPORT_RE.search(message)
     if not match:
         return ""
-    package = match.group("package_fr") or match.group("package_en")
+    name = match.group("name1") or match.group("name2") or match.group("name3")
+    return name.split(".")[0]
+
+
+def python_package_for_import(import_name):
+    """Nom du paquet PyPI à installer pour satisfaire cet import (identique la plupart du temps)."""
+    return PIP_PACKAGE_ALIASES.get(import_name.lower(), import_name)
+
+
+def external_dependency_failure_hint(message):
+    """Affiché quand l'installation automatique du paquet manquant a elle-même échoué."""
+    import_name = missing_python_import(message)
+    if not import_name:
+        return ""
+    package = python_package_for_import(import_name)
     return (
-        f"Cause probable : le paquet Python « {package} » (dépendance externe du module) n'est pas installé "
-        "dans le conteneur Odoo de ce projet. Ajoute-le à init/requirements_pip.txt à la racine du projet "
-        "(une ligne par paquet), puis relance : il sera installé automatiquement avant la commande Odoo."
+        f"Cause probable : le paquet Python « {package} » (dépendance externe du module) n'a pas pu être "
+        "installé automatiquement dans le conteneur Odoo de ce projet (réseau, nom de paquet PyPI différent…). "
+        "Ajoute-le manuellement à init/requirements_pip.txt à la racine du projet, puis relance."
     )
 
 

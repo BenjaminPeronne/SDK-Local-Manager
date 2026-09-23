@@ -1328,6 +1328,30 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertEqual(git_command[:3], ["wsl.exe", "-d", "Ubuntu-24.04"])
         self.assertEqual(git_command[-4:], ["--exec", "git", "pull", "--ff-only"])
 
+    def test_missing_python_package_is_appended_to_a_new_requirements_file(self):
+        self.service.record_python_requirement("DEMO", "svglib", log=lambda _line: None)
+
+        requirements = self.project_path / "init" / "requirements_pip.txt"
+        self.assertEqual("svglib\n", requirements.read_text(encoding="utf-8"))
+
+    def test_missing_python_package_is_appended_without_a_blank_line(self):
+        requirements = self.project_path / "init" / "requirements_pip.txt"
+        requirements.parent.mkdir(parents=True)
+        requirements.write_text("phonenumbers\n", encoding="utf-8")
+
+        self.service.record_python_requirement("DEMO", "svglib", log=lambda _line: None)
+
+        self.assertEqual("phonenumbers\nsvglib\n", requirements.read_text(encoding="utf-8"))
+
+    def test_already_listed_python_package_is_not_duplicated(self):
+        requirements = self.project_path / "init" / "requirements_pip.txt"
+        requirements.parent.mkdir(parents=True)
+        requirements.write_text("svglib\n", encoding="utf-8")
+
+        self.service.record_python_requirement("DEMO", "svglib", log=lambda _line: None)
+
+        self.assertEqual("svglib\n", requirements.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

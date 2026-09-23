@@ -1643,6 +1643,24 @@ class ProjectService:
         if code != 0:
             raise RuntimeError("L'installation des dépendances Python du projet a échoué.")
 
+    def record_python_requirement(self, project, package, log=None):
+        """Ajoute `package` à requirements_pip.txt : persiste ce que l'auto-installation vient de
+        déduire d'une erreur Odoo, pour que les prochains conteneurs l'aient sans reproduire l'échec."""
+        requirements = self.project_path(project) / "init" / "requirements_pip.txt"
+        try:
+            content = requirements.read_text(encoding="utf-8", errors="ignore")
+        except FileNotFoundError:
+            content = ""
+        existing = {
+            line.strip() for line in content.splitlines() if line.strip() and not line.lstrip().startswith("#")
+        }
+        if package in existing:
+            return
+        requirements.parent.mkdir(parents=True, exist_ok=True)
+        separator = "" if not content or content.endswith("\n") else "\n"
+        requirements.write_text(f"{content}{separator}{package}\n", encoding="utf-8")
+        self.log(log, f"{package} ajouté à init/requirements_pip.txt")
+
     def ensure_odoo_containers_ready(self, project, log=None):
         container = f"odoo-{project}"
         postgres = f"postgresql-{project}"

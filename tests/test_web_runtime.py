@@ -1429,6 +1429,71 @@ class ModuleFailureHintTests(unittest.TestCase):
 
         self.assertEqual("", hint)
 
+    def test_undeclared_dependency_is_read_from_the_raw_traceback(self):
+        message = (
+            "Traceback (most recent call last):\n"
+            '  File "odoo/addons/sodial_stock/models/report.py", line 3, in <module>\n'
+            "    import svglib\n"
+            "ModuleNotFoundError: No module named 'svglib'"
+        )
+
+        self.assertEqual("svglib", web.missing_python_import(message))
+
+    def test_import_name_is_mapped_to_its_pypi_package_name(self):
+        self.assertEqual("Pillow", web.python_package_for_import("PIL"))
+        self.assertEqual("svglib", web.python_package_for_import("svglib"))
+
+    def test_unrelated_errors_yield_no_python_import(self):
+        self.assertEqual("", web.missing_python_import("SyntaxError: invalid syntax"))
+
+
+class AutomaticPythonDependencyTests(unittest.TestCase):
+    class LogJob:
+        def __init__(self):
+            self.lines = []
+
+        def add(self, line):
+            self.lines.append(line)
+
+    @patch("odoo_manager_web.normalize_module_layout_for_action")
+    @patch("odoo_manager_web.project_dirs", return_value=["demo"])
+    @patch("odoo_manager_web.project_service")
+    def test_missing_dependency_is_recorded_and_the_install_is_retried(
+        self, project_service, _dirs, _normalize
+    ):
+        service = project_service.return_value
+        service.run_odoo_module_command.side_effect = [
+            RuntimeError(
+                "La commande Odoo a échoué avec le code 255. Dernière erreur Odoo : "
+                "ModuleNotFoundError: No module named 'svglib'"
+            ),
+            None,
+        ]
+        job = self.LogJob()
+
+        web.module_command_job(job, "--install-module", "demo", "db1", "sodial_stock")
+
+        self.assertEqual(2, service.run_odoo_module_command.call_count)
+        service.record_python_requirement.assert_called_once_with("demo", "svglib", log=job.add)
+        self.assertTrue(any("svglib" in line for line in job.lines))
+
+    @patch("odoo_manager_web.normalize_module_layout_for_action")
+    @patch("odoo_manager_web.project_dirs", return_value=["demo"])
+    @patch("odoo_manager_web.project_service")
+    def test_repeated_failure_stops_retrying_and_raises_with_a_hint(self, project_service, _dirs, _normalize):
+        service = project_service.return_value
+        service.run_odoo_module_command.side_effect = RuntimeError(
+            "Dernière erreur Odoo : ModuleNotFoundError: No module named 'svglib'"
+        )
+        job = self.LogJob()
+
+        with self.assertRaisesRegex(RuntimeError, "svglib"):
+            web.module_command_job(job, "--install-module", "demo", "db1", "sodial_stock")
+
+        # Un seul essai supplémentaire : le paquet est déjà dans attempted_packages dès le 2e échec.
+        self.assertEqual(2, service.run_odoo_module_command.call_count)
+        service.record_python_requirement.assert_called_once_with("demo", "svglib", log=job.add)
+
 
 class TraefikInstallationTests(unittest.TestCase):
     class LogJob:
