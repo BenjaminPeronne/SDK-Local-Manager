@@ -212,6 +212,37 @@ def terminate_active_processes(wait_seconds=0.5):
 PYTHON_EXCEPTION_LINE_RE = re.compile(r"\b[A-Za-z_][\w.]*(?:Error|Exception|Fault):\s*\S|^[A-Za-z_]\w*(?:\.\w+)+:\s*\S")
 
 
+class TracebackChain:
+    """Suit les tracebacks Python enchaînés pour retrouver l'exception d'origine.
+
+    Odoo enveloppe l'erreur réelle (« External ID not found… ») dans un ParseError final qui
+    ne dit rien seul : elle n'apparaît que dans le traceback précédent, relié par « The above
+    exception was the direct cause… ».
+    """
+
+    CONNECTORS = ("The above exception was the direct cause", "During handling of the above exception")
+
+    def __init__(self):
+        self.root = None
+        self._chained = False
+
+    def feed(self, line):
+        if line.startswith("Traceback (most recent call last)"):
+            if not self._chained:
+                self.root = None
+            self._chained = False
+        elif line.startswith(self.CONNECTORS):
+            self._chained = True
+        elif self.root is None and PYTHON_EXCEPTION_LINE_RE.search(line) and not line.startswith(("File ", " ")):
+            self.root = line
+
+    def origin_of(self, final_exception):
+        """Suffixe « cause d'origine » si la cause diffère de l'exception finale."""
+        if not self.root or self.root == final_exception:
+            return ""
+        return f" — cause d'origine : {self.root[:250]}"
+
+
 class OdooError(RuntimeError):
     """Échec rapporté par Odoo lui-même (code des modules, données de la base).
 
@@ -1775,6 +1806,7 @@ class ProjectService:
         command_error = None
         command_severity_error = None
         command_error_detail = []
+        traceback_chain = TracebackChain()
 
         def log_module_output(line):
             nonlocal command_error, command_severity_error, command_error_detail
@@ -1782,6 +1814,7 @@ class ProjectService:
                 part = part.strip()
                 if not part:
                     continue
+                traceback_chain.feed(part)
                 if re.search(r"\b(?:ERROR|CRITICAL)\b", part):
                     command_severity_error = part
                 elif re.match(r"\d{4}-\d\d-\d\d .*\b(?:INFO|WARNING|DEBUG)\b", part):
@@ -1806,6 +1839,7 @@ class ProjectService:
                 if command_error:
                     reason = (
                         f"Dernière erreur Odoo : {command_error[:350]}{self.odoo_error_detail(command_error_detail)}"
+                        f"{traceback_chain.origin_of(command_error)}"
                     )
                 elif command_severity_error:
                     reason = f"Dernière erreur Odoo : {command_severity_error[:350]}"
@@ -1857,9 +1891,11 @@ class ProjectService:
         last_exception = None
         exception_index = None
         in_error_block = False
+        traceback_chain = TracebackChain()
         for index, line in enumerate(lines):
             if not line:
                 continue
+            traceback_chain.feed(line.strip())
             if severity.search(line):
                 last_severity = line
                 in_error_block = True
@@ -1870,7 +1906,7 @@ class ProjectService:
                 exception_index = index
         if last_exception:
             detail = cls.odoo_error_detail(list(lines[exception_index + 1 :]))
-            return f"Dernière erreur Odoo : {last_exception[:350]}{detail}"
+            return f"Dernière erreur Odoo : {last_exception[:350]}{detail}{traceback_chain.origin_of(last_exception)}"
         if last_severity:
             return f"Dernière erreur Odoo : {last_severity[:350]}"
         return "Cause non présente dans la sortie reçue. Consultez les Logs de cette tâche."

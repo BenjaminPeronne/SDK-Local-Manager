@@ -912,6 +912,38 @@ class ProjectServiceTests(unittest.TestCase):
         )
         self.assertIn('permission denied to create extension "vector"', reason)
 
+    def test_failure_reason_names_the_original_cause_of_a_chained_parse_error(self):
+        reason = self.service.odoo_command_failure_reason(
+            [
+                "2026-09-23 16:02:39,524 412 CRITICAL sodial odoo.service.server: Failed to initialize database `sodial`.",
+                "Traceback (most recent call last):",
+                '  File "/home/odoo/srv/server/odoo/odoo/tools/convert.py", line 608, in _tag_root',
+                "ValueError: External ID not found in the system: sodial_stock.action_report_delivery_bundle",
+                "",
+                "The above exception was the direct cause of the following exception:",
+                "",
+                "Traceback (most recent call last):",
+                '  File "/home/odoo/srv/server/odoo/odoo/service/server.py", line 1591, in preload_registries',
+                "odoo.tools.convert.ParseError: while parsing /home/odoo/srv/server/addons/sodial_stock/views/x.xml:4",
+            ]
+        )
+        self.assertIn("ParseError", reason)
+        self.assertIn(
+            "cause d'origine : ValueError: External ID not found in the system: "
+            "sodial_stock.action_report_delivery_bundle",
+            reason,
+        )
+
+    def test_failure_reason_without_chained_traceback_adds_no_origin(self):
+        reason = self.service.odoo_command_failure_reason(
+            [
+                "2026-09-23 11:54:18,959 386 CRITICAL demo odoo.service.server: Failed to initialize database `demo`.",
+                "Traceback (most recent call last):",
+                "KeyError: 'sign.request'",
+            ]
+        )
+        self.assertNotIn("cause d'origine", reason)
+
     def test_info_filestore_traceback_is_not_reported_as_module_failure(self):
         reason = self.service.odoo_command_failure_reason(
             [
