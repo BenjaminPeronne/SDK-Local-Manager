@@ -328,6 +328,7 @@ export function GitLabRepositoryPicker({
                   <button
                     type="button"
                     className="w-full px-3 py-2 text-center text-sm font-medium text-muted-foreground hover:bg-hover hover:text-foreground"
+                    onMouseMove={() => setActiveIndex(-1)}
                     onClick={() => setVisibleProjectCount(projects.length)}
                   >
                     Voir plus ({projects.length - visibleProjectCount} de plus)
@@ -438,6 +439,7 @@ export function GitLabRepositoryPicker({
                       <button
                         type="button"
                         className="w-full px-3 py-2 text-center text-sm font-medium text-muted-foreground hover:bg-hover hover:text-foreground"
+                        onMouseMove={() => setRefActiveIndex(-1)}
                         onClick={() => setVisibleRefCount(refOptions.length)}
                       >
                         Voir plus ({refOptions.length - visibleRefCount} de plus)
