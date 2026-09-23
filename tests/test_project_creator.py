@@ -193,6 +193,19 @@ class ProjectCreatorTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "chemin non sécurisé"):
             ProjectCreator.extract_rika_archive(archive, self.workspace / "extract")
 
+    def test_rika_archive_skips_symbolic_links(self):
+        archive = self.workspace / "links.zip"
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr("prod01/odoo/odoo/release.py", "version_info = (18, 0, 0)\n")
+            link = zipfile.ZipInfo("prod01/odoo/link")
+            link.external_attr = (0o120777 << 16)
+            bundle.writestr(link, "odoo/odoo")
+
+        ProjectCreator.extract_rika_archive(archive, self.workspace / "extract")
+
+        self.assertTrue((self.workspace / "extract" / "prod01" / "odoo" / "odoo" / "release.py").is_file())
+        self.assertFalse((self.workspace / "extract" / "prod01" / "odoo" / "link").exists())
+
     @mock.patch("odoo_manager_core.project_creator.platform_id", return_value="windows")
     @mock.patch("odoo_manager_core.project_creator.host_executable_available", return_value=False)
     @mock.patch("odoo_manager_core.project_creator.wsl_execution_path")

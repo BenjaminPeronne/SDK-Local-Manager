@@ -634,6 +634,7 @@ class ProjectCreator:
             total_size = sum(max(0, entry.file_size) for entry in entries)
             if total_size > MAX_RIKA_ARCHIVE_BYTES:
                 raise RuntimeError("La copie RIKA dépasse la taille maximale autorisée.")
+            safe_entries = []
             for entry in entries:
                 normalized = entry.filename.replace("\\", "/")
                 parts = Path(normalized).parts
@@ -643,15 +644,19 @@ class ProjectCreator:
                     or Path(normalized).is_absolute()
                     or (parts and parts[0].endswith(":"))
                     or any(part in {"", ".", ".."} for part in parts)
-                    or ((entry.external_attr >> 16) & 0o170000) == 0o120000
                 ):
-                    raise RuntimeError("La copie RIKA contient un chemin non sécurisé.")
+                    raise RuntimeError(f"La copie RIKA contient un chemin non sécurisé : {entry.filename!r}.")
+                if ((entry.external_attr >> 16) & 0o170000) == 0o120000:
+                    # Les liens symboliques (fréquents dans les dépôts Git) ne sont jamais recréés :
+                    # on les ignore au lieu d'écarter toute la copie.
+                    continue
                 target = (destination / Path(*parts)).resolve()
                 try:
                     target.relative_to(destination_root)
                 except ValueError as exc:
                     raise RuntimeError("La copie RIKA tente d'écrire hors du projet temporaire.") from exc
-            bundle.extractall(destination)
+                safe_entries.append(entry)
+            bundle.extractall(destination, members=safe_entries)
 
     def download_rika_project(self, instance, login, password, temporary, log=None):
         instance = validate_rika_instance(instance)
