@@ -2216,10 +2216,13 @@ except ImportError:
     crons = env["ir.cron"].search([])
     if autovacuum:
         crons -= autovacuum
-    crons.write({"active": False})
+    # Odoo 15 : ir.cron.write() sur un jeu vide exécute `WHERE id IN ()` et échoue en SQL.
+    if crons:
+        crons.write({"active": False})
 
     outgoing = env["ir.mail_server"].search([])
-    outgoing.write({"active": False})
+    if outgoing:
+        outgoing.write({"active": False})
     dummy = env["ir.mail_server"].search([
         ("name", "=", "neutralization - disable emails"),
     ], limit=1)
@@ -2237,7 +2240,9 @@ except ImportError:
         env["ir.mail_server"].create(values)
 
     if "fetchmail.server" in env.registry:
-        env["fetchmail.server"].search([]).write({"active": False})
+        fetchmail_servers = env["fetchmail.server"].search([])
+        if fetchmail_servers:
+            fetchmail_servers.write({"active": False})
     env["ir.config_parameter"].sudo().set_param("database.is_neutralized", "true")
 else:
     neutralize_database(env.cr)
