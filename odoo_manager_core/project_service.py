@@ -199,6 +199,12 @@ def terminate_active_processes(wait_seconds=0.5):
                     pass
 
 
+# Dernière ligne d'un traceback Python : « ValueError: … », mais aussi « psycopg2.errors.InsufficientPrivilege: … »,
+# dont la classe ne finit pas par Error. Les lignes de log Odoo (« odoo.service.server: … ») portent un préfixe
+# horodaté et sont traitées avant, une exception dotée d'un nom de module commence la ligne.
+PYTHON_EXCEPTION_LINE_RE = re.compile(r"\b[A-Za-z_][\w.]*(?:Error|Exception|Fault):\s*\S|^[A-Za-z_]\w*(?:\.\w+)+:\s*\S")
+
+
 class ProjectService:
     def __init__(self, settings, workspace, traefik_dir=None, runner=None, http_probe=None, port_in_use=None):
         self.settings = settings
@@ -1764,7 +1770,7 @@ class ProjectService:
                     command_severity_error = part
                 elif re.match(r"\d{4}-\d\d-\d\d .*\b(?:INFO|WARNING|DEBUG)\b", part):
                     command_severity_error = None
-                elif command_severity_error and re.search(r"\b[A-Za-z_][\w.]*(?:Error|Exception|Fault):\s*\S", part):
+                elif command_severity_error and PYTHON_EXCEPTION_LINE_RE.search(part):
                     command_error = part
                     command_error_detail = []
                 elif command_error:
@@ -1829,7 +1835,7 @@ class ProjectService:
 
     @classmethod
     def odoo_command_failure_reason(cls, lines):
-        exception = re.compile(r"\b[A-Za-z_][\w.]*(?:Error|Exception|Fault):\s*\S")
+        exception = PYTHON_EXCEPTION_LINE_RE
         severity = re.compile(r"\b(?:ERROR|CRITICAL)\b")
         last_severity = None
         last_exception = None

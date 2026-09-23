@@ -883,6 +883,35 @@ class ProjectServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "ImportError: missing Odoo dependency"):
             self.service.run_odoo_module_command("DEMO", "demo", "all", log=lambda _line: None)
 
+    def test_module_error_keeps_psycopg2_exception_not_ending_in_error(self):
+        # pgvector manquant (module IA) : PostgreSQL lève InsufficientPrivilege, une classe sans
+        # suffixe « Error ». Sans elle, seule la ligne CRITICAL générique remontait et la création
+        # automatique de l'extension (qui lit ce message) ne se déclenchait jamais.
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        self.runner.stream_codes = [255]
+        self.runner.stream_output = [
+            "2026-09-23 11:54:18,900 386 ERROR demo odoo.modules.registry: Failed to load registry",
+            "2026-09-23 11:54:18,959 386 CRITICAL demo odoo.service.server: Failed to initialize database `demo`.",
+            "Traceback (most recent call last):",
+            '  File "/home/odoo/srv/server/odoo/odoo/service/server.py", line 1500, in preload_registries',
+            "    registry = Registry.new(dbname, update_module=update_module)",
+            'psycopg2.errors.InsufficientPrivilege: permission denied to create extension "vector"',
+            "HINT:  Must be superuser to create this extension.",
+        ]
+        with self.assertRaisesRegex(RuntimeError, 'permission denied to create extension "vector"'):
+            self.service.run_odoo_module_command("DEMO", "demo", "ai_app", option="-i", log=lambda _line: None)
+
+    def test_failure_reason_keeps_psycopg2_exception_not_ending_in_error(self):
+        reason = self.service.odoo_command_failure_reason(
+            [
+                "2026-09-23 11:54:18,959 386 CRITICAL demo odoo.service.server: Failed to initialize database `demo`.",
+                "Traceback (most recent call last):",
+                'psycopg2.errors.InsufficientPrivilege: permission denied to create extension "vector"',
+            ]
+        )
+        self.assertIn('permission denied to create extension "vector"', reason)
+
     def test_info_filestore_traceback_is_not_reported_as_module_failure(self):
         reason = self.service.odoo_command_failure_reason(
             [
