@@ -28,6 +28,23 @@ export class ApiUnavailableError extends Error {
   }
 }
 
+// Erreur renvoyée par l'API : `code` identifie les cas que l'interface sait absorber sans alerter.
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+// Le projet lu vient d'être supprimé ou renommé : la liste se met à jour d'elle-même.
+export function isProjectGone(error: unknown) {
+  return error instanceof ApiError && error.code === "project_not_found";
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response | undefined;
   const retryDelays = isDesktopRuntime() ? DESKTOP_API_RETRY_DELAYS_MS : [0];
@@ -66,7 +83,11 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     // Sans message du serveur, on garde au moins la requête fautive : un « Bad Request » seul n'est pas diagnosticable.
     const method = (init?.method || "GET").toUpperCase();
-    throw new Error(payload.error || `${method} ${path} : ${response.status} ${response.statusText}`);
+    throw new ApiError(
+      payload.error || `${method} ${path} : ${response.status} ${response.statusText}`,
+      response.status,
+      payload.code,
+    );
   }
   return payload as T;
 }

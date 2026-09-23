@@ -569,7 +569,9 @@ def add_cors_headers(handler):
 
 
 def json_response(handler, payload, status=200):
-    if status >= 400 and isinstance(payload, dict) and payload.get("error"):
+    # Lecture d'un projet tout juste supprimé : attendue, l'interface se met à jour seule.
+    expected_gone = isinstance(payload, dict) and payload.get("code") == PROJECT_NOT_FOUND_CODE
+    if status >= 400 and isinstance(payload, dict) and payload.get("error") and not expected_gone:
         record_manager_error(
             f"API {getattr(handler, 'command', '')} {getattr(handler, 'path', '')}",
             payload["error"],
@@ -1308,11 +1310,18 @@ def project_dirs():
     return sorted(projects)
 
 
+class ProjectNotFoundError(ValueError):
+    """Projet absent du workspace : supprimé ou renommé pendant qu'une requête de l'interface était en vol."""
+
+
+PROJECT_NOT_FOUND_CODE = "project_not_found"
+
+
 def validate_project(project):
     if not project or not SAFE_PROJECT_RE.match(project):
         raise ValueError("Nom de projet invalide.")
     if project not in project_dirs():
-        raise ValueError("Projet introuvable.")
+        raise ProjectNotFoundError("Projet introuvable.")
     return project
 
 
@@ -5626,6 +5635,15 @@ def jobs_snapshot(detail_job_id=None, compact=False, output_from=None):
         ]
 
 
+def unfinished_job(target, project):
+    """Job déjà en file ou en cours pour cette action et ce projet, s'il existe."""
+    with JOBS_LOCK:
+        for job in JOBS.values():
+            if job.target is target and job.project == project and job.status in JOB_UNFINISHED_STATUSES:
+                return job
+    return None
+
+
 def job_creation_payload(job):
     with JOBS_LOCK:
         return {
@@ -6079,6 +6097,8 @@ class Handler(BaseHTTPRequestHandler):
             return json_response(self, {"error": "Route introuvable."}, status=404)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return None
+        except ProjectNotFoundError as exc:
+            return json_response(self, {"error": str(exc), "code": PROJECT_NOT_FOUND_CODE}, status=404)
         except ValueError as exc:
             return json_response(self, {"error": str(exc)}, status=400)
         except Exception as exc:
@@ -6638,7 +6658,10 @@ class Handler(BaseHTTPRequestHandler):
                 )
             elif action == "delete_project":
                 project = validate_project(payload.get("project", ""))
-                job = Job(f"Supprimer {project}", delete_project_job, (project,), project=project)
+                # Double clic ou double envoi : la seconde suppression échouerait sur un projet déjà parti.
+                job = unfinished_job(delete_project_job, project) or Job(
+                    f"Supprimer {project}", delete_project_job, (project,), project=project
+                )
             elif action == "delete_module_code":
                 project = validate_project(payload.get("project", ""))
                 modules = validate_modules(payload.get("modules", ""))

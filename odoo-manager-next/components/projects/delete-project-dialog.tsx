@@ -16,6 +16,7 @@ type DeleteProjectDialogProps = {
 
 export function DeleteProjectDialog({ createJob, onOpenChange, open, selectedProject }: DeleteProjectDialogProps) {
   const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -33,11 +34,17 @@ export function DeleteProjectDialog({ createJob, onOpenChange, open, selectedPro
         />
         <Button
           variant="destructive"
-          disabled={!selectedProject || deleteConfirm !== selectedProject.name}
+          disabled={!selectedProject || deleteConfirm !== selectedProject.name || submitting}
           onClick={async () => {
-            await createJob("delete_project", { project: selectedProject?.name });
-            setDeleteConfirm("");
-            onOpenChange(false);
+            // Un second clic pendant l'envoi lancerait une deuxième suppression, vouée à échouer.
+            setSubmitting(true);
+            try {
+              await createJob("delete_project", { project: selectedProject?.name });
+              setDeleteConfirm("");
+              onOpenChange(false);
+            } finally {
+              setSubmitting(false);
+            }
           }}
         >
           <Trash2 className="h-4 w-4" />

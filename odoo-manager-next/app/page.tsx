@@ -7,7 +7,14 @@ import { useModuleFilters } from "@/hooks/use-module-filters";
 import { useScheduledTimeouts } from "@/hooks/use-scheduled-timeouts";
 import { useStickyProjectHeader } from "@/hooks/use-sticky-project-header";
 import { useToasts } from "@/hooks/use-toasts";
-import { api, API_BASE, ApiUnavailableError, configureRuntimeApiBase, uploadDatabaseBackup } from "@/lib/api";
+import {
+  api,
+  API_BASE,
+  ApiUnavailableError,
+  configureRuntimeApiBase,
+  isProjectGone,
+  uploadDatabaseBackup,
+} from "@/lib/api";
 import { databaseToKeep, readRememberedDatabases, writeRememberedDatabases } from "@/lib/database-selection";
 import {
   desktopBridge,
@@ -697,11 +704,17 @@ export default function Home() {
       });
     } catch (err) {
       if (generation !== modulesRequestGeneration.current) return;
-      pushToast("error", err instanceof Error ? err.message : "Impossible de charger les modules.");
+      if (isProjectGone(err)) {
+        // Projet supprimé entre-temps : pas d'erreur à montrer, la liste des projets suffit à se corriger.
+        setModules([]);
+        void refreshOverview();
+      } else {
+        pushToast("error", err instanceof Error ? err.message : "Impossible de charger les modules.");
+      }
     } finally {
       if (generation === modulesRequestGeneration.current) setLoadingModules(false);
     }
-  }, [pushToast, selectedDb, selectedProject?.name]);
+  }, [pushToast, refreshOverview, selectedDb, selectedProject?.name]);
 
   useEffect(() => {
     const completionKey = jobs

@@ -199,6 +199,34 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(set(), self.routed_paths() - published)
 
+    def test_reading_a_vanished_project_is_a_quiet_404(self):
+        # Le projet vient d'être supprimé alors que l'interface rafraîchit encore ses modules :
+        # ni alerte, ni entrée dans le journal d'erreurs.
+        with tempfile.TemporaryDirectory() as temporary:
+            error_file = Path(temporary) / "errors.jsonl"
+            with (
+                patch.object(web, "ERROR_LOG_PATH", error_file),
+                patch("odoo_manager_web.project_dirs", return_value=[]),
+            ):
+                status, payload = self.get("/api/projects/ghost/addon-links")
+                entries = web.manager_errors_snapshot()["entries"]
+
+        self.assertEqual(404, status)
+        self.assertEqual("project_not_found", payload["code"])
+        self.assertEqual("Projet introuvable.", payload["error"])
+        self.assertEqual([], entries)
+
+    def test_invalid_project_name_stays_a_logged_400(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            error_file = Path(temporary) / "errors.jsonl"
+            with patch.object(web, "ERROR_LOG_PATH", error_file):
+                status, payload = self.get("/api/projects/bad%20name/addon-links")
+                entries = web.manager_errors_snapshot()["entries"]
+
+        self.assertEqual(400, status)
+        self.assertNotIn("code", payload)
+        self.assertEqual(1, len(entries))
+
     def test_application_version_follows_the_manifests(self):
         package = json.loads(
             (Path(__file__).resolve().parents[1] / "odoo-manager-next" / "package.json").read_text(encoding="utf-8")
@@ -288,6 +316,39 @@ class ManagerErrorLogTests(unittest.TestCase):
 
                 web.clear_manager_errors()
                 self.assertEqual(web.manager_errors_snapshot()["entries"], [])
+
+
+class UnfinishedJobTests(unittest.TestCase):
+    """Une action déjà en file ou en cours n'est pas lancée une seconde fois."""
+
+    def setUp(self):
+        patcher = patch("odoo_manager_web.schedule_jobs")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.created = []
+
+    def tearDown(self):
+        with web.JOBS_LOCK:
+            for job in self.created:
+                web.JOBS.pop(job.id, None)
+
+    def make_job(self, target, project, status="queued"):
+        job = web.Job(f"Supprimer {project}", target, (project,), project=project)
+        job.status = status
+        self.created.append(job)
+        return job
+
+    def test_returns_the_pending_job_of_the_same_project(self):
+        existing = self.make_job(web.delete_project_job, "DEMO")
+
+        self.assertIs(existing, web.unfinished_job(web.delete_project_job, "DEMO"))
+
+    def test_ignores_finished_jobs_other_projects_and_other_actions(self):
+        self.make_job(web.delete_project_job, "DEMO", status="done")
+        self.make_job(web.delete_project_job, "OTHER")
+        self.make_job(web.install_socle_job, "DEMO")
+
+        self.assertIsNone(web.unfinished_job(web.delete_project_job, "DEMO"))
 
 
 class ServerRuntimeTests(unittest.TestCase):
