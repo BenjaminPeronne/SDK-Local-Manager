@@ -213,6 +213,15 @@ class ProjectCreatorTests(unittest.TestCase):
         self.assertTrue(link.is_symlink())
         self.assertTrue((link / "__manifest__.py").is_file())
 
+    def test_rika_archive_extraction_reports_its_progress(self):
+        archive = self._rika_archive_with_links({})
+        logs = []
+
+        ProjectCreator.extract_rika_archive(archive, self.workspace / "extract", log=logs.append)
+
+        self.assertTrue(any(line.startswith("Décompression de 1 fichier(s)") for line in logs))
+        self.assertIn("Décompression terminée.", logs)
+
     def test_rika_archive_skips_symbolic_links_leaving_the_copy_and_reports_them(self):
         archive = self._rika_archive_with_links(
             {

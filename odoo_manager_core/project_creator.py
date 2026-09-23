@@ -80,7 +80,19 @@ MAX_RIKA_ARCHIVE_BYTES = 100 * 1024 * 1024 * 1024
 # pendant quelques minutes le temps que la génération se termine côté RIKA.
 RIKA_ZIP_GENERATION_TIMEOUT_SECONDS = 600
 RIKA_ZIP_POLL_INTERVAL_SECONDS = 5
+# Une copie RIKA pèse des centaines de Mo à plusieurs Go : sans ligne régulière, le journal
+# reste muet pendant toute l'attente. Une ligne toutes les quelques secondes suffit.
+RIKA_PROGRESS_INTERVAL_SECONDS = 5
+RIKA_WAIT_LOG_INTERVAL_SECONDS = 30
 MAX_RIKA_ARCHIVE_ENTRIES = 2_000_000
+
+
+def format_size(size):
+    value = float(size)
+    for unit in ("o", "Ko", "Mo", "Go"):
+        if value < 1024 or unit == "Go":
+            return f"{value:.0f} {unit}" if unit == "o" else f"{value:.1f} {unit}"
+        value /= 1024
 
 
 def validate_new_project_name(name):
@@ -658,7 +670,17 @@ class ProjectCreator:
                 except ValueError as exc:
                     raise RuntimeError("La copie RIKA tente d'écrire hors du projet temporaire.") from exc
                 safe_entries.append(entry)
-            bundle.extractall(destination, members=safe_entries)
+            total = len(safe_entries)
+            if log:
+                log(f"Décompression de {total} fichier(s) ({format_size(total_size)})...")
+            next_report = time.monotonic() + RIKA_PROGRESS_INTERVAL_SECONDS
+            for index, entry in enumerate(safe_entries, start=1):
+                bundle.extract(entry, destination)
+                if log and time.monotonic() >= next_report:
+                    log(f"Décompression... {index}/{total} ({index * 100 // total} %)")
+                    next_report = time.monotonic() + RIKA_PROGRESS_INTERVAL_SECONDS
+            if log:
+                log("Décompression terminée.")
             skipped = []
             for entry, parts in symlinks:
                 link_target = bundle.read(entry).decode("utf-8", errors="replace").replace("\\", "/")
@@ -726,6 +748,7 @@ class ProjectCreator:
                 pass
             if not any(cookie.name == "sessionId" and cookie.value for cookie in cookies):
                 raise RuntimeError("RIKA a refusé l'authentification. Vérifie tes identifiants.")
+            self.log(log, "Authentification RIKA acceptée.")
 
             encoded_instance = urllib.parse.quote(instance, safe="")
             self.log(log, f"Génération de la copie RIKA de {instance}...")
@@ -735,12 +758,14 @@ class ProjectCreator:
             ):
                 pass
             archive_requested = True
+            self.log(log, "Génération de la copie demandée à RIKA.")
 
             archive = Path(temporary) / f"{instance}.zip"
             self.log(log, f"Téléchargement de la copie RIKA de {instance}...")
             zip_url = urllib.parse.urljoin(RIKA_BASE_URL, f"{encoded_instance}.zip")
-            deadline = time.monotonic() + RIKA_ZIP_GENERATION_TIMEOUT_SECONDS
-            waited = False
+            waiting_started = time.monotonic()
+            deadline = waiting_started + RIKA_ZIP_GENERATION_TIMEOUT_SECONDS
+            next_wait_report = waiting_started
             while True:
                 try:
                     response = opener.open(zip_url, timeout=300)
@@ -748,9 +773,14 @@ class ProjectCreator:
                 except urllib.error.HTTPError as exc:
                     if exc.code != 404 or time.monotonic() >= deadline:
                         raise
-                    if not waited:
-                        self.log(log, "RIKA prépare encore la copie, nouvelle tentative en arrière-plan...")
-                        waited = True
+                    now = time.monotonic()
+                    if now >= next_wait_report:
+                        self.log(
+                            log,
+                            "RIKA prépare encore la copie "
+                            f"({int(now - waiting_started)} s / {RIKA_ZIP_GENERATION_TIMEOUT_SECONDS} s max)...",
+                        )
+                        next_wait_report = now + RIKA_WAIT_LOG_INTERVAL_SECONDS
                     time.sleep(RIKA_ZIP_POLL_INTERVAL_SECONDS)
             with (
                 response,
@@ -759,7 +789,11 @@ class ProjectCreator:
                 content_length = int(response.headers.get("Content-Length") or 0)
                 if content_length > MAX_RIKA_ARCHIVE_BYTES:
                     raise RuntimeError("La copie RIKA dépasse la taille maximale autorisée.")
+                if content_length:
+                    self.log(log, f"Taille de la copie RIKA : {format_size(content_length)}.")
                 downloaded = 0
+                download_started = time.monotonic()
+                next_report = download_started + RIKA_PROGRESS_INTERVAL_SECONDS
                 while True:
                     chunk = response.read(1024 * 1024)
                     if not chunk:
@@ -768,6 +802,20 @@ class ProjectCreator:
                     if downloaded > MAX_RIKA_ARCHIVE_BYTES:
                         raise RuntimeError("La copie RIKA dépasse la taille maximale autorisée.")
                     output.write(chunk)
+                    if time.monotonic() >= next_report:
+                        progress = f" ({min(downloaded * 100 // content_length, 100)} %)" if content_length else ""
+                        self.log(
+                            log,
+                            f"Téléchargement de la copie RIKA... {format_size(downloaded)}"
+                            + (f" / {format_size(content_length)}" if content_length else "")
+                            + progress,
+                        )
+                        next_report = time.monotonic() + RIKA_PROGRESS_INTERVAL_SECONDS
+                self.log(
+                    log,
+                    f"Copie RIKA téléchargée : {format_size(downloaded)} en "
+                    f"{int(time.monotonic() - download_started)} s.",
+                )
         except urllib.error.HTTPError as exc:
             if exc.code in {401, 403}:
                 raise RuntimeError("RIKA a refusé l'authentification ou l'accès à cette instance.") from exc
@@ -857,6 +905,7 @@ class ProjectCreator:
                     if any(odoo_root.iterdir()):
                         raise RuntimeError("Le modèle Docker contient déjà un dossier Odoo non vide.")
                     odoo_root.rmdir()
+                self.log(log, "Mise en place de la copie RIKA dans le projet...")
                 rika_source.replace(odoo_root)
                 self.configure_template(staged_project, name)
                 staged_project.replace(target)
