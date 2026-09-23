@@ -4,6 +4,7 @@ import { ShieldCheck } from "lucide-react";
 import type { Job, Project } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SimplifiedNeutralizationNotice } from "@/components/databases/simplified-neutralization-notice";
 
 type NeutralizeDatabaseDialogProps = {
   canUseDb: boolean;
@@ -35,6 +36,7 @@ export function NeutralizeDatabaseDialog({
             identifiants SMTP. Cette opération n’est pas réversible automatiquement.
           </DialogDescription>
         </DialogHeader>
+        <SimplifiedNeutralizationNotice odooVersion={selectedProject?.odoo_version} />
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100">
           À utiliser uniquement sur une copie locale ou une base de test, jamais sur la production.
         </div>

@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FilePicker } from "@/components/ui/file-picker";
 import { Input } from "@/components/ui/input";
+import { SimplifiedNeutralizationNotice } from "@/components/databases/simplified-neutralization-notice";
 
 export function RestoreDatabaseDialog({
   open,
@@ -122,6 +123,8 @@ export function RestoreDatabaseDialog({
               </span>
             </span>
           </label>
+
+          {neutralize && <SimplifiedNeutralizationNotice odooVersion={project?.odoo_version} />}
 
           {submitting && (
             <div className="grid gap-2" aria-live="polite">
