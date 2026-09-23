@@ -726,9 +726,22 @@ class JobResourceTests(unittest.TestCase):
         self.assertEqual(snapshot["status"], "error")
         self.assertEqual(
             snapshot["error_message"],
-            "RIKA a refusé l'authentification. Vérifie tes identifiants.",
+            "Erreur du gestionnaire : RIKA a refusé l'authentification. Vérifie tes identifiants.",
         )
         self.assertNotIn("Traceback", snapshot["error_message"])
+
+    @patch("odoo_manager_web.record_manager_error")
+    def test_failed_job_labels_errors_reported_by_odoo(self, _record_error):
+        def odoo_failure(_job):
+            raise web.OdooError("La commande Odoo a échoué avec le code 255. ParseError")
+
+        job = web.Job("Installer sodial_stock", odoo_failure, project="sodial")
+        self.wait_for(job)
+
+        snapshot = web.jobs_snapshot(detail_job_id=job.id, compact=True)[0]
+        self.assertTrue(snapshot["error_message"].startswith("Erreur d'Odoo"))
+        self.assertIn("pas le gestionnaire", snapshot["error_message"])
+        self.assertIn("La commande Odoo a échoué avec le code 255.", snapshot["error_message"])
 
 
 class EventWatchCostTests(unittest.TestCase):

@@ -79,6 +79,7 @@ from odoo_manager_core.project_creator import (
     validate_new_project_name,
     validate_odoo_version,
 )
+from odoo_manager_core.project_service import OdooError
 from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
 from odoo_manager_core.system import (
     active_engine_client,
@@ -2798,6 +2799,14 @@ def parse_output_progress(text):
     return None
 
 
+def job_failure_message(failure):
+    """Message d'échec d'une tâche, avec l'origine : Odoo ou le gestionnaire."""
+    message = str(failure).strip() or "Une erreur inattendue est survenue."
+    if isinstance(failure, OdooError):
+        return f"Erreur d'Odoo (code des modules ou données de la base, pas le gestionnaire) : {message}"
+    return f"Erreur du gestionnaire : {message}"
+
+
 class Job:
     def __init__(self, title, target, args=(), project=None, resources=None):
         global NEXT_JOB_ID
@@ -2888,7 +2897,7 @@ class Job:
                 if self.control.cancel_requested:
                     self.add("Arrêt demandé après la fin de l'action : rien n'a été annulé.")
             elif not cancelled:
-                self.error_message = str(failure).strip() or "Une erreur inattendue est survenue."
+                self.error_message = job_failure_message(failure)
                 self.add(f"Erreur: {self.error_message}")
                 with JOBS_LOCK:
                     self.status = "error"
@@ -4783,7 +4792,7 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
             hint = missing_code_failure_hint(project, db_name, message) or external_dependency_failure_hint(message)
             if hint:
                 job.add(hint)
-                raise RuntimeError(f"{exc} {hint}") from exc
+                raise (OdooError if isinstance(exc, OdooError) else RuntimeError)(f"{exc} {hint}") from exc
             raise
 
 

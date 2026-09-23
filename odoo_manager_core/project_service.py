@@ -212,6 +212,14 @@ def terminate_active_processes(wait_seconds=0.5):
 PYTHON_EXCEPTION_LINE_RE = re.compile(r"\b[A-Za-z_][\w.]*(?:Error|Exception|Fault):\s*\S|^[A-Za-z_]\w*(?:\.\w+)+:\s*\S")
 
 
+class OdooError(RuntimeError):
+    """Échec rapporté par Odoo lui-même (code des modules, données de la base).
+
+    Le gestionnaire a bien lancé la commande : l'interface l'affiche à part des erreurs
+    du gestionnaire (Docker, réseau, fichiers, validation), qui restent des RuntimeError.
+    """
+
+
 class ProjectService:
     def __init__(self, settings, workspace, traefik_dir=None, runner=None, http_probe=None, port_in_use=None):
         self.settings = settings
@@ -1188,7 +1196,7 @@ class ProjectService:
         outputs = self.odoo_startup_diagnostics(container, log=log)
         exit_code = state.split(":", 1)[1].strip() if state.startswith("exited:") else ""
         reason = self.odoo_startup_failure_reason(outputs)
-        return RuntimeError(
+        return OdooError(
             f"Le processus Odoo s'est arrêté{f' (code {exit_code})' if exit_code else ''} {when}. {reason}"
         )
 
@@ -1808,7 +1816,7 @@ class ProjectService:
                 if module_output:
                     self.log(log, "Dernières lignes de la commande de mise à jour Odoo:")
                     self.log(log, module_output)
-                raise RuntimeError(f"La commande Odoo a échoué avec le code {code}. {reason}")
+                raise OdooError(f"La commande Odoo a échoué avec le code {code}. {reason}")
             if was_neutralized:
                 self.log(log, "La base était neutralisée: nouvelle passe après l'opération module...")
                 self._execute_database_neutralization(project, db_name, log=log)
