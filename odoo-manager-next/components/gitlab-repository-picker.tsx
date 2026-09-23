@@ -11,6 +11,9 @@ import { cn } from "@/lib/utils";
 
 export type RepositorySource = "ssh" | "gitlab";
 
+/** Nombre de résultats affichés d'office avant qu'un « Voir plus » ne révèle le reste. */
+const VISIBLE_RESULTS_DEFAULT = 3;
+
 /**
  * Choix de la source d'un dépôt : lien SSH saisi à la main, ou recherche dans GitLab.
  *
@@ -98,6 +101,10 @@ export function GitLabRepositoryPicker({
   const [error, setError] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [refActiveIndex, setRefActiveIndex] = useState(0);
+  const [visibleProjectCount, setVisibleProjectCount] = useState(VISIBLE_RESULTS_DEFAULT);
+  const [visibleRefCount, setVisibleRefCount] = useState(VISIBLE_RESULTS_DEFAULT);
+  // Une fois une branche choisie, la liste se replie sur un résumé compact ; « Changer » la rouvre.
+  const [changingBranch, setChangingBranch] = useState(false);
   const connected = Boolean(status?.connected);
 
   const refOptions = useMemo(
@@ -176,11 +183,20 @@ export function GitLabRepositoryPicker({
   }, [refs]);
 
   // Nouvelle liste : la première ligne est active ; pour les branches, celle déjà choisie.
-  useEffect(() => setActiveIndex(0), [projects]);
+  // Une nouvelle recherche repart aussi sur les 3 premiers résultats, « Voir plus » ne survit pas au filtre.
+  useEffect(() => {
+    setActiveIndex(0);
+    setVisibleProjectCount(VISIBLE_RESULTS_DEFAULT);
+  }, [projects]);
   useEffect(() => {
     const selected = refOptions.findIndex((ref) => ref.name === branch);
     setRefActiveIndex(selected >= 0 ? selected : 0);
+    setVisibleRefCount(VISIBLE_RESULTS_DEFAULT);
   }, [refOptions, branch]);
+  // Une branche vient d'être choisie : replier la liste sur le résumé compact.
+  useEffect(() => {
+    if (branch) setChangingBranch(false);
+  }, [branch]);
   // La ligne active reste visible quand on la déplace au clavier dans une liste qui défile.
   useEffect(() => {
     document.getElementById(`gitlab-project-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
@@ -245,6 +261,9 @@ export function GitLabRepositoryPicker({
 
   if (retained) return retained;
 
+  const visibleProjects = projects?.slice(0, visibleProjectCount) ?? null;
+  const visibleRefs = refOptions.slice(0, visibleRefCount);
+
   return (
     <div className="space-y-3">
       {error && <p className="text-sm text-destructive">{error}</p>}
@@ -257,8 +276,8 @@ export function GitLabRepositoryPicker({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               onKeyDown={(event) =>
-                handleListKeys(event, projects?.length ?? 0, activeIndex, setActiveIndex, (index) => {
-                  const found = projects?.[index];
+                handleListKeys(event, visibleProjects?.length ?? 0, activeIndex, setActiveIndex, (index) => {
+                  const found = visibleProjects?.[index];
                   if (found) chooseProject(found);
                 })
               }
@@ -279,7 +298,7 @@ export function GitLabRepositoryPicker({
               </p>
             ) : projects.length ? (
               <div className="divide-y" role="listbox" id="gitlab-projects" aria-label="Dépôts GitLab">
-                {projects.map((found, index) => (
+                {visibleProjects?.map((found, index) => (
                   <button
                     key={found.id}
                     id={`gitlab-project-${index}`}
@@ -305,6 +324,15 @@ export function GitLabRepositoryPicker({
                     )}
                   </button>
                 ))}
+                {projects.length > visibleProjectCount && (
+                  <button
+                    type="button"
+                    className="w-full px-3 py-2 text-center text-sm font-medium text-muted-foreground hover:bg-hover hover:text-foreground"
+                    onClick={() => setVisibleProjectCount(projects.length)}
+                  >
+                    Voir plus ({projects.length - visibleProjectCount} de plus)
+                  </button>
+                )}
               </div>
             ) : (
               <p className="p-3 text-sm text-muted-foreground">
@@ -319,85 +347,109 @@ export function GitLabRepositoryPicker({
             <span className="min-w-0">
               <span className="block truncate font-medium">{project.name}</span>
               <span className="block truncate font-mono text-xs text-muted-foreground">{project.sshUrl}</span>
-              <span className="mt-1 flex items-center gap-1.5 text-xs">
+              <span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs">
                 <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 {branch ? (
-                  <span className="font-mono font-medium">{branch}</span>
+                  <>
+                    <span className="truncate font-mono font-medium">{branch}</span>
+                    {!changingBranch && (
+                      <button
+                        type="button"
+                        className="shrink-0 text-primary underline-offset-2 hover:underline"
+                        onClick={() => setChangingBranch(true)}
+                      >
+                        Changer
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <span className="text-muted-foreground">Choisis une branche ou un tag ci-dessous</span>
                 )}
               </span>
             </span>
             <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={changeProject}>
-              Changer
+              Changer le dépôt
             </Button>
           </div>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              value={refSearch}
-              onChange={(event) => setRefSearch(event.target.value)}
-              onKeyDown={(event) =>
-                handleListKeys(event, refOptions.length, refActiveIndex, setRefActiveIndex, (index) => {
-                  const ref = refOptions[index];
-                  if (ref) onChange({ url: project.sshUrl, branch: ref.name });
-                })
-              }
-              placeholder="Filtrer les branches et tags"
-              aria-label="Filtrer les branches et tags"
-              role="combobox"
-              aria-expanded={refOptions.length > 0}
-              aria-controls="gitlab-refs"
-              aria-activedescendant={refOptions.length ? `gitlab-ref-${refActiveIndex}` : undefined}
-              autoFocus
-            />
-          </div>
-          <div
-            className="max-h-56 overflow-y-auto rounded-md border"
-            role="listbox"
-            id="gitlab-refs"
-            aria-label="Branches et tags"
-          >
-            {refs === null ? (
-              <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Lecture des branches…
-              </p>
-            ) : refOptions.length ? (
-              <div className="divide-y">
-                {refOptions.map((ref, index) => (
-                  <button
-                    key={`${ref.kind}:${ref.name}`}
-                    id={`gitlab-ref-${index}`}
-                    type="button"
-                    role="option"
-                    tabIndex={-1}
-                    aria-selected={branch === ref.name}
-                    className={cn(
-                      "flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-hover",
-                      index === refActiveIndex && "bg-hover ring-1 ring-inset ring-primary/40",
-                      branch === ref.name && "bg-selected font-medium",
-                    )}
-                    onMouseMove={() => setRefActiveIndex(index)}
-                    onClick={() => onChange({ url: project.sshUrl, branch: ref.name })}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      {branch === ref.name ? (
-                        <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />
-                      ) : (
-                        <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      )}
-                      <span className="truncate font-mono text-[13px]">{ref.name}</span>
-                    </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{ref.kind}</span>
-                  </button>
-                ))}
+          {(!branch || changingBranch) && (
+            <>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="pl-9"
+                  value={refSearch}
+                  onChange={(event) => setRefSearch(event.target.value)}
+                  onKeyDown={(event) =>
+                    handleListKeys(event, visibleRefs.length, refActiveIndex, setRefActiveIndex, (index) => {
+                      const ref = visibleRefs[index];
+                      if (ref) onChange({ url: project.sshUrl, branch: ref.name });
+                    })
+                  }
+                  placeholder="Filtrer les branches et tags"
+                  aria-label="Filtrer les branches et tags"
+                  role="combobox"
+                  aria-expanded={refOptions.length > 0}
+                  aria-controls="gitlab-refs"
+                  aria-activedescendant={refOptions.length ? `gitlab-ref-${refActiveIndex}` : undefined}
+                  autoFocus
+                />
               </div>
-            ) : (
-              <p className="p-3 text-sm text-muted-foreground">Aucune branche ni aucun tag ne correspond.</p>
-            )}
-          </div>
+              <div
+                className="max-h-56 overflow-y-auto rounded-md border"
+                role="listbox"
+                id="gitlab-refs"
+                aria-label="Branches et tags"
+              >
+                {refs === null ? (
+                  <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Lecture des branches…
+                  </p>
+                ) : refOptions.length ? (
+                  <div className="divide-y">
+                    {visibleRefs.map((ref, index) => (
+                      <button
+                        key={`${ref.kind}:${ref.name}`}
+                        id={`gitlab-ref-${index}`}
+                        type="button"
+                        role="option"
+                        tabIndex={-1}
+                        aria-selected={branch === ref.name}
+                        className={cn(
+                          "flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-hover",
+                          index === refActiveIndex && "bg-hover ring-1 ring-inset ring-primary/40",
+                          branch === ref.name && "bg-selected font-medium",
+                        )}
+                        onMouseMove={() => setRefActiveIndex(index)}
+                        onClick={() => onChange({ url: project.sshUrl, branch: ref.name })}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          {branch === ref.name ? (
+                            <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />
+                          ) : (
+                            <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          )}
+                          <span className="truncate font-mono text-[13px]">{ref.name}</span>
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">{ref.kind}</span>
+                      </button>
+                    ))}
+                    {refOptions.length > visibleRefCount && (
+                      <button
+                        type="button"
+                        className="w-full px-3 py-2 text-center text-sm font-medium text-muted-foreground hover:bg-hover hover:text-foreground"
+                        onClick={() => setVisibleRefCount(refOptions.length)}
+                      >
+                        Voir plus ({refOptions.length - visibleRefCount} de plus)
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <p className="p-3 text-sm text-muted-foreground">Aucune branche ni aucun tag ne correspond.</p>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
