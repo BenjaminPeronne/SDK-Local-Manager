@@ -1661,6 +1661,37 @@ class ProjectService:
         requirements.write_text(f"{content}{separator}{package}\n", encoding="utf-8")
         self.log(log, f"{package} ajouté à init/requirements_pip.txt")
 
+    def create_postgres_extension(self, project, db_name, extension, log=None):
+        """Installe une extension PostgreSQL manquante via le rôle `postgres`, superuser du conteneur.
+
+        Certains modules (ex. pgvector pour l'IA) exigent CREATE EXTENSION, que le rôle applicatif
+        `odoo` n'a délibérément pas (privilège minimal, cf. retry_docker_desktop_macos_postgres_bootstrap).
+        Une fois créée, l'extension reste acquise pour cette base : plus jamais besoin d'y revenir.
+        """
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", extension):
+            raise ValueError(f"Nom d'extension PostgreSQL invalide : {extension}")
+        self.log(log, f"Installation de l'extension PostgreSQL {extension} (rôle postgres)...")
+        container = f"postgresql-{project}"
+        code, output = self.capture(
+            self.docker(
+                "exec",
+                container,
+                "psql",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "postgres",
+                "-d",
+                db_name,
+                "-c",
+                f'CREATE EXTENSION IF NOT EXISTS "{extension}";',
+            ),
+            timeout=20,
+        )
+        if code != 0:
+            raise RuntimeError(f"Installation de l'extension PostgreSQL {extension} impossible : {output.strip()}")
+        self.log(log, f"Extension PostgreSQL {extension} installée.")
+
     def ensure_odoo_containers_ready(self, project, log=None):
         container = f"odoo-{project}"
         postgres = f"postgresql-{project}"

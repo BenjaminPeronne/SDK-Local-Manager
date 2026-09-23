@@ -1494,6 +1494,28 @@ class AutomaticPythonDependencyTests(unittest.TestCase):
         self.assertEqual(2, service.run_odoo_module_command.call_count)
         service.record_python_requirement.assert_called_once_with("demo", "svglib", log=job.add)
 
+    @patch("odoo_manager_web.normalize_module_layout_for_action")
+    @patch("odoo_manager_web.project_dirs", return_value=["demo"])
+    @patch("odoo_manager_web.project_service")
+    def test_missing_postgres_extension_is_created_and_the_install_is_retried(
+        self, project_service, _dirs, _normalize
+    ):
+        service = project_service.return_value
+        service.run_odoo_module_command.side_effect = [
+            RuntimeError(
+                'psycopg2.errors.InsufficientPrivilege: permission denied to create extension "vector"\n'
+                "HINT:  Must be superuser to create this extension."
+            ),
+            None,
+        ]
+        job = self.LogJob()
+
+        web.module_command_job(job, "--install-module", "demo", "test_compare", "ai_app")
+
+        self.assertEqual(2, service.run_odoo_module_command.call_count)
+        service.create_postgres_extension.assert_called_once_with("demo", "test_compare", "vector", log=job.add)
+        self.assertTrue(any("vector" in line for line in job.lines))
+
 
 class TraefikInstallationTests(unittest.TestCase):
     class LogJob:

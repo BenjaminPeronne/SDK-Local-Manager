@@ -1352,6 +1352,33 @@ class ProjectServiceTests(unittest.TestCase):
 
         self.assertEqual("svglib\n", requirements.read_text(encoding="utf-8"))
 
+    def test_missing_postgres_extension_is_created_through_the_postgres_role(self):
+        self.service.create_postgres_extension("DEMO", "test_compare", "vector", log=lambda _line: None)
+
+        command, _cwd, _timeout = self.runner.captures[-1]
+        self.assertEqual(command[1], "exec")
+        self.assertIn("postgresql-DEMO", command)
+        self.assertIn("postgres", command)
+        self.assertIn("test_compare", command)
+        self.assertIn('CREATE EXTENSION IF NOT EXISTS "vector";', command)
+
+    def test_postgres_extension_creation_failure_is_reported(self):
+        def capture(command, cwd=None, timeout=10):
+            self.runner.captures.append((list(command), cwd, timeout))
+            if "psql" in command:
+                return 1, "permission denied"
+            return 0, ""
+
+        with patch.object(self.service, "capture", side_effect=capture):
+            with self.assertRaisesRegex(RuntimeError, "vector"):
+                self.service.create_postgres_extension("DEMO", "test_compare", "vector", log=lambda _line: None)
+
+    def test_postgres_extension_name_is_validated(self):
+        with self.assertRaises(ValueError):
+            self.service.create_postgres_extension("DEMO", "test_compare", "vector; DROP TABLE x", log=lambda _l: None)
+
+        self.assertEqual([], self.runner.captures)
+
 
 if __name__ == "__main__":
     unittest.main()

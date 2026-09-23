@@ -4722,7 +4722,7 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
     if flag not in ("--install-module", "--update-module"):
         raise ValueError("Action module Odoo inconnue.")
 
-    attempted_packages = set()
+    attempted_fixes = set()
     while True:
         try:
             project_service().run_odoo_module_command(
@@ -4735,22 +4735,35 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
             )
             return
         except RuntimeError as exc:
-            import_name = missing_python_import(str(exc))
+            message = str(exc)
+            import_name = missing_python_import(message)
             package = python_package_for_import(import_name) if import_name else ""
-            if not package or package in attempted_packages or len(attempted_packages) >= MAX_AUTO_PIP_INSTALLS:
-                hint = missing_code_failure_hint(project, db_name, str(exc)) or external_dependency_failure_hint(
-                    str(exc)
+            extension_match = MISSING_POSTGRES_EXTENSION_RE.search(message)
+            extension = extension_match.group("extension") if extension_match else ""
+
+            if package and f"pip:{package}" not in attempted_fixes and len(attempted_fixes) < MAX_AUTO_DEPENDENCY_FIXES:
+                attempted_fixes.add(f"pip:{package}")
+                job.add(
+                    f"Dépendance Python manquante détectée automatiquement : {package}. "
+                    "Ajout à requirements_pip.txt et nouvelle tentative..."
                 )
-                if hint:
-                    job.add(hint)
-                    raise RuntimeError(f"{exc} {hint}") from exc
-                raise
-            attempted_packages.add(package)
-            job.add(
-                f"Dépendance Python manquante détectée automatiquement : {package}. "
-                "Ajout à requirements_pip.txt et nouvelle tentative..."
-            )
-            project_service().record_python_requirement(project, package, log=job.add)
+                project_service().record_python_requirement(project, package, log=job.add)
+                continue
+            if (
+                extension
+                and f"ext:{extension}" not in attempted_fixes
+                and len(attempted_fixes) < MAX_AUTO_DEPENDENCY_FIXES
+            ):
+                attempted_fixes.add(f"ext:{extension}")
+                job.add(f"Extension PostgreSQL manquante détectée automatiquement : {extension}. Installation...")
+                project_service().create_postgres_extension(project, db_name, extension, log=job.add)
+                continue
+
+            hint = missing_code_failure_hint(project, db_name, message) or external_dependency_failure_hint(message)
+            if hint:
+                job.add(hint)
+                raise RuntimeError(f"{exc} {hint}") from exc
+            raise
 
 
 # Erreurs Odoo typiques d'une base qui référence le code d'un module absent du projet.
@@ -4808,7 +4821,11 @@ PIP_PACKAGE_ALIASES = {
 
 # Filet de sécurité contre une boucle infinie si l'erreur est mal interprétée en rafale : chaque
 # réessai refait tourner la commande Odoo en entier, le plafond doit donc rester bas.
-MAX_AUTO_PIP_INSTALLS = 3
+MAX_AUTO_DEPENDENCY_FIXES = 3
+
+# Extension PostgreSQL (ex. pgvector pour l'IA) que le rôle applicatif odoo n'a pas le droit de
+# créer lui-même : message brut de psycopg2/PostgreSQL, jamais localisé.
+MISSING_POSTGRES_EXTENSION_RE = re.compile(r'permission denied to create extension "(?P<extension>[\w-]+)"')
 
 
 def missing_python_import(message):
