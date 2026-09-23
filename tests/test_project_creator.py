@@ -406,6 +406,17 @@ class ProjectCreatorTests(unittest.TestCase):
         self.assertFalse((self.workspace / "broken").exists())
         self.assertFalse((self.workspace / ".odoo_manager_staging").exists())
 
+    def test_older_supported_versions_clone_their_own_template_branch(self):
+        for version in ("12.0", "14.0"):
+            with self.subTest(version=version):
+                runner = FakeRunner()
+
+                target = self.creator(runner).create(f"demo_v{version[:2]}", version)
+
+                template_clone = next(command for command in runner.commands if "clone" in command)
+                self.assertEqual(template_clone[template_clone.index("--branch") + 1], version)
+                self.assertTrue((target / "docker-compose.yml").exists())
+
     def test_inputs_are_strictly_validated(self):
         for invalid in ("", ".hidden", "name with spaces", "../demo", "Demo", "DEMO_V19", "démo"):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):

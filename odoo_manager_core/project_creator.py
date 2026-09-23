@@ -29,7 +29,10 @@ STAGING_DIRECTORY_NAME = ".odoo_manager_staging"
 # 6,8 Go relevés sur un poste. Un dossier récent peut appartenir à une création en cours.
 ABANDONED_STAGING_MIN_AGE_SECONDS = 3600
 
-SUPPORTED_ODOO_VERSIONS = ("15.0", "16.0", "17.0", "18.0", "19.0")
+# Chaque version listée a sa branche dans docker-odoo-local (le template Docker de Sudokeys,
+# géré par DevOps) : sans elle la création échoue. 13.0 n'y figure pas (à ajouter ici dès que
+# DevOps la publie), et 20.0 non plus.
+SUPPORTED_ODOO_VERSIONS = ("12.0", "14.0", "15.0", "16.0", "17.0", "18.0", "19.0")
 ODOO_REPOSITORY = "ssh://git@gitlab.sudokeys.com:10022/sudokeys/odoo.git"
 ENTERPRISE_REPOSITORY = "ssh://git@gitlab.sudokeys.com:10022/sudokeys/odoo_entreprise.git"
 LOCAL_TEMPLATE_REPOSITORY = "ssh://git@gitlab.sudokeys.com:10022/devops/docker-odoo-local.git"
