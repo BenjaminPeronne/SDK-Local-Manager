@@ -836,7 +836,7 @@ class ProjectServiceTests(unittest.TestCase):
         update = next(command for command in commands if any("--stop-after-init" in argument for argument in command))
         self.assertEqual(update[-3:-1], ["bash", "-lc"])
         self.assertIn(
-            "odoo -c /home/odoo/srv/conf/odoo.conf -d PROTEX_20812 -u sale_custom --stop-after-init", update[-1]
+            "odoo_cli -c /home/odoo/srv/conf/odoo.conf -d PROTEX_20812 -u sale_custom --stop-after-init", update[-1]
         )
         self.assertIn("| tee /home/odoo/srv/data/odoo-manager-module-", update[-1])
         self.assertIn('exit "${PIPESTATUS[0]}"', update[-1])
@@ -990,11 +990,13 @@ class ProjectServiceTests(unittest.TestCase):
         )
 
         commands = [command for command, _cwd in self.runner.streams]
-        uninstall = next(command for command in commands if "odoo shell" in command[-1])
+        uninstall = next(command for command in commands if "odoo_cli shell" in command[-1])
         self.assertIn("ODOO_DB_NAME=PROTEX_20812", uninstall)
         self.assertIn("MODULE_NAMES=sale_custom", uninstall)
-        self.assertIn('odoo shell -c /home/odoo/srv/conf/odoo.conf -d "$ODOO_DB_NAME" --no-http', uninstall[-1])
+        self.assertIn('odoo_cli shell -c /home/odoo/srv/conf/odoo.conf -d "$ODOO_DB_NAME" --no-http', uninstall[-1])
         self.assertIn("installed.button_immediate_uninstall()", uninstall[-1])
+        self.assertIn("/home/_venv/bin/python /home/odoo/srv/server/odoo/odoo-bin", uninstall[-1])
+        self.assertIn("/home/_venv/bin/python /home/odoo/srv/server/odoo/odoo-bin", uninstall[-1])
         self.assertTrue(any("Redémarrage du serveur Odoo" in line for line in logs))
 
     def test_module_translation_reset_adds_i18n_overwrite_before_stop_after_init(self):
@@ -1030,7 +1032,7 @@ class ProjectServiceTests(unittest.TestCase):
         self.service.run_odoo_regenerate_assets("DEMO", "PROTEX_20812", log=lambda _line: None)
 
         commands = [command for command, _cwd in self.runner.streams]
-        shell = next(command for command in commands if "odoo shell" in command[-1])
+        shell = next(command for command in commands if "odoo_cli shell" in command[-1])
         self.assertIn('("url", "=like", "/web/assets/%")', shell[-1])
         self.assertIn("attachments.unlink()", shell[-1])
 
@@ -1043,7 +1045,7 @@ class ProjectServiceTests(unittest.TestCase):
         self.service.run_odoo_reset_admin_password("DEMO", "PROTEX_20812", "S3cret-Local", log=logs.append)
 
         commands = [command for command, _cwd in self.runner.streams]
-        shell = next(command for command in commands if "odoo shell" in command[-1])
+        shell = next(command for command in commands if "odoo_cli shell" in command[-1])
         self.assertIn("ODOO_ADMIN_PASSWORD=S3cret-Local", shell)
         self.assertNotIn("S3cret-Local", shell[-1])
         self.assertIn('env.ref("base.user_admin"', shell[-1])
@@ -1059,7 +1061,7 @@ class ProjectServiceTests(unittest.TestCase):
         self.service.run_odoo_reset_all_translations("DEMO", "PROTEX_20812", ["fr_FR"], log=logs.append)
 
         commands = [command for command, _cwd in self.runner.streams]
-        shell = next(command for command in commands if "odoo shell" in command[-1])
+        shell = next(command for command in commands if "odoo_cli shell" in command[-1])
         self.assertIn("ODOO_LANGUAGES=fr_FR", shell)
         self.assertIn('search([("state", "=", "installed")])', shell[-1])
         self.assertIn("modules._update_translations(languages, overwrite=True)", shell[-1])

@@ -112,6 +112,13 @@ ODOO_STARTUP_STATUS = "/home/odoo/srv/data/odoo-manager-startup.status"
 ODOO_LOG_FILE = "/home/odoo/srv/data/odoo.log"
 PENDING_MODULE_STATES_SQL = "('to install','to upgrade','to remove')"
 ODOO_STATE_MARKER = "odoo-manager-state:"
+# Même choix que le démarrage du serveur : le script `odoo` de l'image peut échouer (patch
+# LOG_ATTACHMENTS qui ne s'applique pas, « /usr/bin/env: bad interpreter » sur une copie RIKA),
+# alors que l'interpréteur du venv lance odoo-bin directement.
+ODOO_CLI_FUNCTION = (
+    "odoo_cli() { if [ -x /home/_venv/bin/python ] && [ -f /home/odoo/srv/server/odoo/odoo-bin ]; then "
+    '/home/_venv/bin/python /home/odoo/srv/server/odoo/odoo-bin "$@"; else odoo "$@"; fi; }; '
+)
 # Serveur Odoo : odoo-bin ou le script `odoo` de l'image, lancé directement ou par python/bash.
 # Un simple chemin finissant par /odoo, `odoo shell` ou une commande module (--stop-after-init)
 # n'est pas un serveur : les confondre faisait croire Odoo démarré alors qu'il ne l'était pas.
@@ -1730,7 +1737,7 @@ class ProjectService:
 
         self.stop_odoo_server(project, log=log)
         odoo_arguments = [
-            "odoo",
+            "odoo_cli",
             "-c",
             "/home/odoo/srv/conf/odoo.conf",
             "-d",
@@ -1743,6 +1750,7 @@ class ProjectService:
         module_log = f"/home/odoo/srv/data/odoo-manager-module-{uuid.uuid4().hex}.log"
         shell_command = (
             "set -o pipefail; "
+            + ODOO_CLI_FUNCTION
             + " ".join(shlex.quote(argument) for argument in odoo_arguments)
             + f" 2>&1 | tee {shlex.quote(module_log)}; "
             + 'exit "${PIPESTATUS[0]}"'
@@ -1878,7 +1886,7 @@ class ProjectService:
         for key, value in (env or {}).items():
             environment.extend(["-e", f"{key}={value}"])
         shell_command = (
-            "odoo shell -c /home/odoo/srv/conf/odoo.conf "
+            ODOO_CLI_FUNCTION + "odoo_cli shell -c /home/odoo/srv/conf/odoo.conf "
             "-d \"$ODOO_DB_NAME\" --no-http <<'ODOO_MANAGER_PY'\n"
             f"{script}ODOO_MANAGER_PY"
         )
@@ -2247,7 +2255,7 @@ env.cr.commit()
 print("ODOO_MANAGER_NEUTRALIZATION_DONE")
 """
         return (
-            "odoo shell -c /home/odoo/srv/conf/odoo.conf "
+            ODOO_CLI_FUNCTION + "odoo_cli shell -c /home/odoo/srv/conf/odoo.conf "
             "-d \"$ODOO_DB_NAME\" --no-http <<'ODOO_MANAGER_PY'\n"
             f"{neutralize_script}ODOO_MANAGER_PY"
         )
