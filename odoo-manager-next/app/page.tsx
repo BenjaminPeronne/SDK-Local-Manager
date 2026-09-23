@@ -1779,10 +1779,12 @@ export default function Home() {
                   ref={projectTabsRef}
                   className={cn(
                     // Fond transparent au repos : le bandeau apparaît en fondu, au rythme du défilement, sur toute la largeur de la zone.
+                    // Réservé à Modules : les autres onglets ont leur propre défilement et n'ont pas été conçus pour un en-tête collant.
                     stickyHeader &&
+                      activeTab === "modules" &&
                       "-my-2 py-2 lg:sticky lg:z-20 lg:before:pointer-events-none lg:before:absolute lg:before:inset-y-0 lg:before:-inset-x-[100vw] lg:before:-z-10 lg:before:border-b lg:before:bg-background/90 lg:before:opacity-[var(--tabs-backdrop,0)] lg:before:backdrop-blur lg:before:transition-opacity lg:before:duration-300 lg:before:ease-out motion-reduce:lg:before:transition-none",
                   )}
-                  style={stickyHeader ? { top: projectHeaderHeight } : undefined}
+                  style={stickyHeader && activeTab === "modules" ? { top: projectHeaderHeight } : undefined}
                 >
                   <TabsList
                     className="grid w-full overflow-hidden transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none lg:w-fit"
