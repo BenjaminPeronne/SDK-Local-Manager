@@ -102,10 +102,10 @@ class ProjectCreatorTests(unittest.TestCase):
 
     def test_standard_project_is_created_atomically_with_relative_enterprise_links(self):
         runner = FakeRunner()
-        target = self.creator(runner).create("DEMO_V19", "19.0")
+        target = self.creator(runner).create("demo_v19", "19.0")
 
         self.assertTrue((target / "docker-compose.yml").exists())
-        self.assertIn("odoo-DEMO_V19", (target / "docker-compose.yml").read_text(encoding="utf-8"))
+        self.assertIn("odoo-demo_v19", (target / "docker-compose.yml").read_text(encoding="utf-8"))
         link = target / "odoo" / "addons" / "web_enterprise"
         self.assertTrue(link.is_symlink())
         self.assertEqual(Path("../addons-store/odoo_entreprise/web_enterprise"), link.readlink())
@@ -147,7 +147,7 @@ class ProjectCreatorTests(unittest.TestCase):
 
     def test_gitlab_addons_are_cloned_to_store_and_linked(self):
         target = self.creator().create(
-            "CLIENT_V19",
+            "client_v19",
             "19.0",
             source_type="gitlab",
             repository_url="ssh://git@gitlab.sudokeys.com:10022/sudokeys/client-addons.git",
@@ -172,7 +172,7 @@ class ProjectCreatorTests(unittest.TestCase):
 
         with mock.patch.object(creator, "download_rika_project", side_effect=download):
             target = creator.create(
-                "RIKA_COPY",
+                "rika_copy",
                 "",
                 source_type="rika",
                 rika_instance="prod01",
@@ -401,13 +401,13 @@ class ProjectCreatorTests(unittest.TestCase):
         runner = FakeRunner(fail_repository="ssh://git@gitlab.sudokeys.com:10022/sudokeys/odoo.git")
 
         with self.assertRaisesRegex(RuntimeError, "clé SSH"):
-            self.creator(runner).create("BROKEN", "19.0")
+            self.creator(runner).create("broken", "19.0")
 
-        self.assertFalse((self.workspace / "BROKEN").exists())
+        self.assertFalse((self.workspace / "broken").exists())
         self.assertFalse((self.workspace / ".odoo_manager_staging").exists())
 
     def test_inputs_are_strictly_validated(self):
-        for invalid in ("", ".hidden", "name with spaces", "../demo"):
+        for invalid in ("", ".hidden", "name with spaces", "../demo", "Demo", "DEMO_V19", "démo"):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 validate_new_project_name(invalid)
         for invalid in ("master;rm", "../master", "feature..test"):

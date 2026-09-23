@@ -182,7 +182,7 @@ export function AppSidebar({
                   >
                     <span
                       className={cn(
-                        "block truncate text-sm font-semibold",
+                        "block truncate text-sm font-semibold uppercase",
                         absent ? "text-muted-foreground" : "text-foreground",
                       )}
                     >

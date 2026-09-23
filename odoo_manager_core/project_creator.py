@@ -34,7 +34,10 @@ ODOO_REPOSITORY = "ssh://git@gitlab.sudokeys.com:10022/sudokeys/odoo.git"
 ENTERPRISE_REPOSITORY = "ssh://git@gitlab.sudokeys.com:10022/sudokeys/odoo_entreprise.git"
 LOCAL_TEMPLATE_REPOSITORY = "ssh://git@gitlab.sudokeys.com:10022/devops/docker-odoo-local.git"
 
-PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
+# Minuscules uniquement : la casse d'origine se retrouvait telle quelle dans le lien Traefik
+# généré à la création (dev.{project}.localhost), et le conteneur/dossier créés avec elle —
+# un nom mixte cassait ensuite les comparaisons de casse strictes en aval.
+PROJECT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")
 GIT_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
 SUDOKEYS_GITLAB_RE = re.compile(
     r"^(?:ssh://git@gitlab\.sudokeys\.com:10022/|git@gitlab\.sudokeys\.com:)"
@@ -78,7 +81,10 @@ MAX_RIKA_ARCHIVE_ENTRIES = 2_000_000
 def validate_new_project_name(name):
     name = str(name or "").strip()
     if not PROJECT_NAME_RE.fullmatch(name) or name in {".", ".."}:
-        raise ValueError("Nom de projet invalide. Utilise des lettres, chiffres, points, tirets ou underscores.")
+        raise ValueError(
+            "Nom de projet invalide. Utilise uniquement des minuscules, chiffres, points, tirets ou underscores "
+            "(pas d'espace ni de majuscule)."
+        )
     if name.startswith(".odoo_manager"):
         raise ValueError("Ce nom de projet est réservé au gestionnaire.")
     return name
