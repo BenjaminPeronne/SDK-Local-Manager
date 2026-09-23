@@ -1374,6 +1374,16 @@ class ProjectServiceTests(unittest.TestCase):
 
         self.assertEqual("phonenumbers\nsvglib\n", requirements.read_text(encoding="utf-8"))
 
+    def test_project_pip_requirements_are_installed_from_the_mounted_conf_path(self):
+        requirements = self.project_path / "init" / "requirements_pip.txt"
+        requirements.parent.mkdir(parents=True)
+        requirements.write_text("svglib\n", encoding="utf-8")
+
+        self.service.install_project_pip_requirements("DEMO", log=lambda _line: None)
+
+        command, _cwd = self.runner.streams[-1]
+        self.assertEqual(command[-2:], ["-r", "/home/odoo/srv/conf/requirements_pip.txt"])
+
     def test_already_listed_python_package_is_not_duplicated(self):
         requirements = self.project_path / "init" / "requirements_pip.txt"
         requirements.parent.mkdir(parents=True)

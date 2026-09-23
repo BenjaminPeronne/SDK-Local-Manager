@@ -1649,7 +1649,7 @@ class ProjectService:
                 "pip",
                 "install",
                 "-r",
-                "/conf/requirements_pip.txt",
+                "/home/odoo/srv/conf/requirements_pip.txt",
             ),
             log=log,
         )
