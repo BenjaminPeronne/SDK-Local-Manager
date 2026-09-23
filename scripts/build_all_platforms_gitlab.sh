@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 # Compile SDK Local Manager pour les trois plateformes avec GitLab CI (.gitlab-ci.yml).
 # Pendant de scripts/build_all_platforms.sh, qui reste la voie GitHub Actions.
+# OBSOLÈTE : .gitlab-ci.yml ne se déclenche plus sur un tag app-v* (lancement manuel uniquement),
+# ce script ne démarre donc plus de pipeline. Voir scripts/publish_gitlab_release.sh.
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)

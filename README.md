@@ -148,7 +148,7 @@ flowchart LR
 | Technologie | Utilité |
 | --- | --- |
 | **GitHub Actions** | Compile nativement macOS (`macos-15`), Linux (`ubuntu-22.04`) et Windows, construit l'image WSL, lance les tests et des tests de démarrage de l'application installée (`.github/workflows/build-desktop.yml`). |
-| **GitLab CI** | Même chaîne sur les runners du GitLab Sudokeys (`.gitlab-ci.yml`). Les deux coexistent pendant la migration. |
+| **GitLab CI** | Même chaîne sur les runners du GitLab Sudokeys (`.gitlab-ci.yml`), à lancer à la main depuis *Build › Pipelines* : un tag ne déclenche rien. La compilation de référence reste celle de GitHub Actions ; GitLab héberge les installateurs (voir *Publier les installateurs sur GitLab*). |
 | **Scripts shell / Python** (`scripts/`) | Build local, numérotation des versions, tag de build, image WSL, tests de fumée et autorisation des builds macOS privés. |
 
 ---
@@ -406,7 +406,19 @@ Le script refuse de partir si le dépôt contient des changements non commités 
 
 Chaque runner reconstruit le backend de sa plateforme, le démarre et contrôle `/api/health` avant de produire l'installateur. Sous Windows, le pipeline installe silencieusement le paquet NSIS, lance l'application installée, contrôle de nouveau l'API, puis relance l'installateur pendant que l'application est ouverte pour vérifier la mise à niveau. Les artefacts sont conservés un jour : télécharger les paquets à archiver avant leur expiration.
 
+### Publier les installateurs sur GitLab
+
+Les installateurs sont compilés par GitHub Actions puis téléchargés dans `dist/all-platforms/<tag>/`. Pour les rendre téléchargeables depuis GitLab :
+
+```bash
+GITLAB_TOKEN=$(security find-generic-password -a "$USER" -s sdk-local-manager-gitlab -w) ./scripts/publish_gitlab_release.sh --tag app-v0.8.0-build5
+```
+
+Le script envoie les quatre installateurs (`.deb`, `.AppImage`, `.dmg`, `.exe`) dans le registre de paquets du projet, crée la Release et n'y attache que ces fichiers ; le backend Linux et l'image WSL, qui ne servent qu'à la compilation, sont ignorés. Le tag n'a pas besoin d'être poussé sur GitLab : la Release le crée à partir du commit local, qui doit déjà y être. Relancer le script sur une Release existante remet ses pièces jointes en conformité. `GITLAB_TOKEN` doit avoir le droit `api`.
+
 ### Build des trois plateformes avec GitLab CI
+
+> Le pipeline ne se déclenche plus sur un tag `app-v*` : lance-le à la main (*Build › Pipelines › Exécuter le pipeline*). `scripts/build_all_platforms_gitlab.sh`, qui compte sur le tag pour démarrer le build, n'est donc plus utilisable tel quel.
 
 ```bash
 GITLAB_TOKEN=<jeton> sh scripts/build_all_platforms_gitlab.sh

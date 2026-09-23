@@ -119,10 +119,12 @@ HEADER_FILE=$(mktemp)
 chmod 600 "$HEADER_FILE"
 printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_TOKEN" >"$HEADER_FILE"
 
-files=$(find "$SOURCE_DIR" -type f | sort)
-[ -n "$files" ] || die "aucun fichier trouvé dans $SOURCE_DIR"
+# Seuls les installateurs sont publiés : le dossier contient aussi le backend Linux, l'image WSL
+# et leurs bibliothèques, des intermédiaires de build qui ne sont pas à télécharger.
+files=$(find "$SOURCE_DIR" -type f \( -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.exe' \) | sort)
+[ -n "$files" ] || die "aucun installateur (.deb, .AppImage, .dmg, .exe) trouvé dans $SOURCE_DIR"
 
-log "Fichiers à publier"
+log "Installateurs à publier"
 printf '%s\n' "$files"
 
 filenames=""
@@ -135,31 +137,97 @@ for file in $files; do
 done
 
 log "Publication de la Release $TAG"
-# shellcheck disable=SC2086
-release_payload=$(python3 - "$TAG" "$DESCRIPTION" "$API" "$PACKAGE_NAME" $filenames <<'PY'
+
+# Le tag n'a pas à être poussé : s'il manque sur le remote GitLab, la Release le crée à partir
+# du commit local (qui doit déjà être sur GitLab). .gitlab-ci.yml ne se déclenche pas sur les tags.
+ref=""
+if ! git -C "$ROOT" ls-remote --exit-code --tags "$REMOTE" "refs/tags/$TAG" >/dev/null 2>&1; then
+  ref=$(git -C "$ROOT" rev-list -n 1 "$TAG" 2>/dev/null || true)
+  [ -n "$ref" ] || die "le tag $TAG est introuvable en local comme sur le remote '$REMOTE'"
+fi
+
+release_payload=$(python3 - "$TAG" "$DESCRIPTION" "$ref" <<'PY'
 import json
 import sys
 
-tag, description, api, package_name, *filenames = sys.argv[1:]
-links = [
-    {
-        "name": name,
-        "url": f"{api}/packages/generic/{package_name}/{tag}/{name}",
-        "link_type": "package",
-    }
-    for name in filenames
-]
-print(json.dumps({"tag_name": tag, "name": tag, "description": description, "assets": {"links": links}}))
+tag, description, ref = sys.argv[1:]
+payload = {"tag_name": tag, "name": tag, "description": description}
+if ref:
+    payload["ref"] = ref
+print(json.dumps(payload))
 PY
 )
 
-if curl -fsS -X POST -H "@$HEADER_FILE" -H "Content-Type: application/json" \
-  -d "$release_payload" "$API/releases" >/dev/null; then
+# Appel API qui affiche le corps de la réponse en cas d'erreur (curl -f l'avalerait).
+api_call() {
+  method=$1
+  url=$2
+  body_file=$(mktemp)
+  code=$(curl -sS -o "$body_file" -w '%{http_code}' -X "$method" -H "@$HEADER_FILE" \
+    -H "Content-Type: application/json" -d "$release_payload" "$url")
+  case "$code" in
+    2??)
+      rm -f "$body_file"
+      return 0
+      ;;
+  esac
+  printf 'HTTP %s : %s\n' "$code" "$(cut -c1-300 "$body_file")" >&2
+  rm -f "$body_file"
+  return 1
+}
+
+if api_call POST "$API/releases"; then
   :
 else
-  log "Release déjà existante, mise à jour"
-  curl -fsS -X PUT -H "@$HEADER_FILE" -H "Content-Type: application/json" \
-    -d "$release_payload" "$API/releases/$TAG" >/dev/null
+  log "Release déjà existante ou refusée, tentative de mise à jour"
+  api_call PUT "$API/releases/$TAG" || die "échec de la publication de la Release $TAG"
 fi
+
+# Pièces jointes : un PUT ne les modifie pas, on aligne donc la liste sur les installateurs
+# (les liens en trop, comme ceux d'une publication antérieure, sont retirés).
+log "Pièces jointes de la Release $TAG"
+# shellcheck disable=SC2086
+python3 - "$API" "$TAG" "$PACKAGE_NAME" $filenames <<'PY'
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+api, tag, package_name, *filenames = sys.argv[1:]
+release = f"{api}/releases/{urllib.parse.quote(tag, safe='')}/assets/links"
+
+
+def call(method, url, body=None):
+    request = urllib.request.Request(
+        url,
+        data=None if body is None else json.dumps(body).encode(),
+        method=method,
+        headers={"PRIVATE-TOKEN": os.environ["GITLAB_TOKEN"], "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            return json.loads(response.read() or b"null")
+    except urllib.error.HTTPError as error:
+        sys.exit(f"Erreur: {method} {url} -> HTTP {error.code} {error.read().decode()[:300]}")
+
+
+existing = {link["name"]: link for link in call("GET", f"{release}?per_page=100")}
+for name, link in existing.items():
+    if name not in filenames:
+        call("DELETE", f"{release}/{link['id']}")
+        print(f"retiré  {name}")
+for name in filenames:
+    if name in existing:
+        print(f"présent {name}")
+        continue
+    call("POST", release, {
+        "name": name,
+        "url": f"{api}/packages/generic/{package_name}/{tag}/{name}",
+        "link_type": "package",
+    })
+    print(f"ajouté  {name}")
+PY
 
 printf 'Release: %s/-/releases/%s\n' "$WEB_URL" "$TAG"
