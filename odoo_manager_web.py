@@ -3768,11 +3768,21 @@ def drop_database_job(job, project, db_name, master_pwd):
     job.add(f"Suppression de la base {db_name} dans {project}")
     job.add(f"Appel Odoo: {url}")
     with job_control.protected(f"suppression de la base {db_name} par Odoo", irreversible=True):
-        status, content = post_form_no_redirect(url, {"master_pwd": master_pwd, "name": db_name})
-        job.add(f"Réponse Odoo: HTTP {status}")
-        odoo_error = extract_odoo_page_error(content) if status == 200 else ""
-        if odoo_error:
-            raise RuntimeError(f"Odoo a refusé la suppression de la base : {odoo_error}")
+        request_error = None
+        try:
+            status, content = post_form_no_redirect(url, {"master_pwd": master_pwd, "name": db_name})
+        except RuntimeError as exc:
+            # Odoo répond parfois HTTP 500 alors que la base est bien supprimée : la requête rouvre
+            # le registre de la base qui vient de disparaître (session, cookies UTM...). Seul
+            # l'état réel de PostgreSQL dit si la suppression a eu lieu.
+            request_error = exc
+            job.add(f"Odoo a répondu par une erreur : {exc}")
+            job.add("Vérification de la suppression dans PostgreSQL...")
+        else:
+            job.add(f"Réponse Odoo: HTTP {status}")
+            odoo_error = extract_odoo_page_error(content) if status == 200 else ""
+            if odoo_error:
+                raise RuntimeError(f"Odoo a refusé la suppression de la base : {odoo_error}")
 
         for _ in range(0, 32, 2):
             if db_name not in set(list_databases_for(project)):
@@ -3781,6 +3791,8 @@ def drop_database_job(job, project, db_name, master_pwd):
                 job.add(f"Base supprimée (filestore inclus) : {db_name}")
                 return
             job_control.sleep(2)
+    if request_error is not None:
+        raise request_error
     raise RuntimeError("La suppression a été envoyée, mais la base est toujours présente dans PostgreSQL.")
 
 

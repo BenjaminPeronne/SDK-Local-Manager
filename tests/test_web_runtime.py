@@ -2195,6 +2195,35 @@ class DatabaseNeutralizationTests(unittest.TestCase):
         clear_cache.assert_called_once_with("DEMO")
         self.assertIn("Base supprimée (filestore inclus) : demo", job.lines)
 
+    @patch("odoo_manager_web.time.sleep")
+    @patch("odoo_manager_web.clear_project_module_cache")
+    @patch("odoo_manager_web.post_form_no_redirect", side_effect=RuntimeError("Odoo a retourne HTTP 500: boom"))
+    @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
+    @patch("odoo_manager_web.list_databases_for", side_effect=[["postgres", "demo"], ["postgres"]])
+    @patch("odoo_manager_web.validate_project", return_value="DEMO")
+    def test_drop_database_succeeds_when_odoo_errors_after_the_database_is_gone(
+        self, _validate_project, _list_databases, _project_url, _post_form, clear_cache, _sleep
+    ):
+        job = self.LogJob()
+
+        web.drop_database_job(job, "DEMO", "demo", "secret")
+
+        clear_cache.assert_called_once_with("DEMO")
+        self.assertIn("Base supprimée (filestore inclus) : demo", job.lines)
+
+    @patch("odoo_manager_web.job_control.sleep")
+    @patch("odoo_manager_web.post_form_no_redirect", side_effect=RuntimeError("Odoo a retourne HTTP 500: boom"))
+    @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
+    @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
+    @patch("odoo_manager_web.validate_project", return_value="DEMO")
+    def test_drop_database_reports_odoo_error_when_the_database_is_still_there(
+        self, _validate_project, _list_databases, _project_url, _post_form, _sleep
+    ):
+        job = self.LogJob()
+
+        with self.assertRaisesRegex(RuntimeError, "HTTP 500"):
+            web.drop_database_job(job, "DEMO", "demo", "secret")
+
     @patch(
         "odoo_manager_web.post_form_no_redirect",
         return_value=(200, '<div class="alert alert-danger">Access Denied</div>'),
