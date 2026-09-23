@@ -2,6 +2,7 @@ import os
 import re
 import shlex
 import shutil
+import ssl
 import tempfile
 import time
 import urllib.error
@@ -22,6 +23,7 @@ from .platform import (
     wsl_execution_path,
 )
 from .project_service import add_postgres_healthcheck_start_period
+from .tls import trusted_ssl_context
 from .windows_links import contains_wsl_symlink, native_symlinks_supported
 
 STAGING_DIRECTORY_NAME = ".odoo_manager_staging"
@@ -659,7 +661,10 @@ class ProjectCreator:
             raise ValueError("L'identifiant et le mot de passe RIKA sont requis.")
 
         cookies = CookieJar()
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
+        opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(cookies),
+            urllib.request.HTTPSHandler(context=trusted_ssl_context()),
+        )
         archive_requested = False
         auth_payload = urllib.parse.urlencode(
             {
@@ -738,6 +743,11 @@ class ProjectCreator:
                 ) from exc
             raise RuntimeError(f"RIKA a retourné une erreur HTTP {exc.code}.") from exc
         except urllib.error.URLError as exc:
+            if isinstance(exc.reason, ssl.SSLCertVerificationError):
+                raise RuntimeError(
+                    "Le certificat HTTPS de RIKA n'a pas pu être vérifié. Un proxy ou un antivirus d'entreprise "
+                    "intercepte peut-être la connexion : son certificat racine doit être installé sur le système."
+                ) from exc
             raise RuntimeError("RIKA est inaccessible. Vérifie la connexion réseau puis réessaie.") from exc
 
         extracted = Path(temporary) / "rika"
