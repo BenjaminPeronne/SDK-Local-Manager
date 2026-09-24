@@ -411,12 +411,12 @@ class DatabaseNameValidationTests(unittest.TestCase):
 
 
 class DatabaseRestoreTests(unittest.TestCase):
-    def make_backup(self, root, include_dump=True):
+    def make_backup(self, root, include_dump=True, manifest="{}"):
         path = Path(root) / "backup.zip"
         with zipfile.ZipFile(path, "w") as archive:
             if include_dump:
                 archive.writestr("dump.sql", "CREATE TABLE test(id integer);\n")
-            archive.writestr("manifest.json", "{}")
+            archive.writestr("manifest.json", manifest)
             archive.writestr("filestore/ab/abcdef", b"attachment")
         return path
 
@@ -427,6 +427,38 @@ class DatabaseRestoreTests(unittest.TestCase):
         self.assertTrue(details["has_filestore"])
         self.assertTrue(details["has_manifest"])
         self.assertEqual(details["entries"], 3)
+
+    def test_reads_the_odoo_version_from_the_backup_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.make_backup(temporary, manifest='{"version": "15.0", "major_version": "15.0"}')
+            details = web.validate_odoo_backup_archive(path)
+
+        self.assertEqual(details["odoo_version"], "15.0")
+
+    def test_reads_the_odoo_version_from_module_versions_when_the_manifest_leaves_it_empty(self):
+        manifest = '{"version": "", "major_version": "", "modules": {"mail": "15.0.1.5", "studio_customization": null}}'
+        with tempfile.TemporaryDirectory() as temporary:
+            details = web.validate_odoo_backup_archive(self.make_backup(temporary, manifest=manifest))
+
+        self.assertEqual(details["odoo_version"], "15.0")
+
+    @patch("odoo_manager_web.project_odoo_version", return_value="19.0")
+    def test_refuses_a_backup_from_another_odoo_version_than_the_project(self, _version):
+        with self.assertRaisesRegex(ValueError, "Odoo 15.0, mais le projet genergies_v15 est en Odoo 19.0"):
+            web.ensure_backup_matches_project_version("genergies_v15", {"odoo_version": "15.0"})
+
+    @patch("odoo_manager_web.project_odoo_version", return_value="19.0")
+    def test_accepts_a_backup_without_a_known_version(self, _version):
+        web.ensure_backup_matches_project_version("genergies_v15", {"odoo_version": ""})
+        web.ensure_backup_matches_project_version("genergies_v15", {"odoo_version": "19.0"})
+
+    def test_restore_error_keeps_only_the_odoo_alert(self):
+        content = (
+            '<div class="alert alert-danger">Database restore error: operator does not exist</div>'
+            "<div>genergies_v15 Backup Duplicate Delete Create Database Albanian / Shqip</div>"
+        )
+
+        self.assertEqual(web.odoo_restore_error(content), "Database restore error: operator does not exist")
 
     def test_rejects_zip_without_database_dump(self):
         with tempfile.TemporaryDirectory() as temporary:

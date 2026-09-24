@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import ast
+import collections
 import errno
 import html
 import http.client
@@ -3518,9 +3519,54 @@ def validate_odoo_backup_archive(backup_path):
                 "entries": len(entries),
                 "has_filestore": any(name.startswith("filestore/") for name in names),
                 "has_manifest": "manifest.json" in names,
+                "odoo_version": backup_odoo_version(archive) if "manifest.json" in names else "",
             }
     except zipfile.BadZipFile as exc:
         raise ValueError("La sauvegarde ZIP est illisible ou endommagée.") from exc
+
+
+def backup_odoo_version(archive):
+    """Version majeure d'Odoo qui a produit la sauvegarde (« 15.0 »), lue dans manifest.json."""
+    try:
+        manifest = json.loads(archive.read("manifest.json").decode("utf-8", errors="replace"))
+    except (KeyError, ValueError, OSError, zipfile.BadZipFile):
+        return ""
+    if not isinstance(manifest, dict):
+        return ""
+    for key in ("major_version", "version"):
+        match = re.match(r"(?:saas~)?(\d+)\.(\d+)", str(manifest.get(key) or ""))
+        if match:
+            return f"{match.group(1)}.{match.group(2)}"
+    # Certains outils d'export laissent version et major_version vides : les versions des
+    # modules installés (« 15.0.1.5 ») portent alors la série, base en tête.
+    modules = manifest.get("modules")
+    if not isinstance(modules, dict):
+        return ""
+    series = collections.Counter()
+    for name, module_version in modules.items():
+        match = re.match(r"(\d+)\.(\d+)\.\d+", str(module_version or ""))
+        if match:
+            if name == "base":
+                return f"{match.group(1)}.{match.group(2)}"
+            series[f"{match.group(1)}.{match.group(2)}"] += 1
+    return series.most_common(1)[0][0] if series else ""
+
+
+def ensure_backup_matches_project_version(project, details):
+    """Refuse avant l'envoi une sauvegarde d'une autre version d'Odoo que celle du projet.
+
+    Odoo n'importe que les bases de sa propre version : une sauvegarde 15.0 restaurée dans un
+    projet 19.0 échoue après de longues minutes d'envoi, sur une erreur SQL illisible
+    (« operator does not exist: character varying ->> unknown »).
+    """
+    backup_version = details.get("odoo_version") or ""
+    project_version = project_odoo_version(project) or ""
+    if backup_version and project_version and backup_version != project_version:
+        raise ValueError(
+            f"Cette sauvegarde vient d'Odoo {backup_version}, mais le projet {project} est en Odoo "
+            f"{project_version}. Odoo ne restaure que les bases de sa propre version : restaure-la dans "
+            f"un projet Odoo {backup_version}, ou migre la base avant de la restaurer ici."
+        )
 
 
 def save_request_body_to_file(stream, content_length, destination, chunk_size=1024 * 1024):
@@ -3600,6 +3646,11 @@ def post_odoo_database_restore(job, url, backup_path, filename, db_name, master_
 def odoo_restore_error(content):
     if "Database restore error:" not in content:
         return ""
+    # Le message est dans l'alerte de la page : sans ce ciblage, la suite du gestionnaire de
+    # bases d'Odoo (boutons, liste de langues…) était recopiée dans l'erreur.
+    alert = extract_odoo_page_error(content)
+    if "Database restore error:" in alert:
+        return alert[alert.find("Database restore error:") :][:800]
     plain = html.unescape(re.sub(r"<[^>]+>", " ", content))
     plain = re.sub(r"\s+", " ", plain).strip()
     marker = "Database restore error:"
@@ -3618,6 +3669,9 @@ def restore_database_job(job, project, backup_path, filename, db_name, master_pw
         size_mb = backup_path.stat().st_size / (1024 * 1024)
         job.add(f"Restauration de {db_name} dans {project}")
         job.add(f"Sauvegarde: {filename} ({size_mb:.1f} Mo)")
+        if details["odoo_version"]:
+            job.add(f"Version Odoo de la sauvegarde: {details['odoo_version']}")
+        ensure_backup_matches_project_version(project, details)
         job.add("Filestore inclus: " + ("oui" if details["has_filestore"] else "non"))
         job.add("Base déclarée comme copie: " + ("oui" if copy else "non"))
         job.add("Neutralisation: " + ("activée" if neutralize else "désactivée"))
@@ -3663,7 +3717,7 @@ def restore_database_job(job, project, backup_path, filename, db_name, master_pw
         job.add(f"Réponse Odoo: HTTP {status}")
         restore_error = odoo_restore_error(content)
         if restore_error:
-            raise RuntimeError(restore_error)
+            raise OdooError(restore_error)
         if status not in {200, 201, 202, 301, 302, 303}:
             raise RuntimeError(f"Odoo a refusé la restauration avec le statut HTTP {status}.")
 
@@ -6352,6 +6406,7 @@ class Handler(BaseHTTPRequestHandler):
                 destination = staging_root / f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns()}_{filename}"
                 save_request_body_to_file(self.rfile, content_length, destination)
                 details = validate_odoo_backup_archive(destination)
+                ensure_backup_matches_project_version(project, details)
                 job = Job(
                     f"Restaurer {db_name} dans {project}",
                     restore_database_job,
@@ -6565,9 +6620,9 @@ class Handler(BaseHTTPRequestHandler):
                 rika_password = str(payload.get("rika_password", "") or "")
                 if source_type not in {"standard", "gitlab", "rika"}:
                     raise ValueError("Type de source invalide.")
-                if source_type != "rika":
+                if source_type != "rika" or version:
                     version = validate_odoo_version(version)
-                elif not rika_instance or not rika_login or not rika_password:
+                if source_type == "rika" and (not rika_instance or not rika_login or not rika_password):
                     raise ValueError("L'instance et les identifiants RIKA sont requis.")
                 if source_type == "gitlab":
                     repository_url = validate_gitlab_repository(repository_url)
