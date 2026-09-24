@@ -142,16 +142,46 @@ def validate_rika_instance(instance):
 
 
 def detected_odoo_version(project_root):
-    release = Path(project_root) / "odoo" / "odoo" / "release.py"
+    """Version Odoo d'une copie RIKA, ou "" si la copie ne la donne pas.
+
+    release.py fait foi ; à défaut, la branche du dépôt Odoo (« 19.0 »).
+    """
+    odoo_root = Path(project_root) / "odoo"
     try:
-        content = release.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        raise RuntimeError("La copie RIKA ne contient pas le fichier de version Odoo attendu.") from exc
+        content = (odoo_root / "odoo" / "release.py").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        content = ""
     match = re.search(r"version_info\s*=\s*\(\s*(\d+)\s*,\s*(\d+)\s*,", content)
-    version = f"{match.group(1)}.{match.group(2)}" if match else ""
-    if version not in SUPPORTED_ODOO_VERSIONS:
-        raise RuntimeError("La version Odoo de cette instance RIKA n'est pas prise en charge.")
-    return version
+    if match:
+        return f"{match.group(1)}.{match.group(2)}"
+    try:
+        head = (odoo_root / ".git" / "HEAD").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+    match = re.search(r"refs/heads/(?:saas-)?(\d+)\.(\d+)\s*$", head.strip())
+    return f"{match.group(1)}.{match.group(2)}" if match else ""
+
+
+def resolve_rika_version(detected, requested):
+    """Version du projet créé depuis RIKA : celle de la copie, sinon celle choisie dans le formulaire."""
+    if detected:
+        if detected not in SUPPORTED_ODOO_VERSIONS:
+            raise RuntimeError(f"La copie RIKA est en Odoo {detected}, version non prise en charge.")
+        if requested and requested != detected:
+            # Le code copié (Odoo et addons) est celui de l'instance : le lancer avec le modèle
+            # Docker d'une autre version produirait un projet inutilisable.
+            raise RuntimeError(
+                f"Cette instance RIKA est en Odoo {detected} (code Odoo et branches des addons), "
+                f"pas en Odoo {requested}. Choisis « Détecter automatiquement » ou l'instance RIKA "
+                f"de la version {requested}."
+            )
+        return detected
+    if requested:
+        return requested
+    raise RuntimeError(
+        "La copie RIKA ne précise pas sa version Odoo. Choisis la version dans le formulaire de création, "
+        "puis relance."
+    )
 
 
 def repository_slug(url):
@@ -715,7 +745,7 @@ class ProjectCreator:
             return False
         return True
 
-    def download_rika_project(self, instance, login, password, temporary, log=None):
+    def download_rika_project(self, instance, login, password, temporary, log=None, requested_version=""):
         instance = validate_rika_instance(instance)
         login = str(login or "").strip()
         password = str(password or "")
@@ -845,8 +875,12 @@ class ProjectCreator:
         except (OSError, zipfile.BadZipFile) as exc:
             raise RuntimeError("Le fichier reçu depuis RIKA n'est pas une sauvegarde ZIP exploitable.") from exc
         source_root = extracted / instance
-        version = detected_odoo_version(source_root)
-        self.log(log, f"Version détectée dans RIKA : Odoo {version}")
+        detected = detected_odoo_version(source_root)
+        version = resolve_rika_version(detected, requested_version)
+        if detected:
+            self.log(log, f"Version détectée dans RIKA : Odoo {version}")
+        else:
+            self.log(log, f"Version absente de la copie RIKA : Odoo {version} (choisie dans le formulaire)")
         return source_root, version
 
     def create(
@@ -865,7 +899,8 @@ class ProjectCreator:
         source_type = str(source_type or "standard").strip().lower()
         if source_type not in {"standard", "gitlab", "rika"}:
             raise ValueError("Type de source invalide.")
-        version = validate_odoo_version(version) if source_type != "rika" else ""
+        # Pour RIKA, une version vide laisse la copie décider (« Détecter automatiquement »).
+        version = validate_odoo_version(version) if source_type != "rika" or str(version or "").strip() else ""
 
         repository_url = str(repository_url or "").strip()
         repository_branch = str(repository_branch or "").strip()
@@ -895,6 +930,7 @@ class ProjectCreator:
                     rika_password,
                     temporary,
                     log=log,
+                    requested_version=version,
                 )
             self.log(log, f"Création du projet {name} en Odoo {version}")
             self.clone(LOCAL_TEMPLATE_REPOSITORY, version, staged_project, log=log)

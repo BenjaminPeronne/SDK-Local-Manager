@@ -162,7 +162,7 @@ class ProjectCreatorTests(unittest.TestCase):
         runner = FakeRunner()
         creator = self.creator(runner)
 
-        def download(instance, login, password, temporary, log=None):
+        def download(instance, login, password, temporary, log=None, requested_version=""):
             self.assertEqual((instance, login, password), ("prod01", "user@example.com", "secret"))
             source = Path(temporary) / "rika" / instance
             release = source / "odoo" / "odoo" / "release.py"
@@ -192,6 +192,35 @@ class ProjectCreatorTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "chemin non sécurisé"):
             ProjectCreator.extract_rika_archive(archive, self.workspace / "extract")
+
+    def test_rika_version_comes_from_the_copy_and_ignores_no_choice(self):
+        from odoo_manager_core.project_creator import resolve_rika_version
+
+        self.assertEqual(resolve_rika_version("19.0", ""), "19.0")
+        self.assertEqual(resolve_rika_version("", "15.0"), "15.0")
+
+    def test_rika_version_mismatch_with_the_chosen_version_is_refused(self):
+        from odoo_manager_core.project_creator import resolve_rika_version
+
+        with self.assertRaisesRegex(RuntimeError, "instance RIKA est en Odoo 19.0.*pas en Odoo 15.0"):
+            resolve_rika_version("19.0", "15.0")
+
+    def test_rika_version_unknown_without_a_choice_asks_for_one(self):
+        from odoo_manager_core.project_creator import resolve_rika_version
+
+        with self.assertRaisesRegex(RuntimeError, "Choisis la version"):
+            resolve_rika_version("", "")
+
+    def test_rika_version_falls_back_on_the_odoo_git_branch(self):
+        from odoo_manager_core.project_creator import detected_odoo_version
+
+        root = self.workspace / "copy"
+        head = root / "odoo" / ".git" / "HEAD"
+        head.parent.mkdir(parents=True)
+        head.write_text("ref: refs/heads/15.0\n", encoding="utf-8")
+
+        self.assertEqual(detected_odoo_version(root), "15.0")
+        self.assertEqual(detected_odoo_version(self.workspace / "empty"), "")
 
     def _rika_archive_with_links(self, links):
         archive = self.workspace / "links.zip"

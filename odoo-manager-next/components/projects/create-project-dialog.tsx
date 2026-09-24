@@ -18,6 +18,8 @@ import {
   RepositorySourceToggle,
 } from "@/components/gitlab-repository-picker";
 
+const RIKA_AUTO_VERSION = "auto";
+
 export function PrerequisiteRow({
   ready,
   icon: Icon,
@@ -82,6 +84,8 @@ export function CreateProjectDialog({
 }) {
   const [name, setName] = useState("");
   const [version, setVersion] = useState("19.0");
+  // RIKA : la version vient de la copie ; le choix manuel ne sert que si la copie ne la donne pas.
+  const [rikaVersion, setRikaVersion] = useState(RIKA_AUTO_VERSION);
   const [sourceType, setSourceType] = useState<"standard" | "gitlab" | "rika">("standard");
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [repositoryBranch, setRepositoryBranch] = useState("master");
@@ -161,7 +165,7 @@ export function CreateProjectDialog({
   async function submitProject() {
     const created = await onSubmit({
       name: name.trim(),
-      version,
+      version: sourceType === "rika" ? (rikaVersion === RIKA_AUTO_VERSION ? "" : rikaVersion) : version,
       source_type: sourceType,
       repository_url: repositoryUrl.trim(),
       repository_branch: repositoryBranch.trim(),
@@ -219,11 +223,17 @@ export function CreateProjectDialog({
             </div>
             <div className="grid content-start gap-1.5 text-sm font-medium">
               <label htmlFor="new-project-version">Version Odoo</label>
-              <Select value={version} onValueChange={setVersion} disabled={sourceType === "rika"}>
+              <Select
+                value={sourceType === "rika" ? rikaVersion : version}
+                onValueChange={sourceType === "rika" ? setRikaVersion : setVersion}
+              >
                 <SelectTrigger id="new-project-version">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  {sourceType === "rika" && (
+                    <SelectItem value={RIKA_AUTO_VERSION}>Détecter automatiquement</SelectItem>
+                  )}
                   {(prerequisites?.supported_versions || ["15.0", "16.0", "17.0", "18.0", "19.0"]).map((item) => (
                     <SelectItem key={item} value={item}>
                       Odoo {item}
@@ -232,7 +242,11 @@ export function CreateProjectDialog({
                 </SelectContent>
               </Select>
               <span className="min-h-4 text-xs font-normal text-muted-foreground">
-                {sourceType === "rika" ? "Détectée automatiquement dans la copie RIKA." : " "}
+                {sourceType !== "rika"
+                  ? " "
+                  : rikaVersion === RIKA_AUTO_VERSION
+                    ? "Lue dans la copie RIKA ; choisis-la si la copie ne l'indique pas."
+                    : "Utilisée si la copie RIKA ne l'indique pas ; refusée si la copie est d'une autre version."}
               </span>
             </div>
           </div>
