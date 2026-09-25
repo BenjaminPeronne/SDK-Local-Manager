@@ -776,6 +776,122 @@ class JobResourceTests(unittest.TestCase):
         self.assertIn("La commande Odoo a échoué avec le code 255.", snapshot["error_message"])
 
 
+class JobHistoryTests(unittest.TestCase):
+    def setUp(self):
+        with web.JOBS_LOCK:
+            self.previous_jobs = web.JOBS.copy()
+            self.previous_next_job_id = web.NEXT_JOB_ID
+            web.JOBS.clear()
+            web.NEXT_JOB_ID = 1
+        self.sandbox = tempfile.TemporaryDirectory(prefix="odoo-manager-jobs-")
+        self.history = Path(self.sandbox.name) / "jobs.json"
+        self.history_patch = patch.object(web, "JOB_HISTORY_PATH", None)
+        self.history_patch.start()
+
+    def tearDown(self):
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            with web.JOBS_LOCK:
+                if not any(job.status in web.JOB_UNFINISHED_STATUSES for job in web.JOBS.values()):
+                    break
+            time.sleep(0.01)
+        self.history_patch.stop()
+        with web.JOBS_LOCK:
+            web.JOBS.clear()
+            web.JOBS.update(self.previous_jobs)
+            web.NEXT_JOB_ID = self.previous_next_job_id
+        self.sandbox.cleanup()
+
+    def wait_for(self, job):
+        deadline = time.monotonic() + 2
+        while job.status in web.JOB_UNFINISHED_STATUSES and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertNotIn(job.status, web.JOB_UNFINISHED_STATUSES)
+
+    def wait_until_saved(self, job):
+        """La fin d'action est enregistrée juste après le changement de statut, dans le fil de l'action."""
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                saved = json.loads(self.history.read_text(encoding="utf-8"))["jobs"]
+            except (OSError, ValueError):
+                saved = []
+            record = next((item for item in saved if item["id"] == job.id), None)
+            if record and record["status"] not in web.JOB_UNFINISHED_STATUSES:
+                return record
+            time.sleep(0.01)
+        self.fail(f"Action {job.id} jamais enregistrée comme terminée.")
+
+    def forget_jobs(self):
+        with web.JOBS_LOCK:
+            web.JOBS.clear()
+            web.NEXT_JOB_ID = 1
+
+    def test_finished_jobs_survive_a_restart(self):
+        web.load_job_history(self.history)
+        job = web.Job("Démarrer DEMO", lambda job: job.add("conteneurs démarrés"), project="DEMO")
+        self.wait_until_saved(job)
+        self.forget_jobs()
+
+        self.assertEqual(web.load_job_history(self.history), 1)
+
+        restored = web.JOBS[job.id]
+        self.assertEqual((restored.title, restored.project, restored.status), ("Démarrer DEMO", "DEMO", "done"))
+        self.assertIn("conteneurs démarrés", restored.output)
+        self.assertEqual(restored.lines[-1], "conteneurs démarrés")
+        self.assertGreater(web.NEXT_JOB_ID, job.id)
+
+    def test_job_running_when_the_manager_stopped_is_restored_as_interrupted(self):
+        record = {"id": 7, "title": "Mettre à jour", "status": "running", "started_at": "2026-09-25 10:00:00"}
+        self.history.write_text(json.dumps({"version": 1, "jobs": [record]}), encoding="utf-8")
+
+        web.load_job_history(self.history)
+
+        restored = web.JOBS[7]
+        self.assertEqual(restored.status, "error")
+        self.assertEqual(restored.error_message, web.JOB_INTERRUPTED_MESSAGE)
+        self.assertFalse(web.job_cancel_payload(restored)["cancellable"])
+        self.assertEqual(web.NEXT_JOB_ID, 8)
+        # L'interruption est réécrite : un second redémarrage ne la relit pas « en cours ».
+        saved = json.loads(self.history.read_text(encoding="utf-8"))["jobs"]
+        self.assertEqual(saved[0]["status"], "error")
+
+    def test_unreadable_history_starts_empty(self):
+        self.history.write_text("{pas du json", encoding="utf-8")
+
+        with patch("traceback.print_exc"):
+            self.assertEqual(web.load_job_history(self.history), 0)
+
+        self.assertEqual(web.JOBS, {})
+
+    def test_cleared_history_is_saved(self):
+        web.load_job_history(self.history)
+        job = web.Job("Arrêter DEMO", lambda _job: None, project="DEMO")
+        self.wait_until_saved(job)
+
+        web.clear_jobs_history()
+
+        self.assertEqual(json.loads(self.history.read_text(encoding="utf-8"))["jobs"], [])
+
+    def test_saved_output_keeps_the_end_of_long_actions(self):
+        web.load_job_history(self.history)
+        job = web.Job("Longue sortie", lambda job: [job.add(f"ligne {index:06d}") for index in range(5000)])
+        saved = self.wait_until_saved(job)["output"]
+
+        self.assertLessEqual(len(saved), web.JOB_HISTORY_OUTPUT_LIMIT)
+        self.assertTrue(saved.endswith("ligne 004999\n"))
+
+    def test_job_output_signals_a_change(self):
+        web.JOBS_CHANGED.clear()
+        job = web.Job("Signal", lambda _job: None)
+        self.wait_for(job)
+        web.JOBS_CHANGED.clear()
+
+        job.add("nouvelle ligne")
+
+        self.assertTrue(web.JOBS_CHANGED.is_set())
+
+
 class EventWatchCostTests(unittest.TestCase):
     def setUp(self):
         web.invalidate_overview_databases()

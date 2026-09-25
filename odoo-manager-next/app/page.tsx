@@ -241,6 +241,9 @@ export default function Home() {
   const overviewRefreshInFlight = useRef(false);
   const systemRefreshInFlight = useRef(false);
   const jobsRefreshInFlight = useRef(false);
+  // Changement signalé pendant une lecture : relu à sa fin, sinon la dernière ligne attendrait le prochain signal.
+  const jobsRefreshQueued = useRef(false);
+  const [jobsStreamConnected, setJobsStreamConnected] = useState(false);
   const selectedJobIdRef = useRef<number | null>(null);
   const jobStatuses = useRef<Map<number, string>>(new Map());
   const jobNotificationsInitialized = useRef(false);
@@ -643,19 +646,26 @@ export default function Home() {
 
   const refreshJobs = useCallback(
     async (detailJobId?: number | null) => {
-      if (jobsRefreshInFlight.current) return;
+      if (jobsRefreshInFlight.current) {
+        jobsRefreshQueued.current = true;
+        return;
+      }
       jobsRefreshInFlight.current = true;
       try {
-        const requestedJobId = detailJobId ?? selectedJobIdRef.current;
-        const knownOutput = requestedJobId ? jobOutputCache.current.get(requestedJobId) : undefined;
-        const params = new URLSearchParams();
-        if (requestedJobId) params.set("detail", String(requestedJobId));
-        if (requestedJobId && knownOutput?.total) params.set("output_from", String(knownOutput.total));
-        const query = params.size ? `?${params}` : "";
-        const payload = await api<{ jobs: Job[] }>(`/api/jobs${query}`);
-        applyJobs(payload.jobs);
-        markApiSuccess();
-        setSelectedJobId((currentId) => currentId ?? payload.jobs[0]?.id ?? null);
+        let requestedJobId = detailJobId ?? selectedJobIdRef.current;
+        do {
+          jobsRefreshQueued.current = false;
+          const knownOutput = requestedJobId ? jobOutputCache.current.get(requestedJobId) : undefined;
+          const params = new URLSearchParams();
+          if (requestedJobId) params.set("detail", String(requestedJobId));
+          if (requestedJobId && knownOutput?.total) params.set("output_from", String(knownOutput.total));
+          const query = params.size ? `?${params}` : "";
+          const payload = await api<{ jobs: Job[] }>(`/api/jobs${query}`);
+          applyJobs(payload.jobs);
+          markApiSuccess();
+          setSelectedJobId((currentId) => currentId ?? payload.jobs[0]?.id ?? null);
+          requestedJobId = selectedJobIdRef.current;
+        } while (jobsRefreshQueued.current);
       } catch (err) {
         markApiFailure(err);
         // Jobs polling should not break the whole screen.
@@ -837,13 +847,15 @@ export default function Home() {
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void refreshJobs();
     };
-    const timer = window.setInterval(refreshWhenVisible, hasRunningJobs ? 1200 : 10000);
+    // Flux connecté, le signal jobs_changed suffit : la lecture périodique ne sert que de filet.
+    const interval = jobsStreamConnected ? 10000 : hasRunningJobs ? 1200 : 10000;
+    const timer = window.setInterval(refreshWhenVisible, interval);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [hasRunningJobs, initializing, refreshJobs]);
+  }, [hasRunningJobs, initializing, jobsStreamConnected, refreshJobs]);
 
   useEffect(() => {
     if (initializing) return;
@@ -869,6 +881,15 @@ export default function Home() {
   useEffect(() => {
     if (initializing || typeof EventSource === "undefined") return;
     const source = new EventSource(`${API_BASE}/api/stream`);
+    source.onopen = () => {
+      setJobsStreamConnected(true);
+      // Les signaux perdus pendant une coupure sont rattrapés en une lecture.
+      void refreshJobs();
+    };
+    source.onerror = () => setJobsStreamConnected(false);
+    source.addEventListener("jobs_changed", () => {
+      if (document.visibilityState === "visible") void refreshJobs();
+    });
     source.addEventListener("overview", (event) => {
       try {
         applyOverview(JSON.parse((event as MessageEvent<string>).data) as Overview);
@@ -888,7 +909,10 @@ export default function Home() {
       // Fetching modules here as well duplicated the filesystem/SQL scan.
       void Promise.all([refreshJobs(), refreshOverview()]);
     });
-    return () => source.close();
+    return () => {
+      source.close();
+      setJobsStreamConnected(false);
+    };
   }, [applyOverview, commitSystemStatus, initializing, refreshJobs, refreshOverview]);
 
   useEffect(() => {

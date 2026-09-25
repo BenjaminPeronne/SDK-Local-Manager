@@ -340,6 +340,16 @@ _EVENT_WATCH_THREAD_STARTED = False
 _EVENT_WATCH_THREAD_LOCK = threading.Lock()
 LOCAL_MODULE_OVERRIDES_LOCK = threading.Lock()
 ERROR_LOG_LOCK = threading.Lock()
+# Historique des actions, réécrit à chaque démarrage ou fin d'action. None tant que main() ne l'a pas
+# activé : les tests qui importent le module n'écrivent rien dans le dossier du poste.
+JOB_HISTORY_PATH = None
+JOB_HISTORY_LOCK = threading.Lock()
+JOB_HISTORY_OUTPUT_LIMIT = 40_000
+JOB_INTERRUPTED_MESSAGE = "Action interrompue : le gestionnaire s'est arrêté pendant son exécution."
+# Une action bavarde écrit des centaines de lignes par seconde : l'interface n'est prévenue
+# qu'une fois par intervalle, puis relit la suite de la sortie.
+JOBS_CHANGED = threading.Event()
+JOBS_EVENT_MIN_INTERVAL_SECONDS = 0.5
 ERROR_LOG_PATH = SETTINGS_STORE.path.with_name("errors.jsonl")
 MAX_ERROR_LOG_BYTES = 2 * 1024 * 1024
 MAX_ERROR_ENTRIES_RETURNED = 250
@@ -2705,6 +2715,9 @@ def schedule_jobs():
             to_start.append(job)
     for job in to_start:
         job.thread.start()
+    if to_start:
+        notify_jobs_changed()
+        persist_job_history()
 
 
 def cancel_job(job_id):
@@ -2727,6 +2740,7 @@ def cancel_job(job_id):
     if status == "queued":
         job.add(job.error_message)
         job.publish_completion()
+        persist_job_history()
         schedule_jobs()
         return job
     if status == "cancelling":
@@ -2740,6 +2754,7 @@ def cancel_job(job_id):
     with JOBS_LOCK:
         if job.status == "running":
             job.status = "cancelling"
+    notify_jobs_changed()
     if outcome == "deferred":
         job.add(f"Arrêt demandé : il sera effectif à la fin de l'étape en cours ({job.control.protected_step}).")
     elif outcome == "accepted":
@@ -2841,7 +2856,52 @@ class Job:
             self.id = NEXT_JOB_ID
             NEXT_JOB_ID += 1
             JOBS[self.id] = self
+        notify_jobs_changed()
         schedule_jobs()
+
+    @classmethod
+    def from_history(cls, record):
+        """Action terminée relue depuis l'historique ; une action alors en cours est marquée interrompue."""
+        job = cls.__new__(cls)
+        job.id = int(record["id"])
+        job.title = str(record.get("title") or "Action")
+        job.project = record.get("project") or None
+        job.status = str(record.get("status") or "error")
+        job.started_at = str(record.get("started_at") or "")
+        job.finished_at = record.get("finished_at") or None
+        job.error_message = str(record.get("error_message") or "")
+        job.output = str(record.get("output") or "")
+        job.output_total = len(job.output)
+        job.lines = job.output.splitlines()[-JOB_LINES_LIMIT:]
+        job.result = record.get("result") if isinstance(record.get("result"), dict) else {}
+        job.progress = None
+        job.target = None
+        job.args = ()
+        job.thread = None
+        job.control = job_control.JobControl()
+        job.cancellable, job.cancel_hint = False, ""
+        job.resources = frozenset()
+        if job.status in JOB_UNFINISHED_STATUSES:
+            job.status = "error"
+            job.finished_at = job.finished_at or job.started_at
+            job.error_message = JOB_INTERRUPTED_MESSAGE
+            job.lines.append(JOB_INTERRUPTED_MESSAGE)
+            job._append_output(JOB_INTERRUPTED_MESSAGE + "\n")
+        return job
+
+    def history_record(self):
+        """Ce que l'historique garde de l'action ; appelé sous JOBS_LOCK."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "project": self.project,
+            "status": self.status,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "error_message": self.error_message,
+            "result": dict(self.result),
+            "output": self.output[-JOB_HISTORY_OUTPUT_LIMIT:],
+        }
 
     def add(self, line):
         text = line.rstrip("\n")
@@ -2854,6 +2914,7 @@ class Job:
             with JOBS_LOCK:
                 self.lines.append(text)
                 self._append_output(text + "\n")
+        notify_jobs_changed()
         # Chaque ligne écrite par l'action est un point d'arrêt : les longues sorties Odoo s'interrompent vite.
         if job_control.current_control() is self.control:
             self.control.checkpoint()
@@ -2878,6 +2939,7 @@ class Job:
                 "current": current,
                 "total": total,
             }
+        notify_jobs_changed()
 
     def run(self):
         failure = None
@@ -2931,6 +2993,8 @@ class Job:
             invalidate_overview_databases()
             EVENT_DOCKER_REFRESH.set()
             self.publish_completion()
+            notify_jobs_changed()
+            persist_job_history()
             schedule_jobs()
 
     def finish_cancelled(self, failure):
@@ -5749,7 +5813,9 @@ def clear_jobs_history():
         running = {job_id: job for job_id, job in JOBS.items() if job.status in JOB_UNFINISHED_STATUSES}
         JOBS.clear()
         JOBS.update(running)
-        return len(running)
+    notify_jobs_changed()
+    persist_job_history()
+    return len(running)
 
 
 def delete_job_history(job_id):
@@ -5760,6 +5826,66 @@ def delete_job_history(job_id):
         if job.status in JOB_UNFINISHED_STATUSES:
             raise ValueError("Impossible de supprimer une action en cours ou en attente : arrête-la d'abord.")
         del JOBS[job_id]
+    notify_jobs_changed()
+    persist_job_history()
+
+
+def persist_job_history():
+    """Réécrit l'historique : les actions survivent au redémarrage du gestionnaire, ou à son plantage."""
+    path = JOB_HISTORY_PATH
+    if path is None:
+        return
+    # L'état est relevé sous le verrou d'écriture : un relevé plus ancien ne peut pas écraser un plus récent.
+    with JOB_HISTORY_LOCK:
+        with JOBS_LOCK:
+            records = [job.history_record() for job in JOBS.values()]
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(json.dumps({"version": 1, "jobs": records}, ensure_ascii=False), encoding="utf-8")
+            os.replace(temporary, path)
+        except OSError:
+            traceback.print_exc()
+
+
+def load_job_history(path):
+    """Relit l'historique au démarrage et active son enregistrement ; un fichier illisible repart de zéro."""
+    global JOB_HISTORY_PATH, NEXT_JOB_ID
+    JOB_HISTORY_PATH = path
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        records = payload.get("jobs", []) if isinstance(payload, dict) else []
+    except FileNotFoundError:
+        return 0
+    except (OSError, ValueError):
+        traceback.print_exc()
+        return 0
+    restored = []
+    for record in records[-MAX_RETAINED_JOBS:]:
+        try:
+            restored.append(Job.from_history(record))
+        except (KeyError, TypeError, ValueError):
+            continue
+    with JOBS_LOCK:
+        for job in sorted(restored, key=lambda item: item.id):
+            JOBS.setdefault(job.id, job)
+        NEXT_JOB_ID = max([NEXT_JOB_ID, *(job_id + 1 for job_id in JOBS)])
+    # Les actions interrompues sont enregistrées comme telles, pas relues « en cours » au prochain démarrage.
+    persist_job_history()
+    return len(restored)
+
+
+def notify_jobs_changed():
+    JOBS_CHANGED.set()
+
+
+def jobs_event_loop():
+    """Prévient l'interface qu'une action a bougé ; elle relit alors /api/jobs, sortie incrémentale comprise."""
+    while True:
+        JOBS_CHANGED.wait()
+        JOBS_CHANGED.clear()
+        publish_event("jobs_changed", {})
+        time.sleep(JOBS_EVENT_MIN_INTERVAL_SECONDS)
 
 
 def compose_service_for(project, pattern="odoo"):
@@ -5834,6 +5960,7 @@ def ensure_event_watch_thread_started():
             return
         _EVENT_WATCH_THREAD_STARTED = True
         threading.Thread(target=event_watch_loop, daemon=True).start()
+        threading.Thread(target=jobs_event_loop, daemon=True).start()
 
 
 CONTAINER_LOG_FILE_CANDIDATES = (
@@ -6856,6 +6983,7 @@ def main():
         raise
     print(f"Interface Odoo locale: {url}")
     print(f"Workspace: {WORKSPACE}")
+    load_job_history(SETTINGS_STORE.path.with_name("jobs.json"))
     ensure_event_watch_thread_started()
     try:
         server.serve_forever()
