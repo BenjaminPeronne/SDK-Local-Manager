@@ -5,6 +5,7 @@ import { DropdownMenu } from "@radix-ui/themes";
 import {
   CheckCircle2,
   ChevronRight,
+  Copy,
   ExternalLink,
   KeyRound,
   Languages,
@@ -52,6 +53,7 @@ type DatabasesTabProps = {
   setAdminPasswordOpen: Dispatch<SetStateAction<boolean>>;
   setCreateDbOpen: Dispatch<SetStateAction<boolean>>;
   setDropDbOpen: Dispatch<SetStateAction<boolean>>;
+  setDuplicateDbOpen: Dispatch<SetStateAction<boolean>>;
   setNeutralizeDbOpen: Dispatch<SetStateAction<boolean>>;
   setPendingDatabaseAction: Dispatch<SetStateAction<PendingDatabaseAction | null>>;
   setPostgresDetailsOpen: Dispatch<SetStateAction<boolean>>;
@@ -77,6 +79,7 @@ export function DatabasesTab({
   setAdminPasswordOpen,
   setCreateDbOpen,
   setDropDbOpen,
+  setDuplicateDbOpen,
   setNeutralizeDbOpen,
   setPendingDatabaseAction,
   setPostgresDetailsOpen,
@@ -187,6 +190,13 @@ export function DatabasesTab({
                       </DropdownMenu.Item>
                       <DropdownMenu.Separator />
                       <DropdownMenu.Label>Outils</DropdownMenu.Label>
+                      <DropdownMenu.Item
+                        disabled={!selectedProjectReady}
+                        onSelect={() => runDatabaseAction(db, "duplicate")}
+                      >
+                        <Copy className="h-4 w-4" />
+                        Dupliquer la base
+                      </DropdownMenu.Item>
                       <DropdownMenu.Item
                         disabled={selectedProject?.postgres_status !== "running" || openingPostgresql}
                         onSelect={() => runDatabaseAction(db, "psql")}
@@ -378,6 +388,15 @@ export function DatabasesTab({
                 >
                   <KeyRound className="h-4 w-4" />
                   Réinitialiser le mot de passe admin
+                </Button>
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  disabled={!canUseDb || !selectedProjectReady || loading}
+                  onClick={() => setDuplicateDbOpen(true)}
+                >
+                  <Copy className="h-4 w-4" />
+                  Dupliquer la base
                 </Button>
                 <Button
                   className="w-full text-destructive hover:text-destructive"

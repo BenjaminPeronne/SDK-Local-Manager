@@ -60,6 +60,7 @@ import { AllTranslationsResetDialog } from "@/components/databases/all-translati
 import { CreateDatabaseDialog } from "@/components/databases/create-database-dialog";
 import { DatabasesTab } from "@/components/databases/databases-tab";
 import { DropDatabaseDialog } from "@/components/databases/drop-database-dialog";
+import { DuplicateDatabaseDialog } from "@/components/databases/duplicate-database-dialog";
 import { NeutralizeDatabaseDialog } from "@/components/databases/neutralize-database-dialog";
 import { RestoreDatabaseDialog } from "@/components/databases/restore-database-dialog";
 import { ActivityTab } from "@/components/jobs/activity-tab";
@@ -169,6 +170,7 @@ export default function Home() {
   const [restoreDbOpen, setRestoreDbOpen] = useState(false);
   const [neutralizeDbOpen, setNeutralizeDbOpen] = useState(false);
   const [dropDbOpen, setDropDbOpen] = useState(false);
+  const [duplicateDbOpen, setDuplicateDbOpen] = useState(false);
   const [pendingDatabaseAction, setPendingDatabaseAction] = useState<PendingDatabaseAction | null>(null);
   const [postgresDetailsOpen, setPostgresDetailsOpen] = useState(false);
   const [rawOutputVisible, setRawOutputVisible] = useState(false);
@@ -1112,6 +1114,7 @@ export default function Home() {
     else if (action === "neutralize") setNeutralizeDbOpen(true);
     else if (action === "admin_password") setAdminPasswordOpen(true);
     else if (action === "psql") void openPostgresqlConsole();
+    else if (action === "duplicate") setDuplicateDbOpen(true);
     else if (action === "drop") setDropDbOpen(true);
   }
 
@@ -1572,6 +1575,7 @@ export default function Home() {
                     setAdminPasswordOpen={setAdminPasswordOpen}
                     setCreateDbOpen={setCreateDbOpen}
                     setDropDbOpen={setDropDbOpen}
+                    setDuplicateDbOpen={setDuplicateDbOpen}
                     setNeutralizeDbOpen={setNeutralizeDbOpen}
                     setPendingDatabaseAction={setPendingDatabaseAction}
                     setPostgresDetailsOpen={setPostgresDetailsOpen}
@@ -1871,6 +1875,30 @@ export default function Home() {
         open={neutralizeDbOpen}
         selectedDb={selectedDb}
         selectedProject={selectedProject}
+      />
+
+      <DuplicateDatabaseDialog
+        open={duplicateDbOpen}
+        onOpenChange={setDuplicateDbOpen}
+        project={selectedProject}
+        database={selectedDb}
+        existingDatabases={odooDatabases}
+        disabled={!canUseDb || !selectedProjectReady || loading}
+        onSubmit={async ({ newName, masterPwd, neutralize }) => {
+          if (!selectedProject) return;
+          const job = await createJob("duplicate_database", {
+            project: selectedProject.name,
+            db: selectedDb,
+            new_name: newName,
+            master_pwd: masterPwd,
+            neutralize,
+          });
+          if (job) {
+            setPendingCreatedDatabase({ jobId: job.id, project: selectedProject.name, database: newName });
+            setDuplicateDbOpen(false);
+            setActiveTab("logs");
+          }
+        }}
       />
 
       <DropDatabaseDialog

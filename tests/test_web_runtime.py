@@ -7,7 +7,7 @@ import time
 import unittest
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import odoo_manager_web as web
 from odoo_manager_core import command_output, job_queue
@@ -2382,6 +2382,99 @@ class DatabaseNeutralizationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Access Denied"):
             web.drop_database_job(job, "DEMO", "demo", "wrong")
+
+    @patch("odoo_manager_web.job_control.sleep")
+    @patch("odoo_manager_web.clear_project_module_cache")
+    @patch("odoo_manager_web.post_form_no_redirect", return_value=(303, ""))
+    @patch("odoo_manager_web.project_odoo_version", return_value="18.0")
+    @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
+    @patch("odoo_manager_web.project_service")
+    @patch(
+        "odoo_manager_web.list_databases_for",
+        side_effect=[["postgres", "demo"], ["postgres", "demo"], ["postgres", "demo", "demo_copy"]],
+    )
+    @patch("odoo_manager_web.validate_project", return_value="DEMO")
+    def test_duplicate_database_posts_to_odoo_and_neutralizes_the_copy(
+        self,
+        _validate_project,
+        _list_databases,
+        project_service,
+        _project_url,
+        _version,
+        post_form,
+        clear_cache,
+        _sleep,
+    ):
+        job = self.LogJob()
+
+        web.duplicate_database_job(job, "DEMO", "demo", "demo_copy", "secret")
+
+        post_form.assert_called_once_with(
+            "http://demo.localhost/web/database/duplicate",
+            {"master_pwd": "secret", "name": "demo", "new_name": "demo_copy", "neutralize_database": "on"},
+            timeout=2 * 60 * 60,
+        )
+        service = project_service.return_value
+        service.start_odoo_server.assert_called_once_with("DEMO", log=job.add, disable_cron=True)
+        service.run_odoo_neutralize_command.assert_called_once_with("DEMO", "demo_copy", log=job.add)
+        clear_cache.assert_called_once_with("DEMO")
+        self.assertEqual(job.result, {"kind": "database_creation", "database": "demo_copy"})
+
+    @patch("odoo_manager_web.job_control.sleep")
+    @patch("odoo_manager_web.clear_project_module_cache")
+    @patch("odoo_manager_web.post_form_no_redirect", return_value=(303, ""))
+    @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
+    @patch("odoo_manager_web.project_service")
+    @patch(
+        "odoo_manager_web.list_databases_for",
+        side_effect=[["postgres", "demo"], ["postgres", "demo"], ["postgres", "demo", "demo_copy"]],
+    )
+    @patch("odoo_manager_web.validate_project", return_value="DEMO")
+    def test_duplicate_database_without_neutralization_keeps_the_server_running(
+        self, _validate_project, _list_databases, project_service, _project_url, post_form, _clear_cache, _sleep
+    ):
+        job = self.LogJob()
+
+        web.duplicate_database_job(job, "DEMO", "demo", "demo_copy", "secret", neutralize=False)
+
+        post_form.assert_called_once_with(
+            "http://demo.localhost/web/database/duplicate",
+            {"master_pwd": "secret", "name": "demo", "new_name": "demo_copy"},
+            timeout=2 * 60 * 60,
+        )
+        project_service.return_value.stop_odoo_server.assert_not_called()
+        project_service.return_value.run_odoo_neutralize_command.assert_not_called()
+
+    @patch("odoo_manager_web.project_odoo_version", return_value="15.0")
+    @patch(
+        "odoo_manager_web.post_form_no_redirect",
+        return_value=(200, '<div class="alert alert-danger">Access Denied</div>'),
+    )
+    @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
+    @patch("odoo_manager_web.project_service")
+    @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
+    @patch("odoo_manager_web.validate_project", return_value="DEMO")
+    def test_duplicate_database_reports_odoo_refusal_and_restores_the_normal_server(
+        self, _validate_project, _list_databases, project_service, _project_url, post_form, _version
+    ):
+        job = self.LogJob()
+
+        with self.assertRaisesRegex(RuntimeError, "Access Denied"):
+            web.duplicate_database_job(job, "DEMO", "demo", "demo_copy", "wrong")
+
+        # Odoo 15 ne connaît pas l'option : la neutralisation repose sur la seconde passe.
+        self.assertNotIn("neutralize_database", post_form.call_args.args[1])
+        service = project_service.return_value
+        self.assertEqual(service.start_odoo_server.call_args_list[-1], call("DEMO", log=job.add))
+
+    @patch("odoo_manager_web.project_service")
+    @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo", "demo_copy"])
+    @patch("odoo_manager_web.validate_project", return_value="DEMO")
+    def test_duplicate_database_rejects_an_existing_target(self, _validate_project, _list_databases, _service):
+        job = self.LogJob()
+
+        with self.assertRaisesRegex(RuntimeError, "existe déjà"):
+            web.duplicate_database_job(job, "DEMO", "demo", "demo_copy", "secret")
 
     @patch("odoo_manager_web.list_databases_for", return_value=["postgres"])
     @patch("odoo_manager_web.validate_project", return_value="DEMO")

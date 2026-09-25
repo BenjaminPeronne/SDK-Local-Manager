@@ -97,7 +97,7 @@ export type BootstrapSnapshot = {
 export type PendingDatabaseAction = { db: string; action: DatabaseMenuAction };
 
 export type DatabaseMenuAction =
-  "regenerate_assets" | "reset_translations" | "neutralize" | "admin_password" | "psql" | "drop";
+  "regenerate_assets" | "reset_translations" | "neutralize" | "admin_password" | "psql" | "duplicate" | "drop";
 
 export type ManagerSettings = {
   version: number;

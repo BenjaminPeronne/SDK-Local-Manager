@@ -209,6 +209,7 @@ API_ACTIONS = (
     "delete_module_code",
     "delete_project",
     "drop_database",
+    "duplicate_database",
     "ignore_missing_modules_locally",
     "install_git",
     "install_module",
@@ -2613,6 +2614,10 @@ JOB_CANCEL_POLICIES = {
         True,
         "La création est interrompue et la base partiellement créée est supprimée avec son filestore.",
     ),
+    "duplicate_database_job": (
+        True,
+        "La duplication est interrompue et la copie partielle est supprimée avec son filestore.",
+    ),
     "drop_database_job": (
         True,
         "Possible tant que la suppression n'a pas été envoyée à Odoo ; ensuite elle va à son terme.",
@@ -3423,6 +3428,86 @@ def create_database_job(job, project, db_name, master_pwd, login, password, lang
         job_control.sleep(2)
 
     raise RuntimeError("La création a été envoyée, mais la base n'apparaît pas dans PostgreSQL après 120 secondes.")
+
+
+def odoo_has_native_neutralization(version):
+    """Odoo 16 a introduit le moteur de neutralisation et l'option correspondante des formulaires."""
+    try:
+        return float(version) >= 16
+    except (TypeError, ValueError):
+        return True
+
+
+def duplicate_database_job(job, project, db_name, new_name, master_pwd, neutralize=True):
+    project, db_name = existing_odoo_database(project, db_name)
+    new_name = validate_new_db(new_name)
+    master_pwd = validate_required_text(master_pwd, "Master password")
+    if new_name == db_name:
+        raise ValueError("Choisis un nom différent de la base d'origine.")
+    service = project_service()
+    cron_safe_server_started = False
+
+    job.add(f"Duplication de {db_name} vers {new_name} dans {project}")
+    job.add("Neutralisation: " + ("activée" if neutralize else "désactivée"))
+    job.add("Démarrage du projet avant duplication...")
+    service.start_project(project, log=job.add)
+    if new_name in set(list_databases_for(project)):
+        raise RuntimeError(f"La base existe déjà: {new_name}")
+    job_control.on_cancel(
+        f"suppression de la base partiellement dupliquée {new_name}",
+        lambda: drop_partial_database(job, project, new_name),
+    )
+    try:
+        if neutralize:
+            # La copie ne doit exécuter aucun cron avant d'être neutralisée.
+            job.add("Passage temporaire d'Odoo en mode sans cron pendant la duplication...")
+            service.stop_odoo_server(project, log=job.add)
+            cron_safe_server_started = True
+            service.start_odoo_server(project, log=job.add, disable_cron=True)
+            service.wait_project_http(project, log=job.add)
+        else:
+            # Odoo poursuit la copie dans son serveur même si la connexion est coupée.
+            job_control.on_cancel(
+                "redémarrage d'Odoo pour interrompre la duplication côté serveur",
+                lambda: restart_odoo_server(job, service, project),
+            )
+
+        url = urllib.parse.urljoin(project_url(project), "web/database/duplicate")
+        form = {"master_pwd": master_pwd, "name": db_name, "new_name": new_name}
+        if neutralize and odoo_has_native_neutralization(project_odoo_version(project)):
+            form["neutralize_database"] = "on"
+        job.add(f"Appel Odoo: {url}")
+        job.add("Les connexions ouvertes sur la base d'origine sont fermées par Odoo pendant la copie.")
+        status, content = post_form_no_redirect(url, form, timeout=2 * 60 * 60)
+        job.add(f"Réponse Odoo: HTTP {status}")
+        odoo_error = extract_odoo_page_error(content) if status == 200 else ""
+        if odoo_error:
+            raise RuntimeError(f"Odoo a refusé la duplication de la base : {odoo_error}")
+
+        for waited in range(0, 122, 2):
+            if new_name in set(list_databases_for(project)):
+                job.add(f"Base dupliquée (filestore inclus) : {new_name}")
+                if neutralize:
+                    job.add("Seconde passe de neutralisation et contrôles de sécurité...")
+                    # Cette méthode arrête le serveur sans cron et redémarre le serveur normal,
+                    # y compris si la neutralisation échoue.
+                    cron_safe_server_started = False
+                    service.run_odoo_neutralize_command(project, new_name, log=job.add)
+                invalidate_overview_databases(project)
+                clear_project_module_cache(project)
+                job.result = {"kind": "database_creation", "database": new_name}
+                return
+            job.add(f"Attente apparition base... {waited}s/120s")
+            job_control.sleep(2)
+        raise RuntimeError("Odoo a accepté la duplication, mais la base n'apparaît pas dans PostgreSQL.")
+    finally:
+        if cron_safe_server_started:
+            job.add("Rétablissement du serveur Odoo normal...")
+            try:
+                restart_odoo_server(job, service, project)
+                service.wait_project_http(project, log=job.add)
+            except Exception as exc:
+                job.add(f"Erreur pendant le rétablissement du serveur Odoo: {exc}")
 
 
 def drop_database_job(job, project, db_name, master_pwd):
@@ -5854,6 +5939,18 @@ def drop_database_action(payload):
     )
 
 
+def duplicate_database_action(payload):
+    project = payload_project(payload)
+    db_name = payload_database(payload)
+    new_name = validate_new_db(payload.get("new_name", ""))
+    return Job(
+        f"Dupliquer {db_name} vers {new_name}",
+        duplicate_database_job,
+        (project, db_name, new_name, payload.get("master_pwd", ""), bool(payload.get("neutralize", True))),
+        project=project,
+    )
+
+
 def reset_all_translations_action(payload):
     project = payload_project(payload)
     db_name = payload_database(payload)
@@ -5940,6 +6037,7 @@ JOB_ACTIONS = {
     "install_git": lambda _payload: Job("Installer Git pour Windows", install_git_job, resources={"git"}),
     "create_database": create_database_action,
     "drop_database": drop_database_action,
+    "duplicate_database": duplicate_database_action,
     "neutralize_database": database_job("Neutraliser {db}", neutralize_database_job),
     "reset_module_translations": database_modules_job(
         "Réinitialiser les traductions de {modules} sur {db}", reset_module_translations_job
