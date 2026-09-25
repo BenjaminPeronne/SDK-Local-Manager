@@ -2,19 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Boxes, Database, Logs, Settings } from "lucide-react";
+import { useApiAvailability } from "@/hooks/use-api-availability";
 import { useHiddenBelowStickyHeader } from "@/hooks/use-hidden-below-sticky-header";
+import { useJobs } from "@/hooks/use-jobs";
+import { useLiveUpdates } from "@/hooks/use-live-updates";
+import { useManagerState } from "@/hooks/use-manager-state";
 import { useModuleFilters } from "@/hooks/use-module-filters";
 import { useScheduledTimeouts } from "@/hooks/use-scheduled-timeouts";
 import { useStickyProjectHeader } from "@/hooks/use-sticky-project-header";
 import { useToasts } from "@/hooks/use-toasts";
-import {
-  api,
-  API_BASE,
-  ApiUnavailableError,
-  configureRuntimeApiBase,
-  isProjectGone,
-  uploadDatabaseBackup,
-} from "@/lib/api";
+import { api, API_BASE, ApiUnavailableError, isProjectGone, uploadDatabaseBackup } from "@/lib/api";
 import { databaseToKeep, readRememberedDatabases, writeRememberedDatabases } from "@/lib/database-selection";
 import {
   desktopBridge,
@@ -26,27 +23,16 @@ import {
 import {
   applicationVersion,
   FALLBACK_APP_VERSION,
-  invokeDesktop,
   isDesktopRuntime,
   openDockerDesktopNative,
   openExternalUrl,
   requestTaskNotificationPermission,
-  sendTaskNotification,
 } from "@/lib/desktop-runtime";
-import { type JobOutputCache, mergeIncrementalJobOutput } from "@/lib/job-output";
-import {
-  isJobActive,
-  isJobUnfinished,
-  jobCompletionTitle,
-  jobsFingerprint,
-  PROJECT_ARRIVAL_PREFIXES,
-} from "@/lib/jobs";
+import { isJobActive, isJobUnfinished, PROJECT_ARRIVAL_PREFIXES } from "@/lib/jobs";
 import { moduleRepositoryUrlError, socleAppInstalled } from "@/lib/modules";
 import { fallbackManagerSettings, firstOdooDatabase } from "@/lib/projects";
 import type {
   AddonLinksStatus,
-  BackendDiagnostics,
-  BootstrapSnapshot,
   DatabaseMenuAction,
   ExternalLogView,
   FilestoreStatus,
@@ -55,7 +41,6 @@ import type {
   ManagerSettings,
   MigrationSnapshot,
   ModuleInfo,
-  Overview,
   PendingDatabaseAction,
   PendingModuleOperation,
   ProjectCreationPrerequisites,
@@ -64,9 +49,8 @@ import type {
   SocleCatalog,
   SocleInstallPlan,
   SshPublicKey,
-  SystemStatus,
 } from "@/lib/types";
-import { cn, delay } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { isWslSetupPending } from "@/lib/wsl-setup";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Notice } from "@/components/common/notice";
@@ -116,19 +100,11 @@ import localIcon from "./local-icon.png";
 
 // Distance de défilement sur laquelle le bandeau des onglets collés passe de transparent à opaque.
 
-const BOOTSTRAP_RETRY_DELAYS_MS = [0, 500, 1000, 2000];
-
-const DOCKER_CONFIRM_DELAY_MS = 700;
-
 // Au-delà, les plus anciennes lignes du suivi en direct sont oubliées : la mémoire et le rendu restent constants.
 const LIVE_LOG_MAX_LINES = 2000;
 
 export default function Home() {
-  const [overview, setOverview] = useState<Overview | null>(null);
-  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [addonLinks, setAddonLinks] = useState<AddonLinksStatus | null>(null);
-  const [settings, setSettings] = useState<ManagerSettings | null>(null);
-  const [settingsDraft, setSettingsDraft] = useState<ManagerSettings | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>("general");
   const [managerErrors, setManagerErrors] = useState<ManagerErrorEntry[]>([]);
@@ -177,20 +153,11 @@ export default function Home() {
   const [loadingSocleCatalog, setLoadingSocleCatalog] = useState(false);
   const [socleSearch, setSocleSearch] = useState("");
   const [soclePlan, setSoclePlan] = useState<SocleInstallPlan | null>(null);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const jobOutputCache = useRef<JobOutputCache>(new Map());
-  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [logDescriptionExpanded, setLogDescriptionExpanded] = useState(false);
   const [externalLogView, setExternalLogView] = useState<ExternalLogView | null>(null);
   const [loading, setLoading] = useState(false);
   const [openingOdoo, setOpeningOdoo] = useState(false);
   const [openingPostgresql, setOpeningPostgresql] = useState(false);
-  const [initializing, setInitializing] = useState(true);
-  const [initializationMessage, setInitializationMessage] = useState("Démarrage du service local…");
-  const [initializationError, setInitializationError] = useState("");
-  const [backendDiagnostics, setBackendDiagnostics] = useState<BackendDiagnostics | null>(null);
-  const [error, setError] = useState("");
-  const [apiUnavailable, setApiUnavailable] = useState(false);
   const [desktopRuntime, setDesktopRuntime] = useState(false);
   const [repositoryOpen, setRepositoryOpen] = useState(false);
   const [repositoryUrl, setRepositoryUrl] = useState("");
@@ -233,26 +200,63 @@ export default function Home() {
     project: string;
     database: string;
   } | null>(null);
-  const lastDockerState = useRef<string | null>(null);
-  const pendingDockerState = useRef<{ state: string; count: number } | null>(null);
-  const consecutiveApiFailures = useRef(0);
-  const initializingRef = useRef(true);
-  const bootstrapGeneration = useRef(0);
-  const overviewRefreshInFlight = useRef(false);
-  const systemRefreshInFlight = useRef(false);
-  const jobsRefreshInFlight = useRef(false);
-  // Changement signalé pendant une lecture : relu à sa fin, sinon la dernière ligne attendrait le prochain signal.
-  const jobsRefreshQueued = useRef(false);
-  const [jobsStreamConnected, setJobsStreamConnected] = useState(false);
-  const selectedJobIdRef = useRef<number | null>(null);
-  const jobStatuses = useRef<Map<number, string>>(new Map());
-  const jobNotificationsInitialized = useRef(false);
   const lastSynchronizedJobCompletion = useRef("");
   const modulesRequestGeneration = useRef(0);
   const schedule = useScheduledTimeouts();
+  const { toasts, pushToast } = useToasts(schedule);
+  const { apiUnavailable, markApiSuccess, markApiFailure } = useApiAvailability();
+  const {
+    jobs,
+    selectedJobId,
+    setSelectedJobId,
+    hasRunningJobs,
+    runningJobs,
+    applyJobs,
+    refreshJobs,
+    trackCreatedJob,
+    focusJob,
+  } = useJobs({ pushToast, markApiSuccess, markApiFailure });
+  const pendingProjectNames = useRef(new Set<string>());
+  const {
+    overview,
+    systemStatus,
+    settings,
+    setSettings,
+    settingsDraft,
+    setSettingsDraft,
+    applySettings,
+    initializing,
+    initializationMessage,
+    initializationError,
+    backendDiagnostics,
+    error,
+    initializeApplication,
+    applyOverview,
+    commitSystemStatus,
+    refreshOverview,
+    refreshSystemStatus,
+    loadSettings,
+  } = useManagerState({
+    pushToast,
+    markApiSuccess,
+    markApiFailure,
+    applyJobs,
+    setSelectedJobId,
+    setSelectedProjectName,
+    pendingProjectNames,
+  });
+  useLiveUpdates({
+    initializing,
+    hasRunningJobs,
+    dockerPollInterval: settings?.docker_poll_interval,
+    refreshJobs,
+    refreshOverview,
+    refreshSystemStatus,
+    applyOverview,
+    commitSystemStatus,
+  });
   const onboardingPrompted = useRef(false);
   const wslSetupPrompted = useRef(false);
-  const pendingProjectNames = useRef(new Set<string>());
   const logOutputRef = useRef<HTMLPreElement>(null);
   const previousSelectedJobRef = useRef<{ id: number | null; status: string | null }>({ id: null, status: null });
   const logAutoFollow = useRef(true);
@@ -299,8 +303,6 @@ export default function Home() {
     () => projectJobs.find((job) => job.id === selectedJobId) || projectJobs[0],
     [projectJobs, selectedJobId],
   );
-  const hasRunningJobs = useMemo(() => jobs.some(isJobUnfinished), [jobs]);
-  const runningJobs = useMemo(() => jobs.filter(isJobUnfinished), [jobs]);
   const pendingProjectArrivals = useMemo(
     () =>
       jobs.filter(
@@ -374,218 +376,6 @@ export default function Home() {
   );
   const allFilteredModulesSelected =
     filteredModuleNames.length > 0 && selectedFilteredModuleCount === filteredModuleNames.length;
-  const { toasts, pushToast } = useToasts(schedule);
-
-  const notifyJobCompletion = useCallback(
-    (job: Job) => {
-      const successful = job.status === "done";
-      const title = `${jobCompletionTitle(job)} : ${job.title}`;
-      const message = !successful && job.error_message ? `${title}\n${job.error_message}` : title;
-      pushToast(successful ? "success" : job.status === "cancelled" ? "info" : "error", message);
-      void sendTaskNotification(job).catch(() => {
-        // A refused system permission must not affect job polling.
-      });
-    },
-    [pushToast],
-  );
-
-  const applyJobs = useCallback(
-    (receivedJobs: Job[], notify = true) => {
-      const nextJobs = mergeIncrementalJobOutput(receivedJobs, jobOutputCache.current);
-      const previousStatuses = jobStatuses.current;
-      if (notify && jobNotificationsInitialized.current) {
-        for (const job of nextJobs) {
-          const previousStatus = previousStatuses.get(job.id);
-          if (previousStatus && isJobUnfinished({ status: previousStatus }) && !isJobUnfinished(job)) {
-            notifyJobCompletion(job);
-          }
-        }
-      }
-      jobStatuses.current = new Map(nextJobs.map((job) => [job.id, job.status]));
-      jobNotificationsInitialized.current = true;
-      setJobs((current) => (jobsFingerprint(current) === jobsFingerprint(nextJobs) ? current : nextJobs));
-    },
-    [notifyJobCompletion],
-  );
-
-  const markApiSuccess = useCallback(() => {
-    consecutiveApiFailures.current = 0;
-    setApiUnavailable(false);
-  }, []);
-
-  const markApiFailure = useCallback((error: unknown) => {
-    if (!(error instanceof ApiUnavailableError)) return false;
-    consecutiveApiFailures.current += 1;
-    if (consecutiveApiFailures.current >= 2) setApiUnavailable(true);
-    return consecutiveApiFailures.current === 2;
-  }, []);
-
-  const applyBootstrapSnapshot = useCallback(
-    (payload: BootstrapSnapshot) => {
-      setOverview(payload.overview);
-      setSystemStatus(payload.system_status);
-      setSettings(payload.settings);
-      setSettingsDraft(payload.settings);
-      applyJobs(payload.jobs, false);
-      setSelectedProjectName((currentName) => {
-        if (currentName && pendingProjectNames.current.has(currentName)) return currentName;
-        // Un projet disparu (supprimé, renommé) ramène à l'accueil plutôt qu'au premier de la liste.
-        const project = payload.overview.projects.find((item) => item.name === currentName);
-        return project?.name || "";
-      });
-      setSelectedJobId((currentId) =>
-        payload.jobs.some((job) => job.id === currentId) ? currentId : (payload.jobs[0]?.id ?? null),
-      );
-      lastDockerState.current = payload.system_status.docker.state;
-      pendingDockerState.current = null;
-      markApiSuccess();
-      setError("");
-    },
-    [applyJobs, markApiSuccess],
-  );
-
-  const commitSystemStatus = useCallback(
-    (payload: SystemStatus, immediate = false) => {
-      markApiSuccess();
-      const previous = lastDockerState.current;
-      const next = payload.docker.state;
-      const sameState = previous === next;
-      const recoverToReady = payload.docker.running;
-
-      if (!immediate && previous && !sameState && !recoverToReady) {
-        const pending = pendingDockerState.current;
-        const count = pending?.state === next ? pending.count + 1 : 1;
-        pendingDockerState.current = { state: next, count };
-        if (count < 2) return false;
-      }
-
-      pendingDockerState.current = null;
-      setSystemStatus(payload);
-      if (!immediate && previous && previous !== next) {
-        if (payload.docker.running) pushToast("success", "Docker est maintenant disponible.");
-        else pushToast("error", payload.docker.message || "Docker n'est plus disponible.");
-      }
-      lastDockerState.current = next;
-      return true;
-    },
-    [markApiSuccess, pushToast],
-  );
-
-  const initializeApplication = useCallback(async () => {
-    const generation = ++bootstrapGeneration.current;
-    initializingRef.current = true;
-    setInitializing(true);
-    setInitializationError("");
-    setBackendDiagnostics(null);
-    markApiSuccess();
-
-    for (const [attempt, retryDelay] of BOOTSTRAP_RETRY_DELAYS_MS.entries()) {
-      if (retryDelay) await delay(retryDelay);
-      if (generation !== bootstrapGeneration.current) return;
-      setInitializationMessage(attempt === 0 ? "Démarrage du service local…" : "Connexion au service local…");
-      try {
-        let payload = await api<BootstrapSnapshot>("/api/bootstrap");
-        if (!payload.system_status.docker.running) {
-          setInitializationMessage("Vérification de Docker et des projets…");
-          await delay(DOCKER_CONFIRM_DELAY_MS);
-          const confirmation = await api<BootstrapSnapshot>("/api/bootstrap");
-          if (
-            confirmation.system_status.docker.state !== payload.system_status.docker.state &&
-            !confirmation.system_status.docker.running
-          ) {
-            await delay(DOCKER_CONFIRM_DELAY_MS);
-            payload = await api<BootstrapSnapshot>("/api/bootstrap");
-          } else {
-            payload = confirmation;
-          }
-        }
-        if (generation !== bootstrapGeneration.current) return;
-        applyBootstrapSnapshot(payload);
-        initializingRef.current = false;
-        setInitializing(false);
-        return;
-      } catch (err) {
-        if (generation !== bootstrapGeneration.current) return;
-        if (attempt === BOOTSTRAP_RETRY_DELAYS_MS.length - 1) {
-          setInitializationError(err instanceof Error ? err.message : "Le service local ne répond pas.");
-          setInitializationMessage("Le gestionnaire n’est pas encore prêt.");
-          if (isDesktopRuntime()) {
-            try {
-              setBackendDiagnostics(await invokeDesktop<BackendDiagnostics>("backend_diagnostics"));
-            } catch {
-              setBackendDiagnostics(null);
-            }
-          }
-        }
-      }
-    }
-  }, [applyBootstrapSnapshot, markApiSuccess]);
-
-  const applyOverview = useCallback(
-    (payload: Overview) => {
-      setOverview((currentOverview) =>
-        currentOverview && JSON.stringify(currentOverview) === JSON.stringify(payload) ? currentOverview : payload,
-      );
-      markApiSuccess();
-      setError("");
-      setSelectedProjectName((currentName) => {
-        if (currentName && pendingProjectNames.current.has(currentName)) return currentName;
-        const current = payload.projects.find((project) => project.name === currentName);
-        return current?.name || "";
-      });
-    },
-    [markApiSuccess],
-  );
-
-  const refreshOverview = useCallback(async () => {
-    if (overviewRefreshInFlight.current) return;
-    overviewRefreshInFlight.current = true;
-    try {
-      const payload = await api<Overview>("/api/overview");
-      applyOverview(payload);
-    } catch (err) {
-      markApiFailure(err);
-      setError(
-        !initializingRef.current && !(err instanceof ApiUnavailableError)
-          ? err instanceof Error
-            ? err.message
-            : "Impossible de charger l'overview."
-          : "",
-      );
-    } finally {
-      overviewRefreshInFlight.current = false;
-    }
-  }, [applyOverview, markApiFailure]);
-
-  const refreshSystemStatus = useCallback(async () => {
-    if (systemRefreshInFlight.current) return;
-    systemRefreshInFlight.current = true;
-    try {
-      const payload = await api<SystemStatus>("/api/system/status");
-      commitSystemStatus(payload);
-    } catch (err) {
-      const newlyUnavailable = markApiFailure(err);
-      if (!initializingRef.current && (newlyUnavailable || !(err instanceof ApiUnavailableError))) {
-        pushToast("error", err instanceof Error ? err.message : "État système indisponible.");
-      }
-    } finally {
-      systemRefreshInFlight.current = false;
-    }
-  }, [commitSystemStatus, markApiFailure, pushToast]);
-
-  const loadSettings = useCallback(async () => {
-    try {
-      const payload = await api<{ settings: ManagerSettings }>("/api/settings");
-      setSettings(payload.settings);
-      setSettingsDraft(payload.settings);
-      markApiSuccess();
-    } catch (err) {
-      markApiFailure(err);
-      if (!initializingRef.current && !(err instanceof ApiUnavailableError)) {
-        pushToast("error", err instanceof Error ? err.message : "Paramètres indisponibles.");
-      }
-    }
-  }, [markApiFailure, markApiSuccess, pushToast]);
 
   const openSettingsDialog = useCallback(() => {
     setSettingsDraft(fallbackManagerSettings(settings, overview, systemStatus));
@@ -602,7 +392,7 @@ export default function Home() {
     void loadSettings();
     void loadSshKeys();
     void loadManagerErrors();
-  }, [loadSettings, overview, settings, systemStatus]);
+  }, [loadSettings, overview, setSettingsDraft, settings, systemStatus]);
 
   // Raccourci vers les comptes : « Connecter GitLab » y mène directement.
   const openAccountSettings = useCallback(() => {
@@ -637,48 +427,11 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify({ onboarding_completed: true, create_workspace: true }),
       });
-      setSettings(payload.settings);
-      setSettingsDraft(payload.settings);
+      applySettings(payload.settings);
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : "Enregistrement impossible.");
     }
-  }, [pushToast]);
-
-  const refreshJobs = useCallback(
-    async (detailJobId?: number | null) => {
-      if (jobsRefreshInFlight.current) {
-        jobsRefreshQueued.current = true;
-        return;
-      }
-      jobsRefreshInFlight.current = true;
-      try {
-        let requestedJobId = detailJobId ?? selectedJobIdRef.current;
-        do {
-          jobsRefreshQueued.current = false;
-          const knownOutput = requestedJobId ? jobOutputCache.current.get(requestedJobId) : undefined;
-          const params = new URLSearchParams();
-          if (requestedJobId) params.set("detail", String(requestedJobId));
-          if (requestedJobId && knownOutput?.total) params.set("output_from", String(knownOutput.total));
-          const query = params.size ? `?${params}` : "";
-          const payload = await api<{ jobs: Job[] }>(`/api/jobs${query}`);
-          applyJobs(payload.jobs);
-          markApiSuccess();
-          setSelectedJobId((currentId) => currentId ?? payload.jobs[0]?.id ?? null);
-          requestedJobId = selectedJobIdRef.current;
-        } while (jobsRefreshQueued.current);
-      } catch (err) {
-        markApiFailure(err);
-        // Jobs polling should not break the whole screen.
-      } finally {
-        jobsRefreshInFlight.current = false;
-      }
-    },
-    [applyJobs, markApiFailure, markApiSuccess],
-  );
-
-  useEffect(() => {
-    selectedJobIdRef.current = selectedJobId;
-  }, [selectedJobId]);
+  }, [applySettings, pushToast]);
 
   const refreshAddonLinks = useCallback(async () => {
     const projectName = selectedProject?.name;
@@ -746,17 +499,6 @@ export default function Home() {
   useEffect(() => {
     setDesktopRuntime(isDesktopRuntime());
     void applicationVersion().then(setAppVersion);
-    void configureRuntimeApiBase()
-      .then(initializeApplication)
-      .catch((err) => {
-        setInitializationError(
-          err instanceof Error ? err.message : "Impossible de déterminer le port du gestionnaire.",
-        );
-        setInitializationMessage("Le gestionnaire n’est pas encore prêt.");
-      });
-    return () => {
-      bootstrapGeneration.current += 1;
-    };
   }, []);
 
   useEffect(() => {
@@ -843,79 +585,6 @@ export default function Home() {
   }, [jobs, overview, pendingCreatedDatabase, pushToast]);
 
   useEffect(() => {
-    if (initializing) return;
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void refreshJobs();
-    };
-    // Flux connecté, le signal jobs_changed suffit : la lecture périodique ne sert que de filet.
-    const interval = jobsStreamConnected ? 10000 : hasRunningJobs ? 1200 : 10000;
-    const timer = window.setInterval(refreshWhenVisible, interval);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, [hasRunningJobs, initializing, jobsStreamConnected, refreshJobs]);
-
-  useEffect(() => {
-    if (initializing) return;
-    // Safety-net fallback only: /api/stream (below) pushes overview changes live.
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void refreshOverview();
-    };
-    const timer = window.setInterval(refreshWhenVisible, hasRunningJobs ? 15000 : 45000);
-    return () => window.clearInterval(timer);
-  }, [hasRunningJobs, initializing, refreshOverview]);
-
-  useEffect(() => {
-    if (initializing) return;
-    // Safety-net fallback only: /api/stream (below) pushes system status changes live.
-    const interval = Math.max(3, settings?.docker_poll_interval || 10) * 1000 * 3;
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void refreshSystemStatus();
-    };
-    const timer = window.setInterval(refreshWhenVisible, interval);
-    return () => window.clearInterval(timer);
-  }, [initializing, refreshSystemStatus, settings?.docker_poll_interval]);
-
-  useEffect(() => {
-    if (initializing || typeof EventSource === "undefined") return;
-    const source = new EventSource(`${API_BASE}/api/stream`);
-    source.onopen = () => {
-      setJobsStreamConnected(true);
-      // Les signaux perdus pendant une coupure sont rattrapés en une lecture.
-      void refreshJobs();
-    };
-    source.onerror = () => setJobsStreamConnected(false);
-    source.addEventListener("jobs_changed", () => {
-      if (document.visibilityState === "visible") void refreshJobs();
-    });
-    source.addEventListener("overview", (event) => {
-      try {
-        applyOverview(JSON.parse((event as MessageEvent<string>).data) as Overview);
-      } catch {
-        // Malformed live update: the safety-net poll will resync state.
-      }
-    });
-    source.addEventListener("system_status", (event) => {
-      try {
-        commitSystemStatus(JSON.parse((event as MessageEvent<string>).data) as SystemStatus);
-      } catch {
-        // Malformed live update: the safety-net poll will resync state.
-      }
-    });
-    source.addEventListener("job_completed", () => {
-      // Applying completed jobs triggers the module synchronization effect.
-      // Fetching modules here as well duplicated the filesystem/SQL scan.
-      void Promise.all([refreshJobs(), refreshOverview()]);
-    });
-    return () => {
-      source.close();
-      setJobsStreamConnected(false);
-    };
-  }, [applyOverview, commitSystemStatus, initializing, refreshJobs, refreshOverview]);
-
-  useEffect(() => {
     if (!selectedProject) return;
     const remembered = rememberedDatabases.current[selectedProject.name];
     const sameProject = databaseOwner.current === selectedProject.name;
@@ -946,8 +615,7 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify({ action, ...payload }),
       });
-      setSelectedJobId(result.job.id);
-      jobStatuses.current.set(result.job.id, result.job.status);
+      trackCreatedJob(result.job);
       setExternalLogView(null);
       enableLogAutoFollow();
       if (result.job.status === "queued") {
@@ -1118,8 +786,7 @@ export default function Home() {
           beta_interface_banner_dismissed: true,
         }),
       });
-      setSettings(payload.settings);
-      setSettingsDraft(payload.settings);
+      applySettings(payload.settings);
       pushToast(
         "success",
         "Nouvelle interface activée. Retour à l’interface classique possible dans Paramètres, section Apparence.",
@@ -1135,8 +802,7 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify({ beta_interface_banner_dismissed: true }),
       });
-      setSettings(payload.settings);
-      setSettingsDraft(payload.settings);
+      applySettings(payload.settings);
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : "Impossible de masquer la proposition.");
     }
@@ -1149,8 +815,7 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify({ migration_banner_dismissed: true }),
       });
-      setSettings(payload.settings);
-      setSettingsDraft(payload.settings);
+      applySettings(payload.settings);
       await refreshMigration();
       pushToast("success", "Proposition masquée. Les projets restent copiables depuis les paramètres.");
     } catch (err) {
@@ -1367,11 +1032,9 @@ export default function Home() {
   function selectJob(jobId: number) {
     stopLiveLogStream();
     setExternalLogView(null);
-    setSelectedJobId(jobId);
-    selectedJobIdRef.current = jobId;
     setRawOutputVisible(false);
     enableLogAutoFollow();
-    void refreshJobs(jobId);
+    focusJob(jobId);
   }
 
   function requestUninstall(moduleNames: string[]) {
@@ -1482,8 +1145,7 @@ export default function Home() {
     });
     try {
       const result = await uploadDatabaseBackup(payload, onProgress);
-      setSelectedJobId(result.job.id);
-      jobStatuses.current.set(result.job.id, result.job.status);
+      trackCreatedJob(result.job);
       setExternalLogView(null);
       enableLogAutoFollow();
       setRestoreDbOpen(false);
