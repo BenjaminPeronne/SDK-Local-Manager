@@ -740,7 +740,10 @@ class ProjectCreator:
             if link.exists() or link.is_symlink():
                 return False
             link.parent.mkdir(parents=True, exist_ok=True)
-            link.symlink_to(link_target)
+            # Windows fixe le type du lien à sa création : un lien « fichier » vers un dossier ne se
+            # traverse pas, et une cible relative n'y est résolue qu'avec ses séparateurs natifs.
+            target = Path(link_target)
+            link.symlink_to(target, target_is_directory=(link.parent / target).is_dir())
         except OSError:
             return False
         return True
