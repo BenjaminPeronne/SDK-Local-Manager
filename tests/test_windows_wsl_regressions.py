@@ -7,6 +7,7 @@ aveuglement sur un système POSIX et exécutent les scripts WSL avec `sh`.
 """
 
 import ast
+import contextlib
 import os
 import sys
 import tempfile
@@ -20,6 +21,7 @@ import test_module_layout
 from test_module_layout import DummyJob
 
 import odoo_manager_web as web
+from odoo_manager_core import manifests
 from odoo_manager_core.config import ManagerSettings
 from odoo_manager_core.project_service import ProjectService
 
@@ -167,10 +169,19 @@ class WindowsWslLayoutTests(unittest.TestCase):
         def unreadable(*args, **kwargs):
             raise AssertionError("lecture Windows d'un lien WSL")
 
+        @contextlib.contextmanager
+        def blind_manifests():
+            # Le graphe des manifestes est construit dans odoo_manager_core.manifests, le reste par le backend.
+            with (
+                mock.patch.object(web, "read_manifest_dict", side_effect=unreadable),
+                mock.patch.object(manifests, "read_manifest_dict", side_effect=unreadable),
+            ):
+                yield
+
         return (
             mock.patch.object(Path, "is_symlink", return_value=False),
             mock.patch.object(Path, "symlink_to", side_effect=FileExistsError(183, "WinError 183")),
-            mock.patch.object(web, "read_manifest_dict", side_effect=unreadable),
+            blind_manifests(),
         )
 
     def test_socle_dependencies_are_read_through_wsl_links(self):

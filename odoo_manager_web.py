@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-import ast
-import collections
 import errno
-import html
 import http.client
 import json
 import ntpath
@@ -12,7 +9,6 @@ import queue
 import re
 import shlex
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -22,7 +18,6 @@ import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
-import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,9 +27,54 @@ from odoo_manager_runtime import initialize_runtime_streams
 
 RUNTIME_LOG_PATH, _RUNTIME_STREAMS = initialize_runtime_streams()
 
-from odoo_manager_core import ProjectCreator, ProjectService, SettingsStore, docker_status, start_docker
+from odoo_manager_core import ProjectCreator, ProjectService, SettingsStore, docker_status, job_queue, start_docker
 from odoo_manager_core import jobs as job_control
+from odoo_manager_core.archives import (
+    SAFE_IMPORT_NAME_RE,
+    multipart_field,
+    parse_multipart_form,
+    safe_extract_zip,
+    safe_import_name,
+    save_request_body_to_file,
+    validate_odoo_backup_archive,
+)
+from odoo_manager_core.command_output import (
+    MISSING_CODE_ERROR_RE,
+    MISSING_POSTGRES_EXTENSION_RE,
+    external_dependency_failure_hint,
+    extract_odoo_page_error,
+    missing_python_import,
+    odoo_restore_error,
+    python_package_for_import,
+)
 from odoo_manager_core.docker_api import EngineUnavailable
+from odoo_manager_core.events import EVENT_SUBSCRIBERS, EVENT_SUBSCRIBERS_LOCK, publish_event
+from odoo_manager_core.http_routes import Route, Router, RouteRequest
+from odoo_manager_core.job_queue import (
+    JOB_UNFINISHED_STATUSES,
+    JOBS,
+    JOBS_LOCK,
+    Job,
+    cancel_job,
+    clear_jobs_history,
+    delete_job_history,
+    job_creation_payload,
+    jobs_event_loop,
+    jobs_snapshot,
+    load_job_history,
+    unfinished_job,
+)
+from odoo_manager_core.manifests import (
+    MANIFEST_FILENAMES,
+    MANIFEST_RECORD_MARKER,
+    ODOO_SERIES_VERSION_RE,
+    manifest_version_key,
+    module_graph_from_paths,
+    module_graph_from_records,
+    module_install_plan,
+    read_manifest_dict,
+    read_repository_manifest,
+)
 from odoo_manager_core.migration import (
     CONTAINER_ABSENT,
     compare_projects,
@@ -82,6 +122,13 @@ from odoo_manager_core.project_creator import (
 )
 from odoo_manager_core.project_service import OdooError
 from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
+from odoo_manager_core.repositories import (
+    REPOSITORY_COMMIT_RE,
+    REPOSITORY_GIT_OPTIONS,
+    repository_clone_error,
+    repository_tree_modules,
+    sparse_checkout_pattern,
+)
 from odoo_manager_core.system import (
     active_engine_client,
     docker_command,
@@ -212,7 +259,6 @@ TRAEFIK_REPO = "ssh://git@gitlab.sudokeys.com:10022/devops/docker-local-tools.gi
 
 SAFE_PROJECT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 SAFE_MODULE_RE = re.compile(r"^[A-Za-z0-9_,.-]+$")
-SAFE_IMPORT_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def safe_path_is_dir(path):
@@ -238,14 +284,7 @@ def safe_path_exists(path):
 
 MAX_DB_NAME_BYTES = 63
 MAX_JSON_BODY_BYTES = 1024 * 1024
-MAX_RETAINED_JOBS = 60
-MAX_RUNNING_JOBS = 4
-JOB_LINES_LIMIT = 700
-JOB_OUTPUT_LIMIT = 120_000
-MAX_ZIP_ENTRIES = 100_000
-MAX_ZIP_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_DATABASE_BACKUP_BYTES = int(os.environ.get("ODOO_MANAGER_MAX_BACKUP_BYTES", 100 * 1024 * 1024 * 1024))
-MAX_DATABASE_BACKUP_ENTRIES = 2_000_000
 
 # Catalogue aligné sur https://www.odoo.com/fr_FR/page/all-apps : ordre et
 # catégories de la page. Les modules absents d'une version sont signalés par l'UI.
@@ -315,19 +354,12 @@ SOCLE_APPS = (
 
 SOCLE_PRESETS = {app_id: (label, modules) for app_id, label, _section, modules in SOCLE_APPS}
 
-# États pour lesquels Odoo considère une dépendance comme satisfaite.
-INSTALLED_MODULE_STATES = frozenset(("installed", "to install", "to upgrade"))
 MODULE_GRAPH_CACHE = {}
 MODULE_GRAPH_TTL_SECONDS = 45
 
-JOBS = {}
-JOBS_LOCK = threading.Lock()
-NEXT_JOB_ID = 1
 ACTIVE_PROCESSES = set()
 ACTIVE_PROCESSES_LOCK = threading.Lock()
 
-EVENT_SUBSCRIBERS = set()
-EVENT_SUBSCRIBERS_LOCK = threading.Lock()
 EVENT_WATCH_INTERVAL_SECONDS = 2
 # La liste des bases coûte un `docker exec psql` par projet démarré : inutile toutes les 2 s.
 EVENT_DATABASES_MAX_AGE_SECONDS = 30
@@ -340,16 +372,6 @@ _EVENT_WATCH_THREAD_STARTED = False
 _EVENT_WATCH_THREAD_LOCK = threading.Lock()
 LOCAL_MODULE_OVERRIDES_LOCK = threading.Lock()
 ERROR_LOG_LOCK = threading.Lock()
-# Historique des actions, réécrit à chaque démarrage ou fin d'action. None tant que main() ne l'a pas
-# activé : les tests qui importent le module n'écrivent rien dans le dossier du poste.
-JOB_HISTORY_PATH = None
-JOB_HISTORY_LOCK = threading.Lock()
-JOB_HISTORY_OUTPUT_LIMIT = 40_000
-JOB_INTERRUPTED_MESSAGE = "Action interrompue : le gestionnaire s'est arrêté pendant son exécution."
-# Une action bavarde écrit des centaines de lignes par seconde : l'interface n'est prévenue
-# qu'une fois par intervalle, puis relit la suite de la sortie.
-JOBS_CHANGED = threading.Event()
-JOBS_EVENT_MIN_INTERVAL_SECONDS = 0.5
 ERROR_LOG_PATH = SETTINGS_STORE.path.with_name("errors.jsonl")
 MAX_ERROR_LOG_BYTES = 2 * 1024 * 1024
 MAX_ERROR_ENTRIES_RETURNED = 250
@@ -623,46 +645,6 @@ def html_response(handler, body, status=200):
         handler.wfile.write(data)
     except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
         return None
-
-
-def parse_multipart_form(content_type, body):
-    match = re.search(r"boundary=([^;]+)", content_type or "")
-    if not match:
-        raise ValueError("Boundary multipart manquante.")
-    boundary = match.group(1).strip().strip('"').encode("utf-8")
-    fields = {}
-    files = {}
-
-    for part in body.split(b"--" + boundary):
-        part = part.strip(b"\r\n")
-        if not part or part == b"--":
-            continue
-        if part.endswith(b"--"):
-            part = part[:-2].strip(b"\r\n")
-        header_blob, separator, payload = part.partition(b"\r\n\r\n")
-        if not separator:
-            continue
-        headers = {}
-        for line in header_blob.decode("utf-8", errors="replace").split("\r\n"):
-            key, sep, value = line.partition(":")
-            if sep:
-                headers[key.strip().lower()] = value.strip()
-        disposition = headers.get("content-disposition", "")
-        name_match = re.search(r'name="([^"]+)"', disposition)
-        if not name_match:
-            continue
-        name = name_match.group(1)
-        filename_match = re.search(r'filename="([^"]*)"', disposition)
-        payload = payload.rstrip(b"\r\n")
-        if filename_match:
-            files[name] = {
-                "filename": Path(filename_match.group(1)).name,
-                "data": payload,
-            }
-        else:
-            fields[name] = payload.decode("utf-8", errors="replace")
-
-    return fields, files
 
 
 def run_capture(args, cwd=None, timeout=12):
@@ -2591,8 +2573,6 @@ def bootstrap_snapshot():
     }
 
 
-JOB_ACTIVE_STATUSES = frozenset({"running", "cancelling"})
-JOB_UNFINISHED_STATUSES = frozenset({"queued", "running", "cancelling"})
 MODULE_OPERATION_CANCEL_HINT = (
     "Le processus Odoo est arrêté, les modules que l'action a laissés en attente reprennent leur état précédent, "
     "puis Odoo redémarre. Les modules déjà traités par Odoo restent modifiés."
@@ -2668,360 +2648,20 @@ JOB_CANCEL_POLICIES = {
         "modification courte de la base, appliquée en une seule transaction.",
     ),
 }
-DEFAULT_JOB_CANCEL_POLICY = (
-    True,
-    "L'action est interrompue ; ce qu'elle a déjà modifié n'est pas annulé automatiquement.",
+
+
+def refresh_after_job():
+    """Une action a pu démarrer ou arrêter des conteneurs, créer ou supprimer des bases."""
+    invalidate_overview_databases()
+    EVENT_DOCKER_REFRESH.set()
+
+
+# Les fonctions sont relues à chaque appel : un test peut remplacer record_manager_error dans ce module.
+job_queue.configure(
+    cancel_policies=JOB_CANCEL_POLICIES,
+    record_error=lambda *args, **kwargs: record_manager_error(*args, **kwargs),
+    on_finished=lambda: refresh_after_job(),
 )
-
-
-def jobs_conflict(first, second):
-    """Deux actions qui ne doivent pas tourner en même temps : même ressource, ou action sur tous les projets."""
-    if first.resources & second.resources:
-        return True
-    for everything, other in ((first, second), (second, first)):
-        # `*` couvre tous les projets, pas Git ni Traefik.
-        if "*" in everything.resources and any(item == "*" or item.startswith("project:") for item in other.resources):
-            return True
-    return False
-
-
-def job_waiting_reason(job):
-    """Pourquoi une action attend ; appelé sous JOBS_LOCK."""
-    for other in JOBS.values():
-        if other.id >= job.id:
-            break
-        if other.status in JOB_UNFINISHED_STATUSES and jobs_conflict(job, other):
-            return f"Après « {other.title} »"
-    return f"Limite de {MAX_RUNNING_JOBS} actions simultanées atteinte"
-
-
-def schedule_jobs():
-    """Démarre, dans l'ordre d'arrivée, les actions en attente qui ne croisent aucune action active."""
-    to_start = []
-    with JOBS_LOCK:
-        active = [job for job in JOBS.values() if job.status in JOB_ACTIVE_STATUSES]
-        waiting = []
-        for job in JOBS.values():
-            if job.status != "queued":
-                continue
-            # Une action arrivée plus tôt et encore bloquée garde la priorité sur son projet.
-            if len(active) >= MAX_RUNNING_JOBS or any(jobs_conflict(job, other) for other in (*active, *waiting)):
-                waiting.append(job)
-                continue
-            job.status = "running"
-            job.started_at = time.strftime("%Y-%m-%d %H:%M:%S")
-            job.thread = threading.Thread(target=job.run, daemon=True)
-            active.append(job)
-            to_start.append(job)
-    for job in to_start:
-        job.thread.start()
-    if to_start:
-        notify_jobs_changed()
-        persist_job_history()
-
-
-def cancel_job(job_id):
-    """Arrête une action en cours ou la retire de la file d'attente."""
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
-        if job is None:
-            raise ValueError("Action introuvable.")
-        status = job.status
-        if status in {"done", "error", "cancelled"}:
-            raise ValueError("Cette action est déjà terminée.")
-        if status == "running" and not job.cancellable:
-            raise ValueError(f"« {job.title} » ne peut pas être arrêtée : {job.cancel_hint}")
-        if status == "queued":
-            job.status = "cancelled"
-            job.finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
-            job.error_message = "Retirée de la file d'attente avant son démarrage."
-            job.target = None
-            job.args = ()
-    if status == "queued":
-        job.add(job.error_message)
-        job.publish_completion()
-        persist_job_history()
-        schedule_jobs()
-        return job
-    if status == "cancelling":
-        return job
-
-    outcome = job.control.request_cancel()
-    if outcome == "refused":
-        raise ValueError(
-            f"« {job.title} » ne peut plus être arrêtée : étape irréversible en cours ({job.control.irreversible_step})."
-        )
-    with JOBS_LOCK:
-        if job.status == "running":
-            job.status = "cancelling"
-    notify_jobs_changed()
-    if outcome == "deferred":
-        job.add(f"Arrêt demandé : il sera effectif à la fin de l'étape en cours ({job.control.protected_step}).")
-    elif outcome == "accepted":
-        job.add("Arrêt demandé : interruption de l'action...")
-    return job
-
-
-# Étapes de `git clone --progress`, dans l'ordre où Git les parcourt. Chacune repart de 0 :
-# la barre affiche l'étape en cours plutôt qu'un total inventé sur l'ensemble.
-GIT_PROGRESS_PHASES = {
-    "Counting objects": "Recensement des objets",
-    "Enumerating objects": "Recensement des objets",
-    "Compressing objects": "Compression des objets",
-    "Receiving objects": "Réception des objets",
-    "Resolving deltas": "Application des différences",
-    "Updating files": "Écriture des fichiers",
-    "Filtering content": "Récupération des fichiers volumineux",
-}
-GIT_PROGRESS_RE = re.compile(
-    r"^(?P<phase>[A-Za-z][A-Za-z ]+):\s+(?P<percent>\d{1,3})%\s*(?:\((?P<current>\d+)/(?P<total>\d+)\))?"
-)
-COUNTED_PROGRESS_RE = re.compile(r"^(?P<label>[^:]{3,60}):\s+(?P<current>\d+)/(?P<total>\d+)\s*$")
-
-
-def parse_output_progress(text):
-    """Avancement chiffré lu dans une ligne de sortie, ou None.
-
-    Les étapes les plus longues sont des commandes externes : leur seule mesure d'avancement
-    est ce qu'elles écrivent. `transient` marque une ligne que la commande réécrit en place,
-    des centaines de fois : elle nourrit la barre, pas l'historique.
-
-    Cette lecture ne fait que compléter `set_progress`, que les actions appellent déjà
-    directement quand elles connaissent leur propre avancement.
-    """
-    line = text.strip()
-    # Le serveur Git préfixe ses propres étapes, réécrites elles aussi en place.
-    if line.startswith("remote: "):
-        line = line[len("remote: ") :]
-    match = GIT_PROGRESS_RE.match(line)
-    if match:
-        label = GIT_PROGRESS_PHASES.get(match.group("phase"))
-        if label is None:
-            return None
-        if match.group("total") and int(match.group("total")):
-            current, total = int(match.group("current")), int(match.group("total"))
-        else:
-            current, total = min(int(match.group("percent")), 100), 100
-        return {"label": label, "current": current, "total": total, "transient": not line.endswith("done.")}
-    match = COUNTED_PROGRESS_RE.match(line)
-    if match and int(match.group("total")):
-        return {
-            "label": match.group("label").strip(),
-            "current": int(match.group("current")),
-            "total": int(match.group("total")),
-            # Une ligne écrite par le gestionnaire lui-même : elle reste dans l'historique.
-            "transient": False,
-        }
-    return None
-
-
-def job_failure_message(failure):
-    """Message d'échec d'une tâche, avec l'origine : Odoo ou le gestionnaire."""
-    message = str(failure).strip() or "Une erreur inattendue est survenue."
-    if isinstance(failure, OdooError):
-        return f"Erreur d'Odoo (code des modules ou données de la base, pas le gestionnaire) : {message}"
-    return f"Erreur du gestionnaire : {message}"
-
-
-class Job:
-    def __init__(self, title, target, args=(), project=None, resources=None):
-        global NEXT_JOB_ID
-        self.title = title
-        self.project = project
-        self.status = "queued"
-        self.started_at = time.strftime("%Y-%m-%d %H:%M:%S")
-        self.finished_at = None
-        self.error_message = ""
-        self.lines = []
-        self.output = ""
-        # Nombre cumulé de caractères écrits : permet à l'interface de ne demander que la suite.
-        self.output_total = 0
-        self.result = {}
-        self.progress = None
-        self.target = target
-        self.args = args
-        self.thread = None
-        self.control = job_control.JobControl()
-        self.cancellable, self.cancel_hint = JOB_CANCEL_POLICIES.get(
-            getattr(target, "__name__", ""), DEFAULT_JOB_CANCEL_POLICY
-        )
-        if resources is None:
-            resources = {f"project:{project}"} if project else ()
-        self.resources = frozenset(resources)
-        with JOBS_LOCK:
-            finished_ids = [job_id for job_id, job in JOBS.items() if job.status not in JOB_UNFINISHED_STATUSES]
-            excess = max(0, len(JOBS) - MAX_RETAINED_JOBS + 1)
-            for job_id in finished_ids[:excess]:
-                JOBS.pop(job_id, None)
-            self.id = NEXT_JOB_ID
-            NEXT_JOB_ID += 1
-            JOBS[self.id] = self
-        notify_jobs_changed()
-        schedule_jobs()
-
-    @classmethod
-    def from_history(cls, record):
-        """Action terminée relue depuis l'historique ; une action alors en cours est marquée interrompue."""
-        job = cls.__new__(cls)
-        job.id = int(record["id"])
-        job.title = str(record.get("title") or "Action")
-        job.project = record.get("project") or None
-        job.status = str(record.get("status") or "error")
-        job.started_at = str(record.get("started_at") or "")
-        job.finished_at = record.get("finished_at") or None
-        job.error_message = str(record.get("error_message") or "")
-        job.output = str(record.get("output") or "")
-        job.output_total = len(job.output)
-        job.lines = job.output.splitlines()[-JOB_LINES_LIMIT:]
-        job.result = record.get("result") if isinstance(record.get("result"), dict) else {}
-        job.progress = None
-        job.target = None
-        job.args = ()
-        job.thread = None
-        job.control = job_control.JobControl()
-        job.cancellable, job.cancel_hint = False, ""
-        job.resources = frozenset()
-        if job.status in JOB_UNFINISHED_STATUSES:
-            job.status = "error"
-            job.finished_at = job.finished_at or job.started_at
-            job.error_message = JOB_INTERRUPTED_MESSAGE
-            job.lines.append(JOB_INTERRUPTED_MESSAGE)
-            job._append_output(JOB_INTERRUPTED_MESSAGE + "\n")
-        return job
-
-    def history_record(self):
-        """Ce que l'historique garde de l'action ; appelé sous JOBS_LOCK."""
-        return {
-            "id": self.id,
-            "title": self.title,
-            "project": self.project,
-            "status": self.status,
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-            "error_message": self.error_message,
-            "result": dict(self.result),
-            "output": self.output[-JOB_HISTORY_OUTPUT_LIMIT:],
-        }
-
-    def add(self, line):
-        text = line.rstrip("\n")
-        progress = parse_output_progress(text)
-        if progress is not None:
-            self.set_progress(progress["label"], progress["current"], progress["total"])
-        # Seules les lignes réécrites en place par la commande sont retenues hors de
-        # l'historique ; tout ce que le gestionnaire écrit lui-même y reste.
-        if progress is None or not progress["transient"]:
-            with JOBS_LOCK:
-                self.lines.append(text)
-                self._append_output(text + "\n")
-        notify_jobs_changed()
-        # Chaque ligne écrite par l'action est un point d'arrêt : les longues sorties Odoo s'interrompent vite.
-        if job_control.current_control() is self.control:
-            self.control.checkpoint()
-
-    def _trim_lines(self):
-        # Troncature amortie : recopier 700 lignes et 120 Ko à chaque ligne coûtait
-        # cher pendant les longues sorties Odoo, verrou global tenu.
-        if len(self.lines) > JOB_LINES_LIMIT * 2:
-            del self.lines[:-JOB_LINES_LIMIT]
-
-    def _append_output(self, text):
-        self.output += text
-        self.output_total += len(text)
-        if len(self.output) > JOB_OUTPUT_LIMIT * 2:
-            self.output = self.output[-JOB_OUTPUT_LIMIT:]
-        self._trim_lines()
-
-    def set_progress(self, label, current=None, total=None):
-        with JOBS_LOCK:
-            self.progress = {
-                "label": str(label),
-                "current": current,
-                "total": total,
-            }
-        notify_jobs_changed()
-
-    def run(self):
-        failure = None
-        failure_trace = ""
-        try:
-            with job_control.bind_control(self.control):
-                try:
-                    self.target(self, *self.args)
-                except BaseException as exc:
-                    failure, failure_trace = exc, traceback.format_exc()
-                cancelled = self.control.cancel_requested and (failure is not None or self.control.cleaning_up)
-                if cancelled:
-                    self.finish_cancelled(failure)
-            if not cancelled and failure is None:
-                with JOBS_LOCK:
-                    if self.status in JOB_ACTIVE_STATUSES:
-                        self.status = "done"
-                if self.control.cancel_requested:
-                    self.add("Arrêt demandé après la fin de l'action : rien n'a été annulé.")
-            elif not cancelled:
-                self.error_message = job_failure_message(failure)
-                self.add(f"Erreur: {self.error_message}")
-                with JOBS_LOCK:
-                    self.status = "error"
-                record_manager_error(
-                    f"Job #{self.id} · {self.title}",
-                    failure,
-                    details=failure_trace,
-                    project=self.project or "",
-                )
-        finally:
-            dependents = []
-            with JOBS_LOCK:
-                self.finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
-                self.args = ()
-                self.target = None
-                self.thread = None
-                if self.status in {"error", "cancelled"}:
-                    outcome = "a été arrêtée" if self.status == "cancelled" else "a échoué"
-                    for other in JOBS.values():
-                        if other.status == "queued" and jobs_conflict(self, other):
-                            other.status = "cancelled"
-                            other.finished_at = self.finished_at
-                            other.error_message = f"Annulée : l'action précédente « {self.title} » {outcome}."
-                            other.target = None
-                            other.args = ()
-                            dependents.append(other)
-            for other in dependents:
-                other.add(other.error_message)
-                other.publish_completion()
-            invalidate_overview_databases()
-            EVENT_DOCKER_REFRESH.set()
-            self.publish_completion()
-            notify_jobs_changed()
-            persist_job_history()
-            schedule_jobs()
-
-    def finish_cancelled(self, failure):
-        self.control.begin_cleanup()
-        if failure is not None and not isinstance(failure, job_control.JobCancelled):
-            self.add(f"Interruption : {failure}")
-        failures = self.control.run_reverts(self.add)
-        message = "Action arrêtée par l'utilisateur."
-        if failures:
-            message += " Retour arrière incomplet : " + " ; ".join(failures)
-            record_manager_error(f"Job #{self.id} · {self.title}", message, project=self.project or "")
-        self.error_message = message
-        self.add(message)
-        with JOBS_LOCK:
-            self.status = "cancelled"
-
-    def publish_completion(self):
-        publish_event(
-            "job_completed",
-            {
-                "id": self.id,
-                "status": self.status,
-                "project": self.project,
-                "finished_at": self.finished_at,
-                "result": self.result,
-            },
-        )
 
 
 def terminate_active_subprocesses(wait_seconds=0.5):
@@ -3545,77 +3185,6 @@ def send_form_no_redirect(connection, target, host_header, body):
         connection.close()
 
 
-def extract_odoo_page_error(content):
-    if not content:
-        return ""
-    pattern = r'<div\b[^>]*class=["\'][^"\']*\balert-danger\b[^"\']*["\'][^>]*>(.*?)</div>'
-    for match in re.finditer(pattern, content, flags=re.IGNORECASE | re.DOTALL):
-        message = re.sub(r"<[^>]+>", " ", match.group(1))
-        message = re.sub(r"\s+", " ", html.unescape(message)).strip()
-        if message:
-            return message
-    return ""
-
-
-def validate_odoo_backup_archive(backup_path):
-    backup_path = Path(backup_path)
-    if not zipfile.is_zipfile(backup_path):
-        raise ValueError("La sauvegarde n'est pas une archive ZIP Odoo valide.")
-
-    try:
-        with zipfile.ZipFile(backup_path) as archive:
-            entries = archive.infolist()
-            if len(entries) > MAX_DATABASE_BACKUP_ENTRIES:
-                raise ValueError("La sauvegarde contient trop de fichiers.")
-            names = {entry.filename.replace("\\", "/") for entry in entries}
-            if "dump.sql" not in names:
-                raise ValueError("Archive Odoo invalide: le fichier dump.sql est absent.")
-            for entry in entries:
-                normalized = entry.filename.replace("\\", "/")
-                if normalized != "dump.sql" and not normalized.startswith("filestore/"):
-                    continue
-                parts = [part for part in normalized.split("/") if part]
-                if normalized.startswith("/") or ".." in parts:
-                    raise ValueError("Archive Odoo invalide: chemin de fichier dangereux.")
-                if entry.flag_bits & 0x1:
-                    raise ValueError("Les sauvegardes ZIP chiffrées ne sont pas prises en charge.")
-            return {
-                "entries": len(entries),
-                "has_filestore": any(name.startswith("filestore/") for name in names),
-                "has_manifest": "manifest.json" in names,
-                "odoo_version": backup_odoo_version(archive) if "manifest.json" in names else "",
-            }
-    except zipfile.BadZipFile as exc:
-        raise ValueError("La sauvegarde ZIP est illisible ou endommagée.") from exc
-
-
-def backup_odoo_version(archive):
-    """Version majeure d'Odoo qui a produit la sauvegarde (« 15.0 »), lue dans manifest.json."""
-    try:
-        manifest = json.loads(archive.read("manifest.json").decode("utf-8", errors="replace"))
-    except (KeyError, ValueError, OSError, zipfile.BadZipFile):
-        return ""
-    if not isinstance(manifest, dict):
-        return ""
-    for key in ("major_version", "version"):
-        match = re.match(r"(?:saas~)?(\d+)\.(\d+)", str(manifest.get(key) or ""))
-        if match:
-            return f"{match.group(1)}.{match.group(2)}"
-    # Certains outils d'export laissent version et major_version vides : les versions des
-    # modules installés (« 15.0.1.5 ») portent alors la série, base en tête.
-    modules = manifest.get("modules")
-    if not isinstance(modules, dict):
-        return ""
-    series = collections.Counter()
-    for name, module_version in modules.items():
-        match = re.match(r"(\d+)\.(\d+)\.\d+", str(module_version or ""))
-        if match:
-            if name == "base":
-                return f"{match.group(1)}.{match.group(2)}"
-            series[f"{match.group(1)}.{match.group(2)}"] += 1
-    return series.most_common(1)[0][0] if series else ""
-
-
 def ensure_backup_matches_project_version(project, details):
     """Refuse avant l'envoi une sauvegarde d'une autre version d'Odoo que celle du projet.
 
@@ -3631,23 +3200,6 @@ def ensure_backup_matches_project_version(project, details):
             f"{project_version}. Odoo ne restaure que les bases de sa propre version : restaure-la dans "
             f"un projet Odoo {backup_version}, ou migre la base avant de la restaurer ici."
         )
-
-
-def save_request_body_to_file(stream, content_length, destination, chunk_size=1024 * 1024):
-    destination = Path(destination)
-    remaining = int(content_length)
-    with destination.open("wb") as output:
-        while remaining:
-            chunk = stream.read(min(chunk_size, remaining))
-            if not chunk:
-                raise ValueError("Le téléversement de la sauvegarde a été interrompu.")
-            output.write(chunk)
-            remaining -= len(chunk)
-    return destination
-
-
-def multipart_field(boundary, name, value):
-    return (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n').encode()
 
 
 def post_odoo_database_restore(job, url, backup_path, filename, db_name, master_pwd, copy, neutralize):
@@ -3705,20 +3257,6 @@ def post_odoo_database_restore(job, url, backup_path, filename, db_name, master_
             raise RuntimeError(f"La restauration n'a pas pu être transmise à Odoo: {exc}") from exc
         finally:
             connection.close()
-
-
-def odoo_restore_error(content):
-    if "Database restore error:" not in content:
-        return ""
-    # Le message est dans l'alerte de la page : sans ce ciblage, la suite du gestionnaire de
-    # bases d'Odoo (boutons, liste de langues…) était recopiée dans l'erreur.
-    alert = extract_odoo_page_error(content)
-    if "Database restore error:" in alert:
-        return alert[alert.find("Database restore error:") :][:800]
-    plain = html.unescape(re.sub(r"<[^>]+>", " ", content))
-    plain = re.sub(r"\s+", " ", plain).strip()
-    marker = "Database restore error:"
-    return plain[plain.find(marker) : plain.find(marker) + 800]
 
 
 def restore_database_job(job, project, backup_path, filename, db_name, master_pwd, copy=True, neutralize=True):
@@ -4572,60 +4110,6 @@ def convert_wsl_addon_links_job(job, project):
     job.add("La liste des modules est désormais lue directement par Windows, sans WSL.")
 
 
-def read_manifest_dict(path):
-    # Odoo lit lui-même le manifeste avec ast.literal_eval : même règle ici.
-    for filename in ("__manifest__.py", "__openerp__.py"):
-        try:
-            text = (Path(path) / filename).read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        return parse_manifest_text(text)
-    return {}
-
-
-def parse_manifest_text(text):
-    try:
-        manifest = ast.literal_eval(text)
-    except (ValueError, SyntaxError, MemoryError, RecursionError):
-        return {}
-    return manifest if isinstance(manifest, dict) else {}
-
-
-def manifest_graph_entry(manifest):
-    depends = sorted({name for name in manifest.get("depends") or () if isinstance(name, str)})
-    auto_install = manifest.get("auto_install", False)
-    if isinstance(auto_install, (list, tuple, set)):
-        # Odoo 16+ : seules ces dépendances déclenchent l'installation automatique.
-        triggers = sorted({name for name in auto_install if isinstance(name, str)})
-        auto_install = True
-    else:
-        triggers = depends
-        auto_install = bool(auto_install)
-    return {
-        "title": str(manifest.get("name") or ""),
-        "depends": depends,
-        "auto_install": auto_install,
-        "auto_install_triggers": triggers,
-        "installable": bool(manifest.get("installable", True)),
-        "application": bool(manifest.get("application", False)),
-        # L'installation auto dépend alors du pays des sociétés : non prévisible ici.
-        "country_restricted": bool(manifest.get("countries")),
-    }
-
-
-def module_graph_from_paths(paths):
-    graph = {}
-    for path in paths:
-        name = posixpath.basename(str(path).replace("\\", "/"))
-        if name not in graph:
-            graph[name] = manifest_graph_entry(read_manifest_dict(path))
-    return graph
-
-
-# Marqueur textuel : un séparateur de contrôle comme \x1e est retiré par str.strip().
-MANIFEST_RECORD_MARKER = "@@odoo-manager-manifest@@ "
-
-
 def wsl_module_graph(project):
     """Lit tous les manifestes depuis WSL en une commande.
 
@@ -4662,14 +4146,7 @@ def wsl_module_graph(project):
     if code != 0:
         detail = "délai dépassé" if code == 124 else (output.strip()[:300] or f"code {code}")
         raise RuntimeError(f"Impossible de lire les manifestes des modules depuis WSL : {detail}")
-    graph = {}
-    for record in ("\n" + output).split("\n" + MANIFEST_RECORD_MARKER)[1:]:
-        name, _, text = record.partition("\n")
-        name = name.strip()
-        if not SAFE_MODULE_RE.fullmatch(name) or name in graph:
-            continue
-        graph[name] = manifest_graph_entry(parse_manifest_text(text))
-    return graph
+    return module_graph_from_records(output, SAFE_MODULE_RE)
 
 
 def project_module_graph(project):
@@ -4693,75 +4170,6 @@ def module_dependency_graph(project):
     with MODULE_CACHE_LOCK:
         MODULE_GRAPH_CACHE[project] = {"created_at": now, "graph": graph}
     return graph
-
-
-def module_install_plan(graph, states, requested):
-    """Reproduit la résolution d'Odoo pour `-i` : dépendances récursives puis
-    modules auto_install dont un déclencheur passe à l'état « to install »."""
-    installed = {name for name, info in states.items() if info.get("state") in INSTALLED_MODULE_STATES}
-    installed.add("base")
-    requested = list(dict.fromkeys(requested))
-    to_install = {}
-    missing = {}
-    uninstallable = {}
-    auto_installed = set()
-
-    def add(name, required_by):
-        stack = [(name, required_by)]
-        while stack:
-            current, parent = stack.pop()
-            if current in installed or current in to_install:
-                continue
-            entry = graph.get(current)
-            if entry is None:
-                missing.setdefault(current, parent)
-                continue
-            if not entry["installable"]:
-                uninstallable.setdefault(current, parent)
-                continue
-            to_install[current] = parent
-            stack.extend((dependency, current) for dependency in entry["depends"])
-
-    for name in requested:
-        add(name, "")
-
-    candidates = sorted(
-        name
-        for name, entry in graph.items()
-        if entry["auto_install"]
-        and entry["installable"]
-        and entry["auto_install_triggers"]
-        and not entry["country_restricted"]
-    )
-    changed = True
-    while changed:
-        changed = False
-        for name in candidates:
-            if name in installed or name in to_install:
-                continue
-            triggers = graph[name]["auto_install_triggers"]
-            satisfied = all(trigger in installed or trigger in to_install for trigger in triggers)
-            if satisfied and any(trigger in to_install for trigger in triggers):
-                auto_installed.add(name)
-                add(name, "")
-                changed = True
-
-    requested_set = set(requested)
-    new_modules = [name for name in to_install if name not in requested_set]
-
-    def described(names):
-        return [{"name": name, "title": graph.get(name, {}).get("title") or name} for name in sorted(names)]
-
-    return {
-        "requested": [name for name in requested if name in to_install],
-        "already_installed": [name for name in requested if name in installed],
-        "dependencies": described(name for name in new_modules if name not in auto_installed),
-        "auto_installed": described(name for name in new_modules if name in auto_installed),
-        "applications": described(name for name in new_modules if graph[name]["application"]),
-        "missing": [{"name": name, "required_by": parent} for name, parent in sorted(missing.items())],
-        "uninstallable": [{"name": name, "required_by": parent} for name, parent in sorted(uninstallable.items())],
-        "total": len(to_install),
-    }
 
 
 def socle_preset_modules(preset_ids):
@@ -4914,13 +4322,6 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
             raise
 
 
-# Erreurs Odoo typiques d'une base qui référence le code d'un module absent du projet.
-MISSING_CODE_ERROR_RE = re.compile(
-    r"n'existe pas|does not exist|non-existing model|External ID not found|No module named|KeyError",
-    re.IGNORECASE,
-)
-
-
 def missing_code_failure_hint(project, db_name, message):
     """Désigne les modules installés sans code quand l'échec Odoo porte sur un champ ou modèle absent."""
     if not MISSING_CODE_ERROR_RE.search(message):
@@ -4943,64 +4344,9 @@ def missing_code_failure_hint(project, db_name, message):
     )
 
 
-# Un module Python manquant se voit de deux façons : Odoo le détecte lui-même via
-# external_dependencies (quand le manifeste le déclare) et le dit en clair, ou il n'est
-# déclaré nulle part et casse au premier import réel, en français ou en anglais selon
-# le point d'échec — les deux formes portent le nom d'import, pas forcément le nom pip.
-MISSING_PYTHON_IMPORT_RE = re.compile(
-    r"d[ée]pendance externe non trouv[ée]e\s*:\s*(?P<name1>[\w.\-]+)"
-    r"|external dependenc\w* (?:is |are )?not (?:met|found)\s*:\s*(?P<name2>[\w.\-]+)"
-    r"|(?:ModuleNotFoundError|ImportError)\s*:\s*No module named ['\"]?(?P<name3>[\w.]+)",
-    re.IGNORECASE,
-)
-
-# Cas connus où le nom importé diverge du nom du paquet PyPI qui le fournit.
-PIP_PACKAGE_ALIASES = {
-    "pil": "Pillow",
-    "cv2": "opencv-python",
-    "yaml": "PyYAML",
-    "crypto": "pycryptodome",
-    "usb": "pyusb",
-    "serial": "pyserial",
-    "bs4": "beautifulsoup4",
-    "dateutil": "python-dateutil",
-    "openssl": "pyOpenSSL",
-}
-
 # Filet de sécurité contre une boucle infinie si l'erreur est mal interprétée en rafale : chaque
 # réessai refait tourner la commande Odoo en entier, le plafond doit donc rester bas.
 MAX_AUTO_DEPENDENCY_FIXES = 3
-
-# Extension PostgreSQL (ex. pgvector pour l'IA) que le rôle applicatif odoo n'a pas le droit de
-# créer lui-même : message brut de psycopg2/PostgreSQL, jamais localisé.
-MISSING_POSTGRES_EXTENSION_RE = re.compile(r'permission denied to create extension "(?P<extension>[\w-]+)"')
-
-
-def missing_python_import(message):
-    """Nom d'import Python manquant, déduit d'une erreur Odoo ou d'un traceback brut."""
-    match = MISSING_PYTHON_IMPORT_RE.search(message)
-    if not match:
-        return ""
-    name = match.group("name1") or match.group("name2") or match.group("name3")
-    return name.split(".")[0]
-
-
-def python_package_for_import(import_name):
-    """Nom du paquet PyPI à installer pour satisfaire cet import (identique la plupart du temps)."""
-    return PIP_PACKAGE_ALIASES.get(import_name.lower(), import_name)
-
-
-def external_dependency_failure_hint(message):
-    """Affiché quand l'installation automatique du paquet manquant a elle-même échoué."""
-    import_name = missing_python_import(message)
-    if not import_name:
-        return ""
-    package = python_package_for_import(import_name)
-    return (
-        f"Cause probable : le paquet Python « {package} » (dépendance externe du module) n'a pas pu être "
-        "installé automatiquement dans le conteneur Odoo de ce projet (réseau, nom de paquet PyPI différent…). "
-        "Ajoute-le manuellement à init/requirements_pip.txt à la racine du projet, puis relance."
-    )
 
 
 def update_imported_modules_job(job, project, db_name, modules):
@@ -5180,39 +4526,6 @@ def validate_module_repository(url, branch, modules, commit=""):
     return url, branch, names, commit
 
 
-REPOSITORY_SKIPPED_DIRS = frozenset({".git", "__pycache__", "node_modules"})
-MANIFEST_FILENAMES = ("__manifest__.py", "__openerp__.py")
-
-
-def repository_modules_from_tree(tree_output, repository_name):
-    """Modules d'un `git ls-tree -r` selon la règle de find_module_candidates.
-
-    Un manifeste à la racine fait du dépôt un module unique ; sinon chaque dossier portant
-    un manifeste est un module, sans descendre dans ses sous-dossiers.
-    """
-    manifest_dirs = set()
-    has_symlinks = False
-    for line in str(tree_output or "").splitlines():
-        meta, _, path = line.partition("\t")
-        if not path:
-            continue
-        if meta.split(" ", 1)[0] == "120000":
-            has_symlinks = True
-        if posixpath.basename(path) in MANIFEST_FILENAMES:
-            manifest_dirs.add(posixpath.dirname(path))
-    modules = {}
-    for directory in sorted(manifest_dirs, key=lambda item: (item.count("/") if item else -1, item)):
-        parts = directory.split("/") if directory else []
-        if any(part in REPOSITORY_SKIPPED_DIRS for part in parts):
-            continue
-        if "" in modules:
-            break
-        if any("/".join(parts[:index]) in modules for index in range(1, len(parts))):
-            continue
-        modules[directory] = parts[-1] if parts else repository_name
-    return modules, has_symlinks
-
-
 def module_provided_by_project(project, name):
     """Module standard, Enterprise ou ancien stockage portant ce nom, sans scanner le projet.
 
@@ -5235,38 +4548,6 @@ def module_provided_by_project(project, name):
                 # Lien créé par WSL illisible depuis Windows : on le considère présent par prudence.
                 return True
     return False
-
-
-REPOSITORY_GIT_OPTIONS = (
-    "-c",
-    "core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
-    "-c",
-    "protocol.allow=never",
-    "-c",
-    "protocol.ssh.allow=always",
-)
-REPOSITORY_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
-MAX_MANIFEST_BYTES = 512 * 1024
-ODOO_SERIES_VERSION_RE = re.compile(r"^(\d+\.\d+)\.\d+\.\d+\.\d+$")
-
-
-def manifest_version_key(version):
-    parts = re.findall(r"\d+", str(version or ""))
-    return tuple(int(part) for part in parts) if parts else None
-
-
-def read_repository_manifest(module_path):
-    for filename in MANIFEST_FILENAMES:
-        manifest = Path(module_path) / filename
-        try:
-            if manifest.is_symlink() or not manifest.is_file():
-                continue
-            if manifest.stat().st_size > MAX_MANIFEST_BYTES:
-                return {}
-            return parse_manifest_text(manifest.read_text(encoding="utf-8", errors="replace"))
-        except OSError:
-            return {}
-    return {}
 
 
 def repository_module_plans(project, modules, states, odoo_version):
@@ -5433,60 +4714,6 @@ def inspect_repository_modules(project, url, branch, db_name=""):
     }
 
 
-def sparse_checkout_pattern(path):
-    """Motif sparse-checkout ne désignant que ce chemin exact, caractères spéciaux échappés."""
-    escaped = "".join("\\" + char if char in "*?[\\" else char for char in path)
-    return "/" + escaped + "\n"
-
-
-def repository_tree_modules(tree_output, repository_name):
-    """Liste (chemin, nom, manifeste) et les liens symboliques d'un `git ls-tree -r`."""
-    found, has_symlinks = repository_modules_from_tree(tree_output, repository_name)
-    manifest_files = {}
-    symlinks = []
-    for line in str(tree_output or "").splitlines():
-        meta, _, path = line.partition("\t")
-        if not path:
-            continue
-        if meta.split(" ", 1)[0] == "120000":
-            symlinks.append(path)
-        directory, filename = posixpath.dirname(path), posixpath.basename(path)
-        if filename in MANIFEST_FILENAMES and directory in found:
-            manifest_files.setdefault(directory, filename)
-    return [(path, name, manifest_files.get(path, MANIFEST_FILENAMES[0])) for path, name in found.items()], symlinks
-
-
-def repository_clone_error(stderr):
-    details = str(stderr or "").casefold()
-    if any(
-        marker in details for marker in ("permission denied (publickey)", "no such identity", "sign_and_send_pubkey")
-    ):
-        return RuntimeError(
-            "GitLab refuse la clé SSH de cet ordinateur. Ouvre l’assistant Clé SSH du manager, "
-            "puis vérifie que sa clé publique est autorisée dans GitLab."
-        )
-    if "host key verification failed" in details:
-        return RuntimeError("L’identité du serveur GitLab n’a pas pu être vérifiée par SSH.")
-    if any(
-        marker in details
-        for marker in (
-            "remote branch",
-            "couldn't find remote ref",
-            "could not find remote branch",
-            "not found in upstream origin",
-        )
-    ):
-        return RuntimeError("La branche ou le tag demandé est introuvable dans ce dépôt.")
-    if any(
-        marker in details
-        for marker in ("could not resolve hostname", "failed to connect", "connection timed out", "connection refused")
-    ):
-        return RuntimeError("GitLab est inaccessible depuis cet ordinateur. Vérifie le réseau et le DNS.")
-    return RuntimeError(
-        "Récupération Git impossible. Vérifie l’URL SSH, la branche et l’autorisation de la clé dans GitLab."
-    )
-
-
 def repository_modules_job(job, project, url, branch, names, commit=""):
     """Import des modules choisis : ajout ou remplacement décidé par module, tout ou rien."""
     project = validate_project(project)
@@ -5594,46 +4821,6 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
         job.result = {"kind": "repository_modules", "modules": names, "added": added, "updated": updated}
 
 
-def safe_import_name(filename):
-    stem = Path(filename or "modules").stem or "modules"
-    return SAFE_IMPORT_NAME_RE.sub("_", stem).strip("._") or "modules"
-
-
-def safe_extract_zip(zip_path, destination):
-    destination.mkdir(parents=True, exist_ok=True)
-    base = destination.resolve()
-    skipped_links = []
-    with zipfile.ZipFile(zip_path) as archive:
-        infos = archive.infolist()
-        if len(infos) > MAX_ZIP_ENTRIES:
-            raise RuntimeError(f"ZIP trop volumineux: plus de {MAX_ZIP_ENTRIES} entrées.")
-        if sum(info.file_size for info in infos) > MAX_ZIP_UNCOMPRESSED_BYTES:
-            raise RuntimeError("ZIP trop volumineux après décompression. Limite: 2 Go.")
-        for info in infos:
-            name = info.filename
-            if not name or name.startswith(("/", "\\")):
-                raise RuntimeError(f"Chemin ZIP invalide: {name}")
-            if "\\" in name or "\x00" in name or re.match(r"^[A-Za-z]:", name):
-                raise RuntimeError(f"Chemin ZIP invalide: {name}")
-            parts = Path(name).parts
-            if any(part == ".." for part in parts):
-                raise RuntimeError(f"Chemin ZIP dangereux: {name}")
-            mode = (info.external_attr >> 16) & 0o170000
-            if mode == stat.S_IFLNK:
-                skipped_links.append(name)
-                continue
-            if mode not in {0, stat.S_IFREG, stat.S_IFDIR}:
-                raise RuntimeError(f"Type de fichier ZIP non pris en charge: {name}")
-            target = (destination / name).resolve()
-            if base != target and base not in target.parents:
-                raise RuntimeError(f"Extraction hors dossier refusee: {name}")
-        for info in infos:
-            if info.filename in skipped_links:
-                continue
-            archive.extract(info, destination)
-    return skipped_links
-
-
 def extract_zip_module_candidates(project, filename, data):
     project = validate_project(project)
     if not filename.lower().endswith(".zip"):
@@ -5731,163 +4918,6 @@ def import_zip_modules_job(job, project, filename, data, replace_existing=False,
             job.add(f"Archive temporaire nettoyée: {import_dir}")
 
 
-def job_output_payload(job, compact, detail_job_id, output_from):
-    if compact and job.id != detail_job_id:
-        return {"lines": [], "output": ""}
-    output = job.output[-JOB_OUTPUT_LIMIT:]
-    window_start = job.output_total - len(output)
-    if compact and output_from and window_start <= output_from <= job.output_total:
-        # Suite seulement : l'interface possède déjà les caractères précédents.
-        return {
-            "lines": [],
-            "output": output[len(output) - (job.output_total - output_from) :],
-            "output_from": output_from,
-        }
-    payload = {"lines": job.lines[-JOB_LINES_LIMIT:], "output": output}
-    if compact:
-        payload["output_from"] = 0
-    return payload
-
-
-def jobs_snapshot(detail_job_id=None, compact=False, output_from=None):
-    with JOBS_LOCK:
-        values = list(JOBS.values())[-30:]
-        if compact and detail_job_id is None and values:
-            detail_job_id = values[-1].id
-        return [
-            {
-                "id": job.id,
-                "title": job.title,
-                "project": job.project,
-                "status": job.status,
-                "started_at": job.started_at,
-                "finished_at": job.finished_at,
-                "error_message": job.error_message,
-                "last_line": job.lines[-1] if job.lines else "",
-                "output_total": job.output_total,
-                **job_output_payload(job, compact, detail_job_id, output_from),
-                "result": dict(job.result),
-                "progress": dict(job.progress) if job.progress else None,
-                **job_cancel_payload(job),
-            }
-            for job in reversed(values)
-        ]
-
-
-def unfinished_job(target, project):
-    """Job déjà en file ou en cours pour cette action et ce projet, s'il existe."""
-    with JOBS_LOCK:
-        for job in JOBS.values():
-            if job.target is target and job.project == project and job.status in JOB_UNFINISHED_STATUSES:
-                return job
-    return None
-
-
-def job_creation_payload(job):
-    with JOBS_LOCK:
-        return {
-            "id": job.id,
-            "title": job.title,
-            "project": job.project,
-            "status": job.status,
-            "started_at": job.started_at,
-            "lines": job.lines[-JOB_LINES_LIMIT:],
-            **job_cancel_payload(job),
-        }
-
-
-def job_cancel_payload(job):
-    """Ce que l'interface peut proposer pour arrêter l'action ; appelé sous JOBS_LOCK."""
-    irreversible = job.control.irreversible_step if job.status == "running" else ""
-    return {
-        "cancellable": job.status == "queued" or (job.status == "running" and job.cancellable and not irreversible),
-        "cancel_hint": job.cancel_hint,
-        "cancel_blocked_step": irreversible,
-        "cancel_pending_step": job.control.protected_step if job.status == "cancelling" else "",
-        "waiting_for": job_waiting_reason(job) if job.status == "queued" else "",
-    }
-
-
-def clear_jobs_history():
-    with JOBS_LOCK:
-        running = {job_id: job for job_id, job in JOBS.items() if job.status in JOB_UNFINISHED_STATUSES}
-        JOBS.clear()
-        JOBS.update(running)
-    notify_jobs_changed()
-    persist_job_history()
-    return len(running)
-
-
-def delete_job_history(job_id):
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
-        if not job:
-            raise ValueError("Action introuvable.")
-        if job.status in JOB_UNFINISHED_STATUSES:
-            raise ValueError("Impossible de supprimer une action en cours ou en attente : arrête-la d'abord.")
-        del JOBS[job_id]
-    notify_jobs_changed()
-    persist_job_history()
-
-
-def persist_job_history():
-    """Réécrit l'historique : les actions survivent au redémarrage du gestionnaire, ou à son plantage."""
-    path = JOB_HISTORY_PATH
-    if path is None:
-        return
-    # L'état est relevé sous le verrou d'écriture : un relevé plus ancien ne peut pas écraser un plus récent.
-    with JOB_HISTORY_LOCK:
-        with JOBS_LOCK:
-            records = [job.history_record() for job in JOBS.values()]
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = path.with_suffix(".tmp")
-            temporary.write_text(json.dumps({"version": 1, "jobs": records}, ensure_ascii=False), encoding="utf-8")
-            os.replace(temporary, path)
-        except OSError:
-            traceback.print_exc()
-
-
-def load_job_history(path):
-    """Relit l'historique au démarrage et active son enregistrement ; un fichier illisible repart de zéro."""
-    global JOB_HISTORY_PATH, NEXT_JOB_ID
-    JOB_HISTORY_PATH = path
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        records = payload.get("jobs", []) if isinstance(payload, dict) else []
-    except FileNotFoundError:
-        return 0
-    except (OSError, ValueError):
-        traceback.print_exc()
-        return 0
-    restored = []
-    for record in records[-MAX_RETAINED_JOBS:]:
-        try:
-            restored.append(Job.from_history(record))
-        except (KeyError, TypeError, ValueError):
-            continue
-    with JOBS_LOCK:
-        for job in sorted(restored, key=lambda item: item.id):
-            JOBS.setdefault(job.id, job)
-        NEXT_JOB_ID = max([NEXT_JOB_ID, *(job_id + 1 for job_id in JOBS)])
-    # Les actions interrompues sont enregistrées comme telles, pas relues « en cours » au prochain démarrage.
-    persist_job_history()
-    return len(restored)
-
-
-def notify_jobs_changed():
-    JOBS_CHANGED.set()
-
-
-def jobs_event_loop():
-    """Prévient l'interface qu'une action a bougé ; elle relit alors /api/jobs, sortie incrémentale comprise."""
-    while True:
-        JOBS_CHANGED.wait()
-        JOBS_CHANGED.clear()
-        publish_event("jobs_changed", {})
-        time.sleep(JOBS_EVENT_MIN_INTERVAL_SECONDS)
-
-
 def compose_service_for(project, pattern="odoo"):
     path = WORKSPACE / project
     code, output = run_capture(docker_command(SETTINGS, "compose", "config", "--services"), cwd=path, timeout=8)
@@ -5898,18 +4928,6 @@ def compose_service_for(project, pattern="odoo"):
         if pattern in service.lower():
             return service
     return ""
-
-
-def publish_event(event_type, payload):
-    """Push a live update to every connected /api/stream subscriber."""
-    message = f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-    with EVENT_SUBSCRIBERS_LOCK:
-        subscribers = list(EVENT_SUBSCRIBERS)
-    for subscriber_queue in subscribers:
-        try:
-            subscriber_queue.put_nowait(message)
-        except queue.Full:
-            pass
 
 
 def event_watch_loop():
@@ -6178,134 +5196,34 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Max-Age", "600")
         self.end_headers()
 
-    def do_GET(self):
+    def dispatch(self, method):
+        """Sert la requête par la route qui correspond au chemin ; voir ROUTER en fin de module."""
         if self.reject_untrusted_request():
-            return
+            return None
         parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
-        try:
-            if path == "/":
-                return html_response(self, INDEX_HTML)
-            if path == "/favicon.ico":
-                # Demandé d'office par le navigateur sur la page de secours : ce n'est pas une erreur du service.
-                return empty_response(self)
-            if path == "/api/version":
-                return json_response(self, api_version_payload())
-            if path == "/api/capabilities":
-                return json_response(self, api_capabilities_payload())
-            if path == "/api/health":
-                return json_response(
-                    self,
-                    {
-                        "ok": True,
-                        "pid": os.getpid(),
-                        "instance_id": os.environ.get("ODOO_MANAGER_INSTANCE_ID", ""),
-                        "port": PORT,
-                        "log_file": str(RUNTIME_LOG_PATH),
-                    },
-                )
-            if path == "/api/bootstrap":
-                return json_response(self, bootstrap_snapshot())
-            if path == "/api/overview":
-                return json_response(self, overview())
-            if path == "/api/settings":
-                return json_response(self, {"settings": settings_snapshot()})
-            if path == "/api/errors":
-                return json_response(self, manager_errors_snapshot())
-            if path == "/api/system/status":
-                return json_response(self, system_status_snapshot())
-            if path == "/api/system/project-creation-prerequisites":
-                return json_response(self, project_creation_prerequisites())
-            if path == "/api/system/migration":
-                return json_response(self, migration_snapshot())
-            if path == "/api/system/ssh-keys":
-                return json_response(self, ssh_public_keys_snapshot())
-            if path == "/api/jobs":
-                params = urllib.parse.parse_qs(parsed.query)
-                detail_value = params.get("detail", [""])[0]
-                detail_job_id = int(detail_value) if detail_value.isdigit() else None
-                output_value = params.get("output_from", [""])[0]
-                output_from = int(output_value) if detail_job_id and output_value.isdigit() else None
-                return json_response(
-                    self,
-                    {"jobs": jobs_snapshot(detail_job_id=detail_job_id, compact=True, output_from=output_from)},
-                )
-            if path == "/api/stream":
-                return self.stream_events()
-
-            match = re.match(r"^/api/projects/([^/]+)/logs/stream$", path)
-            if match:
-                project = validate_project(urllib.parse.unquote(match.group(1)))
-                raw = truthy(urllib.parse.parse_qs(parsed.query).get("raw", [""])[0])
-                return self.stream_project_logs(project, raw=raw)
-
-            match = re.match(r"^/api/projects/([^/]+)/modules$", path)
-            if match:
-                project = validate_project(urllib.parse.unquote(match.group(1)))
-                params = urllib.parse.parse_qs(parsed.query)
-                db_name = params.get("db", [""])[0]
-                if db_name:
-                    validate_db(db_name)
-                return json_response(self, {"modules": modules_for(project, db_name)})
-
-            match = re.match(r"^/api/projects/([^/]+)/addon-links$", path)
-            if match:
-                project = urllib.parse.unquote(match.group(1))
-                return json_response(self, addon_links_snapshot(project))
-
-            match = re.match(r"^/api/projects/([^/]+)/languages$", path)
-            if match:
-                project = validate_project(urllib.parse.unquote(match.group(1)))
-                db_name = validate_odoo_db(urllib.parse.parse_qs(parsed.query).get("db", [""])[0])
-                return json_response(self, {"languages": installed_languages(project, db_name)})
-
-            match = re.match(r"^/api/projects/([^/]+)/socle$", path)
-            if match:
-                project = validate_project(urllib.parse.unquote(match.group(1)))
-                db_name = urllib.parse.parse_qs(parsed.query).get("db", [""])[0]
-                if db_name:
-                    validate_odoo_db(db_name)
-                return json_response(self, socle_catalog(project, db_name))
-
-            match = re.match(r"^/api/projects/([^/]+)/socle/plan$", path)
-            if match:
-                project = validate_project(urllib.parse.unquote(match.group(1)))
-                params = urllib.parse.parse_qs(parsed.query)
-                db_name = validate_odoo_db(params.get("db", [""])[0])
-                return json_response(self, socle_install_plan(project, db_name, params.get("presets", [""])[0]))
-
-            match = re.match(r"^/api/projects/([^/]+)/databases$", path)
-            if match:
-                project = validate_project(urllib.parse.unquote(match.group(1)))
-                return json_response(self, {"databases": list_databases_for(project)})
-
-            match = re.match(r"^/api/projects/([^/]+)/database-versions$", path)
-            if match:
-                project = validate_project(urllib.parse.unquote(match.group(1)))
-                databases = list_databases_for(project)
-                return json_response(self, {"versions": database_base_versions(project, databases)})
-
-            match = re.match(r"^/api/projects/([^/]+)/logs$", path)
-            if match:
-                project = validate_project(urllib.parse.unquote(match.group(1)))
-                raw = truthy(urllib.parse.parse_qs(parsed.query).get("raw", [""])[0])
-                return json_response(self, {"logs": tail_logs(project, raw=raw)})
-
-            match = re.match(r"^/api/projects/([^/]+)/diagnostics$", path)
-            if match:
-                project = validate_project(urllib.parse.unquote(match.group(1)))
-                return json_response(self, project_diagnostics(project))
-
+        route, params = ROUTER.resolve(method, parsed.path)
+        if route is None:
             return json_response(self, {"error": "Route introuvable."}, status=404)
+        request = RouteRequest(self, params, urllib.parse.parse_qs(parsed.query))
+        try:
+            result = route.view(request)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return None
-        except ProjectNotFoundError as exc:
-            return json_response(self, {"error": str(exc), "code": PROJECT_NOT_FOUND_CODE}, status=404)
-        except ValueError as exc:
-            return json_response(self, {"error": str(exc)}, status=400)
         except Exception as exc:
-            traceback.print_exc()
-            return json_response(self, {"error": str(exc)}, status=500)
+            return route.on_error(self, exc)
+        if result is None:
+            return None
+        payload, status = result if isinstance(result, tuple) else (result, 200)
+        return json_response(self, payload, status=status)
+
+    def do_GET(self):
+        return self.dispatch("GET")
+
+    def do_POST(self):
+        return self.dispatch("POST")
+
+    def do_DELETE(self):
+        return self.dispatch("DELETE")
 
     def write_sse(self, event_type, payload):
         message = f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -6413,552 +5331,687 @@ class Handler(BaseHTTPRequestHandler):
                     except OSError:
                         pass
 
-    def do_POST(self):
-        if self.reject_untrusted_request():
-            return
-        parsed = urllib.parse.urlparse(self.path)
-        if parsed.path == "/api/system/shutdown":
-            json_response(self, {"ok": True})
 
-            def shutdown_server():
-                terminate_active_subprocesses()
-                terminate_project_processes()
-                self.server.shutdown()
+# ---------------------------------------------------------------------------
+# Routes de l'API locale
+#
+# Une vue reçoit un RouteRequest et renvoie soit la charge JSON (réponse 200), soit
+# (charge, statut), soit None quand elle a déjà répondu elle-même (flux, page HTML).
+# Ses exceptions sont traduites par la politique d'erreur de sa route.
+# ---------------------------------------------------------------------------
 
-            threading.Thread(target=shutdown_server, daemon=True).start()
-            return
 
-        if parsed.path == "/api/errors/report":
-            try:
-                payload = self.read_json()
-                record_manager_error(
-                    "Interface",
-                    payload.get("message", ""),
-                    details=payload.get("details", ""),
-                    project=payload.get("project", ""),
-                )
-                return json_response(self, {"ok": True}, status=201)
-            except Exception as exc:
-                return json_response(self, {"error": str(exc)}, status=400)
+def read_route_errors(handler, exc):
+    """Lectures : projet disparu en 404 silencieux, entrée invalide en 400, le reste en 500."""
+    if isinstance(exc, ProjectNotFoundError):
+        return json_response(handler, {"error": str(exc), "code": PROJECT_NOT_FOUND_CODE}, status=404)
+    if isinstance(exc, ValueError):
+        return json_response(handler, {"error": str(exc)}, status=400)
+    traceback.print_exc()
+    return json_response(handler, {"error": str(exc)}, status=500)
 
-        if parsed.path == "/api/settings":
-            try:
-                payload = self.read_json()
-                with JOBS_LOCK:
-                    running = [job.title for job in JOBS.values() if job.status in JOB_UNFINISHED_STATUSES]
-                # Closing onboarding changes no path used by a running job; the
-                # first project creation sends it right after starting its job. Masquer le
-                # bandeau de migration se fait souvent pendant la copie qu'il a lancée.
-                # L'apparence de l'interface ne touche à aucun chemin : la bascule vers l'interface
-                # affinée depuis son bandeau doit fonctionner même pendant une action.
-                interface_only = set(payload) <= {
-                    "onboarding_completed",
-                    "create_workspace",
-                    "migration_banner_dismissed",
-                    "beta_interface_banner_dismissed",
-                    "interface_layout",
-                    "sticky_header",
-                }
-                if running and not interface_only:
-                    raise ValueError(
-                        "Traitement en cours : "
-                        + ", ".join(running)
-                        + ". Consulte le suivi des actions avant de modifier les paramètres."
-                    )
-                create_workspace = bool(payload.pop("create_workspace", False))
-                settings = SETTINGS_STORE.update(payload, create_workspace=create_workspace)
-                apply_settings(settings)
-                return json_response(self, {"settings": settings_snapshot()})
-            except Exception as exc:
-                return json_response(self, {"error": str(exc)}, status=400)
 
-        if parsed.path == "/api/system/docker/start":
-            result = start_docker(SETTINGS)
-            return json_response(self, result, status=200 if result.get("ok") else 400)
+def write_route_errors(handler, exc):
+    """Écritures : tout refus est une requête à corriger, en 400."""
+    return json_response(handler, {"error": str(exc)}, status=400)
 
-        if parsed.path == "/api/system/ssh-key/generate":
-            try:
-                payload = self.read_json()
-                return json_response(
-                    self,
-                    generate_ssh_key(payload.get("comment", ""), replace=truthy(payload.get("replace", False))),
-                    status=201,
-                )
-            except (ValueError, RuntimeError, OSError) as exc:
-                return json_response(self, {"error": str(exc)}, status=400)
 
-        postgresql_match = re.match(r"^/api/projects/([^/]+)/postgresql/open$", parsed.path)
-        if postgresql_match:
-            try:
-                project = validate_project(urllib.parse.unquote(postgresql_match.group(1)))
-                payload = self.read_json()
-                return json_response(self, open_postgresql_console(project, payload.get("db", "")))
-            except (ValueError, RuntimeError, OSError) as exc:
-                return json_response(self, {"error": str(exc)}, status=400)
+def cancel_route_errors(handler, exc):
+    """Arrêt d'une action : une action déjà terminée ou non arrêtable est un conflit d'état."""
+    return json_response(handler, {"error": str(exc)}, status=409 if isinstance(exc, ValueError) else 400)
 
-        restore_match = re.match(r"^/api/projects/([^/]+)/database-restore$", parsed.path)
-        if restore_match:
-            destination = None
-            try:
-                project = validate_project(urllib.parse.unquote(restore_match.group(1)))
-                content_length = int(self.headers.get("Content-Length", "0"))
-                if content_length <= 0:
-                    raise ValueError("Fichier de sauvegarde ZIP manquant.")
-                if content_length > MAX_DATABASE_BACKUP_BYTES:
-                    max_gb = MAX_DATABASE_BACKUP_BYTES / (1024 * 1024 * 1024)
-                    raise ValueError(f"Sauvegarde trop volumineuse. Limite configurée: {max_gb:.0f} Go.")
-                if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() not in {
-                    "application/zip",
-                    "application/octet-stream",
-                }:
-                    raise ValueError("Format de téléversement invalide. Sélectionne une sauvegarde ZIP Odoo.")
 
-                db_name = validate_new_db(urllib.parse.unquote(self.headers.get("X-Odoo-Database-Name", "")))
-                master_pwd = validate_required_text(
-                    urllib.parse.unquote(self.headers.get("X-Odoo-Master-Password", "odoo")),
-                    "Master password",
-                )
-                copy_database = truthy(self.headers.get("X-Odoo-Copy", "1"))
-                neutralize = truthy(self.headers.get("X-Odoo-Neutralize", "1"))
-                filename = urllib.parse.unquote(self.headers.get("X-File-Name", "backup.zip"))
-                filename = SAFE_IMPORT_NAME_RE.sub("_", Path(filename).name) or "backup.zip"
-                if not filename.lower().endswith(".zip"):
-                    raise ValueError("La sauvegarde doit être un fichier ZIP.")
+# --- Lectures ---------------------------------------------------------------
 
-                staging_root = database_restore_staging_root(project)
-                staging_root.mkdir(parents=True, exist_ok=True)
-                free_space = shutil.disk_usage(staging_root).free
-                if free_space < content_length + 512 * 1024 * 1024:
-                    raise ValueError("Espace disque insuffisant pour préparer la restauration.")
-                destination = staging_root / f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns()}_{filename}"
-                save_request_body_to_file(self.rfile, content_length, destination)
-                details = validate_odoo_backup_archive(destination)
-                ensure_backup_matches_project_version(project, details)
-                job = Job(
-                    f"Restaurer {db_name} dans {project}",
-                    restore_database_job,
-                    (project, destination, filename, db_name, master_pwd, copy_database, neutralize),
-                    project=project,
-                )
-                destination = None
-                return json_response(
-                    self,
-                    {"job": job_creation_payload(job), "backup": details},
-                    status=201,
-                )
-            except Exception as exc:
-                if destination is not None:
-                    destination.unlink(missing_ok=True)
-                return json_response(self, {"error": str(exc)}, status=400)
 
-        repository_inspect_match = re.match(r"^/api/projects/([^/]+)/repository/inspect$", parsed.path)
-        if repository_inspect_match:
-            try:
-                payload = self.read_json()
-                db_name = str(payload.get("db") or "")
-                if db_name:
-                    validate_odoo_db(db_name)
-                result = inspect_repository_modules(
-                    urllib.parse.unquote(repository_inspect_match.group(1)),
-                    payload.get("url", ""),
-                    payload.get("branch", ""),
-                    db_name,
-                )
-                return json_response(self, result)
-            except Exception as exc:
-                return json_response(self, {"error": str(exc)}, status=400)
+def serve_fallback_page(request):
+    html_response(request.handler, INDEX_HTML)
 
-        zip_inspect_match = re.match(r"^/api/projects/([^/]+)/module-zip/inspect$", parsed.path)
-        if zip_inspect_match:
-            try:
-                project = validate_project(urllib.parse.unquote(zip_inspect_match.group(1)))
-                length = int(self.headers.get("Content-Length", "0"))
-                if length <= 0:
-                    raise ValueError("Fichier ZIP manquant.")
-                if length > 250 * 1024 * 1024:
-                    raise ValueError("ZIP trop volumineux. Limite: 250 Mo.")
-                body = self.rfile.read(length)
-                _, files = parse_multipart_form(self.headers.get("Content-Type", ""), body)
-                upload = files.get("zip")
-                if not upload:
-                    raise ValueError("Champ fichier ZIP introuvable.")
-                filename = upload.get("filename") or "modules.zip"
-                result = inspect_zip_modules(project, filename, upload["data"])
-                return json_response(self, result)
-            except Exception as exc:
-                return json_response(self, {"error": str(exc)}, status=400)
 
-        zip_match = re.match(r"^/api/projects/([^/]+)/module-zip$", parsed.path)
-        if zip_match:
-            try:
-                project = validate_project(urllib.parse.unquote(zip_match.group(1)))
-                length = int(self.headers.get("Content-Length", "0"))
-                if length <= 0:
-                    raise ValueError("Fichier ZIP manquant.")
-                if length > 250 * 1024 * 1024:
-                    raise ValueError("ZIP trop volumineux. Limite: 250 Mo.")
-                body = self.rfile.read(length)
-                fields, files = parse_multipart_form(self.headers.get("Content-Type", ""), body)
-                upload = files.get("zip")
-                if not upload:
-                    raise ValueError("Champ fichier ZIP introuvable.")
-                filename = upload.get("filename") or "modules.zip"
-                replace_existing = truthy(fields.get("replace_existing"))
-                selected_modules = fields.get("modules")
-                if selected_modules is not None:
-                    module_name_list(selected_modules)
-                job = Job(
-                    f"Importer ZIP {filename}",
-                    import_zip_modules_job,
-                    (project, filename, upload["data"], replace_existing, selected_modules),
-                    project=project,
-                )
-                return json_response(
-                    self,
-                    {"job": job_creation_payload(job)},
-                    status=201,
-                )
-            except Exception as exc:
-                return json_response(self, {"error": str(exc)}, status=400)
+def serve_favicon(request):
+    # Demandé d'office par le navigateur sur la page de secours : ce n'est pas une erreur du service.
+    empty_response(request.handler)
 
-        cancel_match = re.match(r"^/api/jobs/([0-9]+)/cancel$", parsed.path)
-        if cancel_match:
-            try:
-                self.read_json()
-                job = cancel_job(int(cancel_match.group(1)))
-                return json_response(self, {"job": job_creation_payload(job)})
-            except ValueError as exc:
-                return json_response(self, {"error": str(exc)}, status=409)
 
-        if parsed.path != "/api/jobs":
-            return json_response(self, {"error": "Route introuvable."}, status=404)
-        try:
-            payload = self.read_json()
-            action = payload.get("action")
+def health_payload(_request):
+    return {
+        "ok": True,
+        "pid": os.getpid(),
+        "instance_id": os.environ.get("ODOO_MANAGER_INSTANCE_ID", ""),
+        "port": PORT,
+        "log_file": str(RUNTIME_LOG_PATH),
+    }
 
-            if action == "repository_modules":
-                project = validate_project(payload.get("project", ""))
-                url, branch, names, commit = validate_module_repository(
-                    payload.get("url"), payload.get("branch"), payload.get("modules"), payload.get("commit")
-                )
-                job = Job(
-                    f"Importer des modules depuis Git · {project}",
-                    repository_modules_job,
-                    (project, url, branch, names, commit),
-                    project=project,
-                )
-            elif action == "start_project":
-                project = validate_project(payload.get("project", ""))
-                job = Job(f"Démarrer {project}", start_project_job, (project,), project=project)
-            elif action == "stop_project":
-                project = validate_project(payload.get("project", ""))
-                job = Job(f"Arrêter {project}", stop_project_job, (project,), project=project)
-            elif action == "update_project":
-                project = validate_project(payload.get("project", ""))
-                job = Job(f"MAJ projet {project}", update_project_job, (project,), project=project)
-            elif action == "update_all":
-                job = Job("MAJ tous les projets", update_all_projects_job, resources={"*"})
-            elif action == "update_all_modules":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                allow_missing_filestore = truthy(payload.get("allow_missing_filestore"))
-                title_suffix = " sans filestore complet" if allow_missing_filestore else ""
-                module_states = installed_modules(project, db_name)
-                available_names = {path.name for path in module_dirs(project)}
-                local_exceptions = active_local_module_exceptions(
-                    project,
-                    db_name,
-                    states=module_states,
-                    available_names=available_names,
-                )
-                if local_exceptions:
-                    modules = available_update_modules(
-                        project,
-                        db_name,
-                        states=module_states,
-                        available_names=available_names,
-                        excluded_names=local_exceptions,
-                    )
-                    if not modules:
-                        raise ValueError("Aucun module installé avec code disponible à mettre à jour.")
-                    job = Job(
-                        f"Mettre à jour les modules disponibles sur {db_name}{title_suffix}",
-                        update_all_modules_job,
-                        (project, db_name, ",".join(modules)),
-                        project=project,
-                    )
-                else:
-                    job = Job(
-                        f"Mettre à jour tous les modules sur {db_name}{title_suffix}",
-                        update_all_modules_job,
-                        (project, db_name, "all"),
-                        project=project,
-                    )
-            elif action == "update_imported_modules":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                modules = validate_modules(payload.get("modules", ""))
-                job = Job(
-                    f"Installer ou mettre à jour les modules importés sur {db_name}",
-                    update_imported_modules_job,
-                    (project, db_name, modules),
-                    project=project,
-                )
-            elif action == "update_local_modules":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                modules = available_update_modules(project, db_name)
-                if not modules:
-                    raise ValueError("Aucun addon projet installé à mettre à jour.")
-                job = Job(
-                    f"Mettre à jour les addons projet sur {db_name}",
-                    module_command_job,
-                    ("--update-module", project, db_name, ",".join(modules)),
-                    project=project,
-                )
-            elif action == "ignore_missing_modules_locally":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                modules = validate_modules(payload.get("modules", ""))
-                job = Job(
-                    f"Exclure localement {modules} sur {db_name}",
-                    cancel_missing_module_operations_job,
-                    (project, db_name, modules),
-                    project=project,
-                )
-            elif action == "restore_module_update_exclusions":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                modules = validate_modules(payload.get("modules", ""))
-                job = Job(
-                    f"Réactiver les mises à jour de {modules} sur {db_name}",
-                    restore_module_update_exclusions_job,
-                    (project, db_name, modules),
-                    project=project,
-                )
-            elif action == "create_project":
-                name = validate_new_project_name(payload.get("name", ""))
-                source_type = str(payload.get("source_type", "standard") or "standard").strip()
-                version = str(payload.get("version", "") or "").strip()
-                repository_url = str(payload.get("repository_url", "") or "").strip()
-                repository_branch = str(payload.get("repository_branch", "") or "").strip()
-                rika_instance = str(payload.get("rika_instance", "") or "").strip()
-                rika_login = str(payload.get("rika_login", "") or "").strip()
-                rika_password = str(payload.get("rika_password", "") or "")
-                if source_type not in {"standard", "gitlab", "rika"}:
-                    raise ValueError("Type de source invalide.")
-                if source_type != "rika" or version:
-                    version = validate_odoo_version(version)
-                if source_type == "rika" and (not rika_instance or not rika_login or not rika_password):
-                    raise ValueError("L'instance et les identifiants RIKA sont requis.")
-                if source_type == "gitlab":
-                    repository_url = validate_gitlab_repository(repository_url)
-                    repository_branch = validate_git_ref(repository_branch)
-                if (WORKSPACE / name).exists() or (WORKSPACE / name).is_symlink():
-                    raise ValueError(f"Un projet nommé {name} existe déjà dans le workspace.")
-                start_after_creation = truthy(payload.get("start_after_creation", True))
-                job = Job(
-                    f"Créer le projet {name or 'Odoo'}",
-                    create_project_job,
-                    (
-                        name,
-                        version,
-                        source_type,
-                        repository_url,
-                        repository_branch,
-                        rika_instance,
-                        rika_login,
-                        rika_password,
-                        start_after_creation,
-                    ),
-                    project=name,
-                )
-            elif action == "migrate_project":
-                name = validate_new_project_name(payload.get("project", ""))
-                job = Job(
-                    f"Migrer {name} vers l'environnement Linux",
-                    migrate_project_job,
-                    (name, bool(payload.get("force"))),
-                    project=name,
-                )
-            elif action == "cleanup_staging":
-                job = Job("Nettoyer les créations interrompues", cleanup_staging_job)
-            elif action == "install_traefik":
-                job = Job("Installer Traefik", install_traefik_job, resources={"traefik"})
-            elif action == "install_git":
-                job = Job("Installer Git pour Windows", install_git_job, resources={"git"})
-            elif action == "create_database":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_new_db(payload.get("db", ""))
-                master_pwd = payload.get("master_pwd", "")
-                login = payload.get("login", "")
-                password = payload.get("password", "")
-                lang = payload.get("lang", "fr_FR")
-                country = payload.get("country", "")
-                demo = bool(payload.get("demo", False))
-                job = Job(
-                    f"Créer base {db_name}",
-                    create_database_job,
-                    (project, db_name, master_pwd, login, password, lang, country, demo),
-                    project=project,
-                )
-            elif action == "drop_database":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                job = Job(
-                    f"Supprimer base {db_name}",
-                    drop_database_job,
-                    (project, db_name, payload.get("master_pwd", "")),
-                    project=project,
-                )
-            elif action == "neutralize_database":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                job = Job(
-                    f"Neutraliser {db_name}",
-                    neutralize_database_job,
-                    (project, db_name),
-                    project=project,
-                )
-            elif action == "reset_module_translations":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                modules = validate_modules(payload.get("modules", ""))
-                job = Job(
-                    f"Réinitialiser les traductions de {modules} sur {db_name}",
-                    reset_module_translations_job,
-                    (project, db_name, modules),
-                    project=project,
-                )
-            elif action == "reset_all_translations":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                languages = validate_language_codes(payload.get("languages", ""))
-                job = Job(
-                    f"Réinitialiser toutes les traductions de {db_name}",
-                    reset_all_translations_job,
-                    (project, db_name, ",".join(languages)),
-                    project=project,
-                )
-            elif action == "regenerate_assets":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                job = Job(
-                    f"Régénérer les assets de {db_name}",
-                    regenerate_assets_job,
-                    (project, db_name),
-                    project=project,
-                )
-            elif action == "reset_admin_password":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                password = validate_admin_password(payload.get("password"))
-                job = Job(
-                    f"Réinitialiser le mot de passe admin de {db_name}",
-                    reset_admin_password_job,
-                    (project, db_name, password),
-                    project=project,
-                )
-            elif action == "delete_project":
-                project = validate_project(payload.get("project", ""))
-                # Double clic ou double envoi : la seconde suppression échouerait sur un projet déjà parti.
-                job = unfinished_job(delete_project_job, project) or Job(
-                    f"Supprimer {project}", delete_project_job, (project,), project=project
-                )
-            elif action == "delete_module_code":
-                project = validate_project(payload.get("project", ""))
-                modules = validate_modules(payload.get("modules", ""))
-                db_name = str(payload.get("db", "") or "").strip()
-                uninstall_first = bool(payload.get("uninstall_first", False))
-                if uninstall_first:
-                    db_name = validate_odoo_db(db_name)
-                job = Job(
-                    f"Supprimer modules {modules} du projet",
-                    delete_module_code_job,
-                    (project, modules, db_name, uninstall_first),
-                    project=project,
-                )
-            elif action in ("install_module", "update_module", "uninstall_module"):
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                modules = validate_modules(payload.get("modules", ""))
-                if action == "install_module":
-                    flag = "--install-module"
-                    label = "Installer"
-                elif action == "uninstall_module":
-                    flag = "--uninstall-module"
-                    label = "Désinstaller"
-                else:
-                    flag = "--update-module"
-                    label = "Mettre à jour"
-                job = Job(
-                    f"{label} {modules} sur {db_name}",
-                    module_command_job,
-                    (flag, project, db_name, modules),
-                    project=project,
-                )
-            elif action == "install_socle":
-                project = validate_project(payload.get("project", ""))
-                db_name = validate_odoo_db(payload.get("db", ""))
-                presets = ",".join(validate_socle_presets(payload.get("presets", "")))
-                job = Job(
-                    f"Installer le socle sur {db_name}", install_socle_job, (project, db_name, presets), project=project
-                )
-            elif action == "repair_enterprise_links":
-                project = validate_project(payload.get("project", ""))
-                job = Job(
-                    f"Vérifier les liens Enterprise de {project}",
-                    repair_enterprise_links_job,
-                    (project,),
-                    project=project,
-                )
-            elif action == "convert_wsl_addon_links":
-                project = validate_project(payload.get("project", ""))
-                job = Job(
-                    f"Convertir les liens WSL de {project}",
-                    convert_wsl_addon_links_job,
-                    (project,),
-                    project=project,
-                )
-            elif action == "link_modules":
-                project = validate_project(payload.get("project", ""))
-                source = payload.get("source", "")
-                if not source:
-                    raise ValueError("Dossier de modules manquant.")
-                job = Job(f"Lier modules dans {project}", link_modules_job, (project, source), project=project)
-            else:
-                return json_response(self, {"error": "Action inconnue."}, status=400)
 
-            return json_response(
-                self,
-                {"job": job_creation_payload(job)},
-                status=201,
-            )
-        except Exception as exc:
-            return json_response(self, {"error": str(exc)}, status=400)
+def jobs_payload(request):
+    detail_value = request.query_value("detail")
+    detail_job_id = int(detail_value) if detail_value.isdigit() else None
+    output_value = request.query_value("output_from")
+    output_from = int(output_value) if detail_job_id and output_value.isdigit() else None
+    return {"jobs": jobs_snapshot(detail_job_id=detail_job_id, compact=True, output_from=output_from)}
 
-    def do_DELETE(self):
-        if self.reject_untrusted_request():
-            return
-        parsed = urllib.parse.urlparse(self.path)
-        if parsed.path == "/api/errors":
-            clear_manager_errors()
-            return json_response(self, {"ok": True})
-        match = re.match(r"^/api/jobs/([0-9]+)$", parsed.path)
-        if match:
-            try:
-                delete_job_history(int(match.group(1)))
-                return json_response(self, {"ok": True})
-            except Exception as exc:
-                return json_response(self, {"error": str(exc)}, status=400)
 
-        if parsed.path != "/api/jobs":
-            return json_response(self, {"error": "Route introuvable."}, status=404)
-        try:
-            running = clear_jobs_history()
-            return json_response(self, {"ok": True, "running": running})
-        except Exception as exc:
-            return json_response(self, {"error": str(exc)}, status=400)
+def serve_event_stream(request):
+    request.handler.stream_events()
+
+
+def serve_project_log_stream(request):
+    project = validate_project(request.param("project"))
+    request.handler.stream_project_logs(project, raw=truthy(request.query_value("raw")))
+
+
+def project_modules_payload(request):
+    project = validate_project(request.param("project"))
+    db_name = request.query_value("db")
+    if db_name:
+        validate_db(db_name)
+    return {"modules": modules_for(project, db_name)}
+
+
+def project_addon_links_payload(request):
+    # addon_links_snapshot valide lui-même le projet.
+    return addon_links_snapshot(request.param("project"))
+
+
+def project_languages_payload(request):
+    project = validate_project(request.param("project"))
+    db_name = validate_odoo_db(request.query_value("db"))
+    return {"languages": installed_languages(project, db_name)}
+
+
+def project_socle_payload(request):
+    project = validate_project(request.param("project"))
+    db_name = request.query_value("db")
+    if db_name:
+        validate_odoo_db(db_name)
+    return socle_catalog(project, db_name)
+
+
+def project_socle_plan_payload(request):
+    project = validate_project(request.param("project"))
+    db_name = validate_odoo_db(request.query_value("db"))
+    return socle_install_plan(project, db_name, request.query_value("presets"))
+
+
+def project_databases_payload(request):
+    return {"databases": list_databases_for(validate_project(request.param("project")))}
+
+
+def project_database_versions_payload(request):
+    project = validate_project(request.param("project"))
+    return {"versions": database_base_versions(project, list_databases_for(project))}
+
+
+def project_logs_payload(request):
+    project = validate_project(request.param("project"))
+    return {"logs": tail_logs(project, raw=truthy(request.query_value("raw")))}
+
+
+def project_diagnostics_payload(request):
+    return project_diagnostics(validate_project(request.param("project")))
+
+
+# --- Écritures --------------------------------------------------------------
+
+
+def shutdown_service(request):
+    handler = request.handler
+    json_response(handler, {"ok": True})
+
+    def shutdown_server():
+        terminate_active_subprocesses()
+        terminate_project_processes()
+        handler.server.shutdown()
+
+    threading.Thread(target=shutdown_server, daemon=True).start()
+
+
+def report_interface_error(request):
+    payload = request.handler.read_json()
+    record_manager_error(
+        "Interface",
+        payload.get("message", ""),
+        details=payload.get("details", ""),
+        project=payload.get("project", ""),
+    )
+    return {"ok": True}, 201
+
+
+# Réglages sans effet sur les chemins d'une action en cours. Closing onboarding changes no path
+# used by a running job; the first project creation sends it right after starting its job.
+# Masquer le bandeau de migration se fait souvent pendant la copie qu'il a lancée. L'apparence
+# de l'interface ne touche à aucun chemin : la bascule vers l'interface affinée depuis son
+# bandeau doit fonctionner même pendant une action.
+INTERFACE_ONLY_SETTINGS = frozenset(
+    {
+        "onboarding_completed",
+        "create_workspace",
+        "migration_banner_dismissed",
+        "beta_interface_banner_dismissed",
+        "interface_layout",
+        "sticky_header",
+    }
+)
+
+
+def update_settings(request):
+    payload = request.handler.read_json()
+    with JOBS_LOCK:
+        running = [job.title for job in JOBS.values() if job.status in JOB_UNFINISHED_STATUSES]
+    if running and not set(payload) <= INTERFACE_ONLY_SETTINGS:
+        raise ValueError(
+            "Traitement en cours : "
+            + ", ".join(running)
+            + ". Consulte le suivi des actions avant de modifier les paramètres."
+        )
+    create_workspace = bool(payload.pop("create_workspace", False))
+    settings = SETTINGS_STORE.update(payload, create_workspace=create_workspace)
+    apply_settings(settings)
+    return {"settings": settings_snapshot()}
+
+
+def start_docker_engine(_request):
+    result = start_docker(SETTINGS)
+    return result, 200 if result.get("ok") else 400
+
+
+def generate_ssh_key_view(request):
+    payload = request.handler.read_json()
+    return generate_ssh_key(payload.get("comment", ""), replace=truthy(payload.get("replace", False))), 201
+
+
+def open_postgresql_console_view(request):
+    project = validate_project(request.param("project"))
+    payload = request.handler.read_json()
+    return open_postgresql_console(project, payload.get("db", ""))
+
+
+def restore_database_upload(request):
+    handler = request.handler
+    project = validate_project(request.param("project"))
+    content_length = int(handler.headers.get("Content-Length", "0"))
+    if content_length <= 0:
+        raise ValueError("Fichier de sauvegarde ZIP manquant.")
+    if content_length > MAX_DATABASE_BACKUP_BYTES:
+        max_gb = MAX_DATABASE_BACKUP_BYTES / (1024 * 1024 * 1024)
+        raise ValueError(f"Sauvegarde trop volumineuse. Limite configurée: {max_gb:.0f} Go.")
+    if handler.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() not in {
+        "application/zip",
+        "application/octet-stream",
+    }:
+        raise ValueError("Format de téléversement invalide. Sélectionne une sauvegarde ZIP Odoo.")
+
+    db_name = validate_new_db(urllib.parse.unquote(handler.headers.get("X-Odoo-Database-Name", "")))
+    master_pwd = validate_required_text(
+        urllib.parse.unquote(handler.headers.get("X-Odoo-Master-Password", "odoo")),
+        "Master password",
+    )
+    copy_database = truthy(handler.headers.get("X-Odoo-Copy", "1"))
+    neutralize = truthy(handler.headers.get("X-Odoo-Neutralize", "1"))
+    filename = urllib.parse.unquote(handler.headers.get("X-File-Name", "backup.zip"))
+    filename = SAFE_IMPORT_NAME_RE.sub("_", Path(filename).name) or "backup.zip"
+    if not filename.lower().endswith(".zip"):
+        raise ValueError("La sauvegarde doit être un fichier ZIP.")
+
+    staging_root = database_restore_staging_root(project)
+    staging_root.mkdir(parents=True, exist_ok=True)
+    free_space = shutil.disk_usage(staging_root).free
+    if free_space < content_length + 512 * 1024 * 1024:
+        raise ValueError("Espace disque insuffisant pour préparer la restauration.")
+    destination = staging_root / f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns()}_{filename}"
+    try:
+        save_request_body_to_file(handler.rfile, content_length, destination)
+        details = validate_odoo_backup_archive(destination)
+        ensure_backup_matches_project_version(project, details)
+        job = Job(
+            f"Restaurer {db_name} dans {project}",
+            restore_database_job,
+            (project, destination, filename, db_name, master_pwd, copy_database, neutralize),
+            project=project,
+        )
+    except BaseException:
+        # L'archive refusée ne reste pas dans la zone de préparation ; acceptée, l'action en devient propriétaire.
+        destination.unlink(missing_ok=True)
+        raise
+    return {"job": job_creation_payload(job), "backup": details}, 201
+
+
+def inspect_repository_view(request):
+    payload = request.handler.read_json()
+    db_name = str(payload.get("db") or "")
+    if db_name:
+        validate_odoo_db(db_name)
+    # inspect_repository_modules valide lui-même le projet.
+    return inspect_repository_modules(
+        request.param("project"), payload.get("url", ""), payload.get("branch", ""), db_name
+    )
+
+
+MAX_MODULE_ZIP_BYTES = 250 * 1024 * 1024
+
+
+def read_module_zip_upload(handler):
+    """Champs et fichier ZIP d'un formulaire multipart de modules."""
+    length = int(handler.headers.get("Content-Length", "0"))
+    if length <= 0:
+        raise ValueError("Fichier ZIP manquant.")
+    if length > MAX_MODULE_ZIP_BYTES:
+        raise ValueError("ZIP trop volumineux. Limite: 250 Mo.")
+    fields, files = parse_multipart_form(handler.headers.get("Content-Type", ""), handler.rfile.read(length))
+    upload = files.get("zip")
+    if not upload:
+        raise ValueError("Champ fichier ZIP introuvable.")
+    return fields, upload, upload.get("filename") or "modules.zip"
+
+
+def inspect_module_zip_view(request):
+    project = validate_project(request.param("project"))
+    _fields, upload, filename = read_module_zip_upload(request.handler)
+    return inspect_zip_modules(project, filename, upload["data"])
+
+
+def import_module_zip_view(request):
+    project = validate_project(request.param("project"))
+    fields, upload, filename = read_module_zip_upload(request.handler)
+    replace_existing = truthy(fields.get("replace_existing"))
+    selected_modules = fields.get("modules")
+    if selected_modules is not None:
+        module_name_list(selected_modules)
+    job = Job(
+        f"Importer ZIP {filename}",
+        import_zip_modules_job,
+        (project, filename, upload["data"], replace_existing, selected_modules),
+        project=project,
+    )
+    return {"job": job_creation_payload(job)}, 201
+
+
+def cancel_job_view(request):
+    request.handler.read_json()
+    return {"job": job_creation_payload(cancel_job(int(request.params["job"])))}
+
+
+def create_job_view(request):
+    payload = request.handler.read_json()
+    build = JOB_ACTIONS.get(payload.get("action"))
+    if build is None:
+        return {"error": "Action inconnue."}, 400
+    return {"job": job_creation_payload(build(payload))}, 201
+
+
+def clear_errors_view(_request):
+    clear_manager_errors()
+    return {"ok": True}
+
+
+def delete_job_view(request):
+    delete_job_history(int(request.params["job"]))
+    return {"ok": True}
+
+
+def clear_jobs_view(_request):
+    return {"ok": True, "running": clear_jobs_history()}
+
+
+# --- Actions de POST /api/jobs ----------------------------------------------
+#
+# Chaque action valide la requête puis crée son Job ; une exception devient un refus 400.
+
+
+def payload_project(payload):
+    return validate_project(payload.get("project", ""))
+
+
+def payload_database(payload):
+    return validate_odoo_db(payload.get("db", ""))
+
+
+def project_job(title, target):
+    """Action sur un projet sans autre paramètre : démarrer, arrêter, vérifier ses liens…"""
+
+    def build(payload):
+        project = payload_project(payload)
+        return Job(title.format(project=project), target, (project,), project=project)
+
+    return build
+
+
+def database_job(title, target):
+    """Action sur une base d'un projet, sans autre paramètre."""
+
+    def build(payload):
+        project = payload_project(payload)
+        db_name = payload_database(payload)
+        return Job(title.format(db=db_name), target, (project, db_name), project=project)
+
+    return build
+
+
+def database_modules_job(title, target):
+    """Action sur une liste de modules d'une base."""
+
+    def build(payload):
+        project = payload_project(payload)
+        db_name = payload_database(payload)
+        modules = validate_modules(payload.get("modules", ""))
+        return Job(title.format(db=db_name, modules=modules), target, (project, db_name, modules), project=project)
+
+    return build
+
+
+def module_command_action(flag, label):
+    def build(payload):
+        project = payload_project(payload)
+        db_name = payload_database(payload)
+        modules = validate_modules(payload.get("modules", ""))
+        return Job(
+            f"{label} {modules} sur {db_name}", module_command_job, (flag, project, db_name, modules), project=project
+        )
+
+    return build
+
+
+def repository_modules_action(payload):
+    project = payload_project(payload)
+    url, branch, names, commit = validate_module_repository(
+        payload.get("url"), payload.get("branch"), payload.get("modules"), payload.get("commit")
+    )
+    return Job(
+        f"Importer des modules depuis Git · {project}",
+        repository_modules_job,
+        (project, url, branch, names, commit),
+        project=project,
+    )
+
+
+def update_all_modules_action(payload):
+    project = payload_project(payload)
+    db_name = payload_database(payload)
+    title_suffix = " sans filestore complet" if truthy(payload.get("allow_missing_filestore")) else ""
+    module_states = installed_modules(project, db_name)
+    available_names = {path.name for path in module_dirs(project)}
+    local_exceptions = active_local_module_exceptions(
+        project,
+        db_name,
+        states=module_states,
+        available_names=available_names,
+    )
+    if not local_exceptions:
+        return Job(
+            f"Mettre à jour tous les modules sur {db_name}{title_suffix}",
+            update_all_modules_job,
+            (project, db_name, "all"),
+            project=project,
+        )
+    modules = available_update_modules(
+        project,
+        db_name,
+        states=module_states,
+        available_names=available_names,
+        excluded_names=local_exceptions,
+    )
+    if not modules:
+        raise ValueError("Aucun module installé avec code disponible à mettre à jour.")
+    return Job(
+        f"Mettre à jour les modules disponibles sur {db_name}{title_suffix}",
+        update_all_modules_job,
+        (project, db_name, ",".join(modules)),
+        project=project,
+    )
+
+
+def update_local_modules_action(payload):
+    project = payload_project(payload)
+    db_name = payload_database(payload)
+    modules = available_update_modules(project, db_name)
+    if not modules:
+        raise ValueError("Aucun addon projet installé à mettre à jour.")
+    return Job(
+        f"Mettre à jour les addons projet sur {db_name}",
+        module_command_job,
+        ("--update-module", project, db_name, ",".join(modules)),
+        project=project,
+    )
+
+
+def create_project_action(payload):
+    name = validate_new_project_name(payload.get("name", ""))
+    source_type = str(payload.get("source_type", "standard") or "standard").strip()
+    version = str(payload.get("version", "") or "").strip()
+    repository_url = str(payload.get("repository_url", "") or "").strip()
+    repository_branch = str(payload.get("repository_branch", "") or "").strip()
+    rika_instance = str(payload.get("rika_instance", "") or "").strip()
+    rika_login = str(payload.get("rika_login", "") or "").strip()
+    rika_password = str(payload.get("rika_password", "") or "")
+    if source_type not in {"standard", "gitlab", "rika"}:
+        raise ValueError("Type de source invalide.")
+    if source_type != "rika" or version:
+        version = validate_odoo_version(version)
+    if source_type == "rika" and (not rika_instance or not rika_login or not rika_password):
+        raise ValueError("L'instance et les identifiants RIKA sont requis.")
+    if source_type == "gitlab":
+        repository_url = validate_gitlab_repository(repository_url)
+        repository_branch = validate_git_ref(repository_branch)
+    if (WORKSPACE / name).exists() or (WORKSPACE / name).is_symlink():
+        raise ValueError(f"Un projet nommé {name} existe déjà dans le workspace.")
+    start_after_creation = truthy(payload.get("start_after_creation", True))
+    return Job(
+        f"Créer le projet {name or 'Odoo'}",
+        create_project_job,
+        (
+            name,
+            version,
+            source_type,
+            repository_url,
+            repository_branch,
+            rika_instance,
+            rika_login,
+            rika_password,
+            start_after_creation,
+        ),
+        project=name,
+    )
+
+
+def migrate_project_action(payload):
+    name = validate_new_project_name(payload.get("project", ""))
+    return Job(
+        f"Migrer {name} vers l'environnement Linux",
+        migrate_project_job,
+        (name, bool(payload.get("force"))),
+        project=name,
+    )
+
+
+def create_database_action(payload):
+    project = payload_project(payload)
+    db_name = validate_new_db(payload.get("db", ""))
+    return Job(
+        f"Créer base {db_name}",
+        create_database_job,
+        (
+            project,
+            db_name,
+            payload.get("master_pwd", ""),
+            payload.get("login", ""),
+            payload.get("password", ""),
+            payload.get("lang", "fr_FR"),
+            payload.get("country", ""),
+            bool(payload.get("demo", False)),
+        ),
+        project=project,
+    )
+
+
+def drop_database_action(payload):
+    project = payload_project(payload)
+    db_name = payload_database(payload)
+    return Job(
+        f"Supprimer base {db_name}",
+        drop_database_job,
+        (project, db_name, payload.get("master_pwd", "")),
+        project=project,
+    )
+
+
+def reset_all_translations_action(payload):
+    project = payload_project(payload)
+    db_name = payload_database(payload)
+    languages = validate_language_codes(payload.get("languages", ""))
+    return Job(
+        f"Réinitialiser toutes les traductions de {db_name}",
+        reset_all_translations_job,
+        (project, db_name, ",".join(languages)),
+        project=project,
+    )
+
+
+def reset_admin_password_action(payload):
+    project = payload_project(payload)
+    db_name = payload_database(payload)
+    password = validate_admin_password(payload.get("password"))
+    return Job(
+        f"Réinitialiser le mot de passe admin de {db_name}",
+        reset_admin_password_job,
+        (project, db_name, password),
+        project=project,
+    )
+
+
+def delete_project_action(payload):
+    project = payload_project(payload)
+    # Double clic ou double envoi : la seconde suppression échouerait sur un projet déjà parti.
+    return unfinished_job(delete_project_job, project) or Job(
+        f"Supprimer {project}", delete_project_job, (project,), project=project
+    )
+
+
+def delete_module_code_action(payload):
+    project = payload_project(payload)
+    modules = validate_modules(payload.get("modules", ""))
+    db_name = str(payload.get("db", "") or "").strip()
+    uninstall_first = bool(payload.get("uninstall_first", False))
+    if uninstall_first:
+        db_name = validate_odoo_db(db_name)
+    return Job(
+        f"Supprimer modules {modules} du projet",
+        delete_module_code_job,
+        (project, modules, db_name, uninstall_first),
+        project=project,
+    )
+
+
+def install_socle_action(payload):
+    project = payload_project(payload)
+    db_name = payload_database(payload)
+    presets = ",".join(validate_socle_presets(payload.get("presets", "")))
+    return Job(f"Installer le socle sur {db_name}", install_socle_job, (project, db_name, presets), project=project)
+
+
+def link_modules_action(payload):
+    project = payload_project(payload)
+    source = payload.get("source", "")
+    if not source:
+        raise ValueError("Dossier de modules manquant.")
+    return Job(f"Lier modules dans {project}", link_modules_job, (project, source), project=project)
+
+
+JOB_ACTIONS = {
+    "repository_modules": repository_modules_action,
+    "start_project": project_job("Démarrer {project}", start_project_job),
+    "stop_project": project_job("Arrêter {project}", stop_project_job),
+    "update_project": project_job("MAJ projet {project}", update_project_job),
+    "update_all": lambda _payload: Job("MAJ tous les projets", update_all_projects_job, resources={"*"}),
+    "update_all_modules": update_all_modules_action,
+    "update_imported_modules": database_modules_job(
+        "Installer ou mettre à jour les modules importés sur {db}", update_imported_modules_job
+    ),
+    "update_local_modules": update_local_modules_action,
+    "ignore_missing_modules_locally": database_modules_job(
+        "Exclure localement {modules} sur {db}", cancel_missing_module_operations_job
+    ),
+    "restore_module_update_exclusions": database_modules_job(
+        "Réactiver les mises à jour de {modules} sur {db}", restore_module_update_exclusions_job
+    ),
+    "create_project": create_project_action,
+    "migrate_project": migrate_project_action,
+    "cleanup_staging": lambda _payload: Job("Nettoyer les créations interrompues", cleanup_staging_job),
+    "install_traefik": lambda _payload: Job("Installer Traefik", install_traefik_job, resources={"traefik"}),
+    "install_git": lambda _payload: Job("Installer Git pour Windows", install_git_job, resources={"git"}),
+    "create_database": create_database_action,
+    "drop_database": drop_database_action,
+    "neutralize_database": database_job("Neutraliser {db}", neutralize_database_job),
+    "reset_module_translations": database_modules_job(
+        "Réinitialiser les traductions de {modules} sur {db}", reset_module_translations_job
+    ),
+    "reset_all_translations": reset_all_translations_action,
+    "regenerate_assets": database_job("Régénérer les assets de {db}", regenerate_assets_job),
+    "reset_admin_password": reset_admin_password_action,
+    "delete_project": delete_project_action,
+    "delete_module_code": delete_module_code_action,
+    "install_module": module_command_action("--install-module", "Installer"),
+    "update_module": module_command_action("--update-module", "Mettre à jour"),
+    "uninstall_module": module_command_action("--uninstall-module", "Désinstaller"),
+    "install_socle": install_socle_action,
+    "repair_enterprise_links": project_job("Vérifier les liens Enterprise de {project}", repair_enterprise_links_job),
+    "convert_wsl_addon_links": project_job("Convertir les liens WSL de {project}", convert_wsl_addon_links_job),
+    "link_modules": link_modules_action,
+}
+
+
+def api_route(method, template, view, on_error=None):
+    return Route(method, template, view, on_error or (read_route_errors if method == "GET" else write_route_errors))
+
+
+def payload_view(build):
+    """Vue de lecture qui ne dépend d'aucun paramètre."""
+    return lambda _request: build()
+
+
+ROUTER = Router(
+    (
+        api_route("GET", "/", serve_fallback_page),
+        api_route("GET", "/favicon.ico", serve_favicon),
+        api_route("GET", "/api/version", payload_view(api_version_payload)),
+        api_route("GET", "/api/capabilities", payload_view(api_capabilities_payload)),
+        api_route("GET", "/api/health", health_payload),
+        api_route("GET", "/api/bootstrap", payload_view(bootstrap_snapshot)),
+        api_route("GET", "/api/overview", payload_view(overview)),
+        api_route("GET", "/api/settings", payload_view(lambda: {"settings": settings_snapshot()})),
+        api_route("GET", "/api/errors", payload_view(manager_errors_snapshot)),
+        api_route("GET", "/api/jobs", jobs_payload),
+        api_route("GET", "/api/stream", serve_event_stream),
+        api_route("GET", "/api/system/status", payload_view(system_status_snapshot)),
+        api_route("GET", "/api/system/project-creation-prerequisites", payload_view(project_creation_prerequisites)),
+        api_route("GET", "/api/system/migration", payload_view(migration_snapshot)),
+        api_route("GET", "/api/system/ssh-keys", payload_view(ssh_public_keys_snapshot)),
+        api_route("GET", "/api/projects/{project}/modules", project_modules_payload),
+        api_route("GET", "/api/projects/{project}/addon-links", project_addon_links_payload),
+        api_route("GET", "/api/projects/{project}/languages", project_languages_payload),
+        api_route("GET", "/api/projects/{project}/socle", project_socle_payload),
+        api_route("GET", "/api/projects/{project}/socle/plan", project_socle_plan_payload),
+        api_route("GET", "/api/projects/{project}/databases", project_databases_payload),
+        api_route("GET", "/api/projects/{project}/database-versions", project_database_versions_payload),
+        api_route("GET", "/api/projects/{project}/logs", project_logs_payload),
+        api_route("GET", "/api/projects/{project}/logs/stream", serve_project_log_stream),
+        api_route("GET", "/api/projects/{project}/diagnostics", project_diagnostics_payload),
+        api_route("POST", "/api/jobs", create_job_view),
+        api_route("POST", "/api/jobs/{job}/cancel", cancel_job_view, cancel_route_errors),
+        api_route("POST", "/api/settings", update_settings),
+        api_route("POST", "/api/errors/report", report_interface_error),
+        api_route("POST", "/api/system/shutdown", shutdown_service),
+        api_route("POST", "/api/system/docker/start", start_docker_engine),
+        api_route("POST", "/api/system/ssh-key/generate", generate_ssh_key_view),
+        api_route("POST", "/api/projects/{project}/postgresql/open", open_postgresql_console_view),
+        api_route("POST", "/api/projects/{project}/database-restore", restore_database_upload),
+        api_route("POST", "/api/projects/{project}/repository/inspect", inspect_repository_view),
+        api_route("POST", "/api/projects/{project}/module-zip/inspect", inspect_module_zip_view),
+        api_route("POST", "/api/projects/{project}/module-zip", import_module_zip_view),
+        api_route("DELETE", "/api/errors", clear_errors_view),
+        api_route("DELETE", "/api/jobs", clear_jobs_view),
+        api_route("DELETE", "/api/jobs/{job}", delete_job_view),
+    )
+)
 
 
 class ManagerHTTPServer(ThreadingHTTPServer):
