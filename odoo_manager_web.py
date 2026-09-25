@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-import ast
-import collections
 import errno
-import html
 import http.client
 import json
 import ntpath
@@ -12,7 +9,6 @@ import queue
 import re
 import shlex
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -22,7 +18,6 @@ import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
-import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,8 +29,38 @@ RUNTIME_LOG_PATH, _RUNTIME_STREAMS = initialize_runtime_streams()
 
 from odoo_manager_core import ProjectCreator, ProjectService, SettingsStore, docker_status, start_docker
 from odoo_manager_core import jobs as job_control
+from odoo_manager_core.archives import (
+    SAFE_IMPORT_NAME_RE,
+    multipart_field,
+    parse_multipart_form,
+    safe_extract_zip,
+    safe_import_name,
+    save_request_body_to_file,
+    validate_odoo_backup_archive,
+)
+from odoo_manager_core.command_output import (
+    MISSING_CODE_ERROR_RE,
+    MISSING_POSTGRES_EXTENSION_RE,
+    external_dependency_failure_hint,
+    extract_odoo_page_error,
+    missing_python_import,
+    odoo_restore_error,
+    parse_output_progress,
+    python_package_for_import,
+)
 from odoo_manager_core.docker_api import EngineUnavailable
 from odoo_manager_core.http_routes import Route, Router, RouteRequest
+from odoo_manager_core.manifests import (
+    MANIFEST_FILENAMES,
+    MANIFEST_RECORD_MARKER,
+    ODOO_SERIES_VERSION_RE,
+    manifest_version_key,
+    module_graph_from_paths,
+    module_graph_from_records,
+    module_install_plan,
+    read_manifest_dict,
+    read_repository_manifest,
+)
 from odoo_manager_core.migration import (
     CONTAINER_ABSENT,
     compare_projects,
@@ -83,6 +108,13 @@ from odoo_manager_core.project_creator import (
 )
 from odoo_manager_core.project_service import OdooError
 from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
+from odoo_manager_core.repositories import (
+    REPOSITORY_COMMIT_RE,
+    REPOSITORY_GIT_OPTIONS,
+    repository_clone_error,
+    repository_tree_modules,
+    sparse_checkout_pattern,
+)
 from odoo_manager_core.system import (
     active_engine_client,
     docker_command,
@@ -213,7 +245,6 @@ TRAEFIK_REPO = "ssh://git@gitlab.sudokeys.com:10022/devops/docker-local-tools.gi
 
 SAFE_PROJECT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 SAFE_MODULE_RE = re.compile(r"^[A-Za-z0-9_,.-]+$")
-SAFE_IMPORT_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def safe_path_is_dir(path):
@@ -243,10 +274,7 @@ MAX_RETAINED_JOBS = 60
 MAX_RUNNING_JOBS = 4
 JOB_LINES_LIMIT = 700
 JOB_OUTPUT_LIMIT = 120_000
-MAX_ZIP_ENTRIES = 100_000
-MAX_ZIP_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_DATABASE_BACKUP_BYTES = int(os.environ.get("ODOO_MANAGER_MAX_BACKUP_BYTES", 100 * 1024 * 1024 * 1024))
-MAX_DATABASE_BACKUP_ENTRIES = 2_000_000
 
 # Catalogue aligné sur https://www.odoo.com/fr_FR/page/all-apps : ordre et
 # catégories de la page. Les modules absents d'une version sont signalés par l'UI.
@@ -316,8 +344,6 @@ SOCLE_APPS = (
 
 SOCLE_PRESETS = {app_id: (label, modules) for app_id, label, _section, modules in SOCLE_APPS}
 
-# États pour lesquels Odoo considère une dépendance comme satisfaite.
-INSTALLED_MODULE_STATES = frozenset(("installed", "to install", "to upgrade"))
 MODULE_GRAPH_CACHE = {}
 MODULE_GRAPH_TTL_SECONDS = 45
 
@@ -624,46 +650,6 @@ def html_response(handler, body, status=200):
         handler.wfile.write(data)
     except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
         return None
-
-
-def parse_multipart_form(content_type, body):
-    match = re.search(r"boundary=([^;]+)", content_type or "")
-    if not match:
-        raise ValueError("Boundary multipart manquante.")
-    boundary = match.group(1).strip().strip('"').encode("utf-8")
-    fields = {}
-    files = {}
-
-    for part in body.split(b"--" + boundary):
-        part = part.strip(b"\r\n")
-        if not part or part == b"--":
-            continue
-        if part.endswith(b"--"):
-            part = part[:-2].strip(b"\r\n")
-        header_blob, separator, payload = part.partition(b"\r\n\r\n")
-        if not separator:
-            continue
-        headers = {}
-        for line in header_blob.decode("utf-8", errors="replace").split("\r\n"):
-            key, sep, value = line.partition(":")
-            if sep:
-                headers[key.strip().lower()] = value.strip()
-        disposition = headers.get("content-disposition", "")
-        name_match = re.search(r'name="([^"]+)"', disposition)
-        if not name_match:
-            continue
-        name = name_match.group(1)
-        filename_match = re.search(r'filename="([^"]*)"', disposition)
-        payload = payload.rstrip(b"\r\n")
-        if filename_match:
-            files[name] = {
-                "filename": Path(filename_match.group(1)).name,
-                "data": payload,
-            }
-        else:
-            fields[name] = payload.decode("utf-8", errors="replace")
-
-    return fields, files
 
 
 def run_capture(args, cwd=None, timeout=12):
@@ -2763,59 +2749,6 @@ def cancel_job(job_id):
     return job
 
 
-# Étapes de `git clone --progress`, dans l'ordre où Git les parcourt. Chacune repart de 0 :
-# la barre affiche l'étape en cours plutôt qu'un total inventé sur l'ensemble.
-GIT_PROGRESS_PHASES = {
-    "Counting objects": "Recensement des objets",
-    "Enumerating objects": "Recensement des objets",
-    "Compressing objects": "Compression des objets",
-    "Receiving objects": "Réception des objets",
-    "Resolving deltas": "Application des différences",
-    "Updating files": "Écriture des fichiers",
-    "Filtering content": "Récupération des fichiers volumineux",
-}
-GIT_PROGRESS_RE = re.compile(
-    r"^(?P<phase>[A-Za-z][A-Za-z ]+):\s+(?P<percent>\d{1,3})%\s*(?:\((?P<current>\d+)/(?P<total>\d+)\))?"
-)
-COUNTED_PROGRESS_RE = re.compile(r"^(?P<label>[^:]{3,60}):\s+(?P<current>\d+)/(?P<total>\d+)\s*$")
-
-
-def parse_output_progress(text):
-    """Avancement chiffré lu dans une ligne de sortie, ou None.
-
-    Les étapes les plus longues sont des commandes externes : leur seule mesure d'avancement
-    est ce qu'elles écrivent. `transient` marque une ligne que la commande réécrit en place,
-    des centaines de fois : elle nourrit la barre, pas l'historique.
-
-    Cette lecture ne fait que compléter `set_progress`, que les actions appellent déjà
-    directement quand elles connaissent leur propre avancement.
-    """
-    line = text.strip()
-    # Le serveur Git préfixe ses propres étapes, réécrites elles aussi en place.
-    if line.startswith("remote: "):
-        line = line[len("remote: ") :]
-    match = GIT_PROGRESS_RE.match(line)
-    if match:
-        label = GIT_PROGRESS_PHASES.get(match.group("phase"))
-        if label is None:
-            return None
-        if match.group("total") and int(match.group("total")):
-            current, total = int(match.group("current")), int(match.group("total"))
-        else:
-            current, total = min(int(match.group("percent")), 100), 100
-        return {"label": label, "current": current, "total": total, "transient": not line.endswith("done.")}
-    match = COUNTED_PROGRESS_RE.match(line)
-    if match and int(match.group("total")):
-        return {
-            "label": match.group("label").strip(),
-            "current": int(match.group("current")),
-            "total": int(match.group("total")),
-            # Une ligne écrite par le gestionnaire lui-même : elle reste dans l'historique.
-            "transient": False,
-        }
-    return None
-
-
 def job_failure_message(failure):
     """Message d'échec d'une tâche, avec l'origine : Odoo ou le gestionnaire."""
     message = str(failure).strip() or "Une erreur inattendue est survenue."
@@ -3546,77 +3479,6 @@ def send_form_no_redirect(connection, target, host_header, body):
         connection.close()
 
 
-def extract_odoo_page_error(content):
-    if not content:
-        return ""
-    pattern = r'<div\b[^>]*class=["\'][^"\']*\balert-danger\b[^"\']*["\'][^>]*>(.*?)</div>'
-    for match in re.finditer(pattern, content, flags=re.IGNORECASE | re.DOTALL):
-        message = re.sub(r"<[^>]+>", " ", match.group(1))
-        message = re.sub(r"\s+", " ", html.unescape(message)).strip()
-        if message:
-            return message
-    return ""
-
-
-def validate_odoo_backup_archive(backup_path):
-    backup_path = Path(backup_path)
-    if not zipfile.is_zipfile(backup_path):
-        raise ValueError("La sauvegarde n'est pas une archive ZIP Odoo valide.")
-
-    try:
-        with zipfile.ZipFile(backup_path) as archive:
-            entries = archive.infolist()
-            if len(entries) > MAX_DATABASE_BACKUP_ENTRIES:
-                raise ValueError("La sauvegarde contient trop de fichiers.")
-            names = {entry.filename.replace("\\", "/") for entry in entries}
-            if "dump.sql" not in names:
-                raise ValueError("Archive Odoo invalide: le fichier dump.sql est absent.")
-            for entry in entries:
-                normalized = entry.filename.replace("\\", "/")
-                if normalized != "dump.sql" and not normalized.startswith("filestore/"):
-                    continue
-                parts = [part for part in normalized.split("/") if part]
-                if normalized.startswith("/") or ".." in parts:
-                    raise ValueError("Archive Odoo invalide: chemin de fichier dangereux.")
-                if entry.flag_bits & 0x1:
-                    raise ValueError("Les sauvegardes ZIP chiffrées ne sont pas prises en charge.")
-            return {
-                "entries": len(entries),
-                "has_filestore": any(name.startswith("filestore/") for name in names),
-                "has_manifest": "manifest.json" in names,
-                "odoo_version": backup_odoo_version(archive) if "manifest.json" in names else "",
-            }
-    except zipfile.BadZipFile as exc:
-        raise ValueError("La sauvegarde ZIP est illisible ou endommagée.") from exc
-
-
-def backup_odoo_version(archive):
-    """Version majeure d'Odoo qui a produit la sauvegarde (« 15.0 »), lue dans manifest.json."""
-    try:
-        manifest = json.loads(archive.read("manifest.json").decode("utf-8", errors="replace"))
-    except (KeyError, ValueError, OSError, zipfile.BadZipFile):
-        return ""
-    if not isinstance(manifest, dict):
-        return ""
-    for key in ("major_version", "version"):
-        match = re.match(r"(?:saas~)?(\d+)\.(\d+)", str(manifest.get(key) or ""))
-        if match:
-            return f"{match.group(1)}.{match.group(2)}"
-    # Certains outils d'export laissent version et major_version vides : les versions des
-    # modules installés (« 15.0.1.5 ») portent alors la série, base en tête.
-    modules = manifest.get("modules")
-    if not isinstance(modules, dict):
-        return ""
-    series = collections.Counter()
-    for name, module_version in modules.items():
-        match = re.match(r"(\d+)\.(\d+)\.\d+", str(module_version or ""))
-        if match:
-            if name == "base":
-                return f"{match.group(1)}.{match.group(2)}"
-            series[f"{match.group(1)}.{match.group(2)}"] += 1
-    return series.most_common(1)[0][0] if series else ""
-
-
 def ensure_backup_matches_project_version(project, details):
     """Refuse avant l'envoi une sauvegarde d'une autre version d'Odoo que celle du projet.
 
@@ -3632,23 +3494,6 @@ def ensure_backup_matches_project_version(project, details):
             f"{project_version}. Odoo ne restaure que les bases de sa propre version : restaure-la dans "
             f"un projet Odoo {backup_version}, ou migre la base avant de la restaurer ici."
         )
-
-
-def save_request_body_to_file(stream, content_length, destination, chunk_size=1024 * 1024):
-    destination = Path(destination)
-    remaining = int(content_length)
-    with destination.open("wb") as output:
-        while remaining:
-            chunk = stream.read(min(chunk_size, remaining))
-            if not chunk:
-                raise ValueError("Le téléversement de la sauvegarde a été interrompu.")
-            output.write(chunk)
-            remaining -= len(chunk)
-    return destination
-
-
-def multipart_field(boundary, name, value):
-    return (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n').encode()
 
 
 def post_odoo_database_restore(job, url, backup_path, filename, db_name, master_pwd, copy, neutralize):
@@ -3706,20 +3551,6 @@ def post_odoo_database_restore(job, url, backup_path, filename, db_name, master_
             raise RuntimeError(f"La restauration n'a pas pu être transmise à Odoo: {exc}") from exc
         finally:
             connection.close()
-
-
-def odoo_restore_error(content):
-    if "Database restore error:" not in content:
-        return ""
-    # Le message est dans l'alerte de la page : sans ce ciblage, la suite du gestionnaire de
-    # bases d'Odoo (boutons, liste de langues…) était recopiée dans l'erreur.
-    alert = extract_odoo_page_error(content)
-    if "Database restore error:" in alert:
-        return alert[alert.find("Database restore error:") :][:800]
-    plain = html.unescape(re.sub(r"<[^>]+>", " ", content))
-    plain = re.sub(r"\s+", " ", plain).strip()
-    marker = "Database restore error:"
-    return plain[plain.find(marker) : plain.find(marker) + 800]
 
 
 def restore_database_job(job, project, backup_path, filename, db_name, master_pwd, copy=True, neutralize=True):
@@ -4573,60 +4404,6 @@ def convert_wsl_addon_links_job(job, project):
     job.add("La liste des modules est désormais lue directement par Windows, sans WSL.")
 
 
-def read_manifest_dict(path):
-    # Odoo lit lui-même le manifeste avec ast.literal_eval : même règle ici.
-    for filename in ("__manifest__.py", "__openerp__.py"):
-        try:
-            text = (Path(path) / filename).read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        return parse_manifest_text(text)
-    return {}
-
-
-def parse_manifest_text(text):
-    try:
-        manifest = ast.literal_eval(text)
-    except (ValueError, SyntaxError, MemoryError, RecursionError):
-        return {}
-    return manifest if isinstance(manifest, dict) else {}
-
-
-def manifest_graph_entry(manifest):
-    depends = sorted({name for name in manifest.get("depends") or () if isinstance(name, str)})
-    auto_install = manifest.get("auto_install", False)
-    if isinstance(auto_install, (list, tuple, set)):
-        # Odoo 16+ : seules ces dépendances déclenchent l'installation automatique.
-        triggers = sorted({name for name in auto_install if isinstance(name, str)})
-        auto_install = True
-    else:
-        triggers = depends
-        auto_install = bool(auto_install)
-    return {
-        "title": str(manifest.get("name") or ""),
-        "depends": depends,
-        "auto_install": auto_install,
-        "auto_install_triggers": triggers,
-        "installable": bool(manifest.get("installable", True)),
-        "application": bool(manifest.get("application", False)),
-        # L'installation auto dépend alors du pays des sociétés : non prévisible ici.
-        "country_restricted": bool(manifest.get("countries")),
-    }
-
-
-def module_graph_from_paths(paths):
-    graph = {}
-    for path in paths:
-        name = posixpath.basename(str(path).replace("\\", "/"))
-        if name not in graph:
-            graph[name] = manifest_graph_entry(read_manifest_dict(path))
-    return graph
-
-
-# Marqueur textuel : un séparateur de contrôle comme \x1e est retiré par str.strip().
-MANIFEST_RECORD_MARKER = "@@odoo-manager-manifest@@ "
-
-
 def wsl_module_graph(project):
     """Lit tous les manifestes depuis WSL en une commande.
 
@@ -4663,14 +4440,7 @@ def wsl_module_graph(project):
     if code != 0:
         detail = "délai dépassé" if code == 124 else (output.strip()[:300] or f"code {code}")
         raise RuntimeError(f"Impossible de lire les manifestes des modules depuis WSL : {detail}")
-    graph = {}
-    for record in ("\n" + output).split("\n" + MANIFEST_RECORD_MARKER)[1:]:
-        name, _, text = record.partition("\n")
-        name = name.strip()
-        if not SAFE_MODULE_RE.fullmatch(name) or name in graph:
-            continue
-        graph[name] = manifest_graph_entry(parse_manifest_text(text))
-    return graph
+    return module_graph_from_records(output, SAFE_MODULE_RE)
 
 
 def project_module_graph(project):
@@ -4694,75 +4464,6 @@ def module_dependency_graph(project):
     with MODULE_CACHE_LOCK:
         MODULE_GRAPH_CACHE[project] = {"created_at": now, "graph": graph}
     return graph
-
-
-def module_install_plan(graph, states, requested):
-    """Reproduit la résolution d'Odoo pour `-i` : dépendances récursives puis
-    modules auto_install dont un déclencheur passe à l'état « to install »."""
-    installed = {name for name, info in states.items() if info.get("state") in INSTALLED_MODULE_STATES}
-    installed.add("base")
-    requested = list(dict.fromkeys(requested))
-    to_install = {}
-    missing = {}
-    uninstallable = {}
-    auto_installed = set()
-
-    def add(name, required_by):
-        stack = [(name, required_by)]
-        while stack:
-            current, parent = stack.pop()
-            if current in installed or current in to_install:
-                continue
-            entry = graph.get(current)
-            if entry is None:
-                missing.setdefault(current, parent)
-                continue
-            if not entry["installable"]:
-                uninstallable.setdefault(current, parent)
-                continue
-            to_install[current] = parent
-            stack.extend((dependency, current) for dependency in entry["depends"])
-
-    for name in requested:
-        add(name, "")
-
-    candidates = sorted(
-        name
-        for name, entry in graph.items()
-        if entry["auto_install"]
-        and entry["installable"]
-        and entry["auto_install_triggers"]
-        and not entry["country_restricted"]
-    )
-    changed = True
-    while changed:
-        changed = False
-        for name in candidates:
-            if name in installed or name in to_install:
-                continue
-            triggers = graph[name]["auto_install_triggers"]
-            satisfied = all(trigger in installed or trigger in to_install for trigger in triggers)
-            if satisfied and any(trigger in to_install for trigger in triggers):
-                auto_installed.add(name)
-                add(name, "")
-                changed = True
-
-    requested_set = set(requested)
-    new_modules = [name for name in to_install if name not in requested_set]
-
-    def described(names):
-        return [{"name": name, "title": graph.get(name, {}).get("title") or name} for name in sorted(names)]
-
-    return {
-        "requested": [name for name in requested if name in to_install],
-        "already_installed": [name for name in requested if name in installed],
-        "dependencies": described(name for name in new_modules if name not in auto_installed),
-        "auto_installed": described(name for name in new_modules if name in auto_installed),
-        "applications": described(name for name in new_modules if graph[name]["application"]),
-        "missing": [{"name": name, "required_by": parent} for name, parent in sorted(missing.items())],
-        "uninstallable": [{"name": name, "required_by": parent} for name, parent in sorted(uninstallable.items())],
-        "total": len(to_install),
-    }
 
 
 def socle_preset_modules(preset_ids):
@@ -4915,13 +4616,6 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
             raise
 
 
-# Erreurs Odoo typiques d'une base qui référence le code d'un module absent du projet.
-MISSING_CODE_ERROR_RE = re.compile(
-    r"n'existe pas|does not exist|non-existing model|External ID not found|No module named|KeyError",
-    re.IGNORECASE,
-)
-
-
 def missing_code_failure_hint(project, db_name, message):
     """Désigne les modules installés sans code quand l'échec Odoo porte sur un champ ou modèle absent."""
     if not MISSING_CODE_ERROR_RE.search(message):
@@ -4944,64 +4638,9 @@ def missing_code_failure_hint(project, db_name, message):
     )
 
 
-# Un module Python manquant se voit de deux façons : Odoo le détecte lui-même via
-# external_dependencies (quand le manifeste le déclare) et le dit en clair, ou il n'est
-# déclaré nulle part et casse au premier import réel, en français ou en anglais selon
-# le point d'échec — les deux formes portent le nom d'import, pas forcément le nom pip.
-MISSING_PYTHON_IMPORT_RE = re.compile(
-    r"d[ée]pendance externe non trouv[ée]e\s*:\s*(?P<name1>[\w.\-]+)"
-    r"|external dependenc\w* (?:is |are )?not (?:met|found)\s*:\s*(?P<name2>[\w.\-]+)"
-    r"|(?:ModuleNotFoundError|ImportError)\s*:\s*No module named ['\"]?(?P<name3>[\w.]+)",
-    re.IGNORECASE,
-)
-
-# Cas connus où le nom importé diverge du nom du paquet PyPI qui le fournit.
-PIP_PACKAGE_ALIASES = {
-    "pil": "Pillow",
-    "cv2": "opencv-python",
-    "yaml": "PyYAML",
-    "crypto": "pycryptodome",
-    "usb": "pyusb",
-    "serial": "pyserial",
-    "bs4": "beautifulsoup4",
-    "dateutil": "python-dateutil",
-    "openssl": "pyOpenSSL",
-}
-
 # Filet de sécurité contre une boucle infinie si l'erreur est mal interprétée en rafale : chaque
 # réessai refait tourner la commande Odoo en entier, le plafond doit donc rester bas.
 MAX_AUTO_DEPENDENCY_FIXES = 3
-
-# Extension PostgreSQL (ex. pgvector pour l'IA) que le rôle applicatif odoo n'a pas le droit de
-# créer lui-même : message brut de psycopg2/PostgreSQL, jamais localisé.
-MISSING_POSTGRES_EXTENSION_RE = re.compile(r'permission denied to create extension "(?P<extension>[\w-]+)"')
-
-
-def missing_python_import(message):
-    """Nom d'import Python manquant, déduit d'une erreur Odoo ou d'un traceback brut."""
-    match = MISSING_PYTHON_IMPORT_RE.search(message)
-    if not match:
-        return ""
-    name = match.group("name1") or match.group("name2") or match.group("name3")
-    return name.split(".")[0]
-
-
-def python_package_for_import(import_name):
-    """Nom du paquet PyPI à installer pour satisfaire cet import (identique la plupart du temps)."""
-    return PIP_PACKAGE_ALIASES.get(import_name.lower(), import_name)
-
-
-def external_dependency_failure_hint(message):
-    """Affiché quand l'installation automatique du paquet manquant a elle-même échoué."""
-    import_name = missing_python_import(message)
-    if not import_name:
-        return ""
-    package = python_package_for_import(import_name)
-    return (
-        f"Cause probable : le paquet Python « {package} » (dépendance externe du module) n'a pas pu être "
-        "installé automatiquement dans le conteneur Odoo de ce projet (réseau, nom de paquet PyPI différent…). "
-        "Ajoute-le manuellement à init/requirements_pip.txt à la racine du projet, puis relance."
-    )
 
 
 def update_imported_modules_job(job, project, db_name, modules):
@@ -5181,39 +4820,6 @@ def validate_module_repository(url, branch, modules, commit=""):
     return url, branch, names, commit
 
 
-REPOSITORY_SKIPPED_DIRS = frozenset({".git", "__pycache__", "node_modules"})
-MANIFEST_FILENAMES = ("__manifest__.py", "__openerp__.py")
-
-
-def repository_modules_from_tree(tree_output, repository_name):
-    """Modules d'un `git ls-tree -r` selon la règle de find_module_candidates.
-
-    Un manifeste à la racine fait du dépôt un module unique ; sinon chaque dossier portant
-    un manifeste est un module, sans descendre dans ses sous-dossiers.
-    """
-    manifest_dirs = set()
-    has_symlinks = False
-    for line in str(tree_output or "").splitlines():
-        meta, _, path = line.partition("\t")
-        if not path:
-            continue
-        if meta.split(" ", 1)[0] == "120000":
-            has_symlinks = True
-        if posixpath.basename(path) in MANIFEST_FILENAMES:
-            manifest_dirs.add(posixpath.dirname(path))
-    modules = {}
-    for directory in sorted(manifest_dirs, key=lambda item: (item.count("/") if item else -1, item)):
-        parts = directory.split("/") if directory else []
-        if any(part in REPOSITORY_SKIPPED_DIRS for part in parts):
-            continue
-        if "" in modules:
-            break
-        if any("/".join(parts[:index]) in modules for index in range(1, len(parts))):
-            continue
-        modules[directory] = parts[-1] if parts else repository_name
-    return modules, has_symlinks
-
-
 def module_provided_by_project(project, name):
     """Module standard, Enterprise ou ancien stockage portant ce nom, sans scanner le projet.
 
@@ -5236,38 +4842,6 @@ def module_provided_by_project(project, name):
                 # Lien créé par WSL illisible depuis Windows : on le considère présent par prudence.
                 return True
     return False
-
-
-REPOSITORY_GIT_OPTIONS = (
-    "-c",
-    "core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
-    "-c",
-    "protocol.allow=never",
-    "-c",
-    "protocol.ssh.allow=always",
-)
-REPOSITORY_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
-MAX_MANIFEST_BYTES = 512 * 1024
-ODOO_SERIES_VERSION_RE = re.compile(r"^(\d+\.\d+)\.\d+\.\d+\.\d+$")
-
-
-def manifest_version_key(version):
-    parts = re.findall(r"\d+", str(version or ""))
-    return tuple(int(part) for part in parts) if parts else None
-
-
-def read_repository_manifest(module_path):
-    for filename in MANIFEST_FILENAMES:
-        manifest = Path(module_path) / filename
-        try:
-            if manifest.is_symlink() or not manifest.is_file():
-                continue
-            if manifest.stat().st_size > MAX_MANIFEST_BYTES:
-                return {}
-            return parse_manifest_text(manifest.read_text(encoding="utf-8", errors="replace"))
-        except OSError:
-            return {}
-    return {}
 
 
 def repository_module_plans(project, modules, states, odoo_version):
@@ -5434,60 +5008,6 @@ def inspect_repository_modules(project, url, branch, db_name=""):
     }
 
 
-def sparse_checkout_pattern(path):
-    """Motif sparse-checkout ne désignant que ce chemin exact, caractères spéciaux échappés."""
-    escaped = "".join("\\" + char if char in "*?[\\" else char for char in path)
-    return "/" + escaped + "\n"
-
-
-def repository_tree_modules(tree_output, repository_name):
-    """Liste (chemin, nom, manifeste) et les liens symboliques d'un `git ls-tree -r`."""
-    found, has_symlinks = repository_modules_from_tree(tree_output, repository_name)
-    manifest_files = {}
-    symlinks = []
-    for line in str(tree_output or "").splitlines():
-        meta, _, path = line.partition("\t")
-        if not path:
-            continue
-        if meta.split(" ", 1)[0] == "120000":
-            symlinks.append(path)
-        directory, filename = posixpath.dirname(path), posixpath.basename(path)
-        if filename in MANIFEST_FILENAMES and directory in found:
-            manifest_files.setdefault(directory, filename)
-    return [(path, name, manifest_files.get(path, MANIFEST_FILENAMES[0])) for path, name in found.items()], symlinks
-
-
-def repository_clone_error(stderr):
-    details = str(stderr or "").casefold()
-    if any(
-        marker in details for marker in ("permission denied (publickey)", "no such identity", "sign_and_send_pubkey")
-    ):
-        return RuntimeError(
-            "GitLab refuse la clé SSH de cet ordinateur. Ouvre l’assistant Clé SSH du manager, "
-            "puis vérifie que sa clé publique est autorisée dans GitLab."
-        )
-    if "host key verification failed" in details:
-        return RuntimeError("L’identité du serveur GitLab n’a pas pu être vérifiée par SSH.")
-    if any(
-        marker in details
-        for marker in (
-            "remote branch",
-            "couldn't find remote ref",
-            "could not find remote branch",
-            "not found in upstream origin",
-        )
-    ):
-        return RuntimeError("La branche ou le tag demandé est introuvable dans ce dépôt.")
-    if any(
-        marker in details
-        for marker in ("could not resolve hostname", "failed to connect", "connection timed out", "connection refused")
-    ):
-        return RuntimeError("GitLab est inaccessible depuis cet ordinateur. Vérifie le réseau et le DNS.")
-    return RuntimeError(
-        "Récupération Git impossible. Vérifie l’URL SSH, la branche et l’autorisation de la clé dans GitLab."
-    )
-
-
 def repository_modules_job(job, project, url, branch, names, commit=""):
     """Import des modules choisis : ajout ou remplacement décidé par module, tout ou rien."""
     project = validate_project(project)
@@ -5593,46 +5113,6 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
         job.add(f"Code préparé : {len(plans)} module(s), source {url}, branche {branch}.")
         job.add("Installe ou mets à jour ces modules dans la base Odoo depuis l’interface.")
         job.result = {"kind": "repository_modules", "modules": names, "added": added, "updated": updated}
-
-
-def safe_import_name(filename):
-    stem = Path(filename or "modules").stem or "modules"
-    return SAFE_IMPORT_NAME_RE.sub("_", stem).strip("._") or "modules"
-
-
-def safe_extract_zip(zip_path, destination):
-    destination.mkdir(parents=True, exist_ok=True)
-    base = destination.resolve()
-    skipped_links = []
-    with zipfile.ZipFile(zip_path) as archive:
-        infos = archive.infolist()
-        if len(infos) > MAX_ZIP_ENTRIES:
-            raise RuntimeError(f"ZIP trop volumineux: plus de {MAX_ZIP_ENTRIES} entrées.")
-        if sum(info.file_size for info in infos) > MAX_ZIP_UNCOMPRESSED_BYTES:
-            raise RuntimeError("ZIP trop volumineux après décompression. Limite: 2 Go.")
-        for info in infos:
-            name = info.filename
-            if not name or name.startswith(("/", "\\")):
-                raise RuntimeError(f"Chemin ZIP invalide: {name}")
-            if "\\" in name or "\x00" in name or re.match(r"^[A-Za-z]:", name):
-                raise RuntimeError(f"Chemin ZIP invalide: {name}")
-            parts = Path(name).parts
-            if any(part == ".." for part in parts):
-                raise RuntimeError(f"Chemin ZIP dangereux: {name}")
-            mode = (info.external_attr >> 16) & 0o170000
-            if mode == stat.S_IFLNK:
-                skipped_links.append(name)
-                continue
-            if mode not in {0, stat.S_IFREG, stat.S_IFDIR}:
-                raise RuntimeError(f"Type de fichier ZIP non pris en charge: {name}")
-            target = (destination / name).resolve()
-            if base != target and base not in target.parents:
-                raise RuntimeError(f"Extraction hors dossier refusee: {name}")
-        for info in infos:
-            if info.filename in skipped_links:
-                continue
-            archive.extract(info, destination)
-    return skipped_links
 
 
 def extract_zip_module_candidates(project, filename, data):

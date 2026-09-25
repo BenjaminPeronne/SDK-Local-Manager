@@ -8,6 +8,7 @@ from unittest import mock
 from test_module_layout import DummyJob, ModuleLayoutTests
 
 import odoo_manager_web as web
+from odoo_manager_core import manifests
 
 
 class SocleModulesTests(ModuleLayoutTests):
@@ -282,7 +283,7 @@ class SocleModulesTests(ModuleLayoutTests):
 
 def graph_entry(depends=(), auto_install=False, **extra):
     manifest = {"name": extra.pop("title", ""), "depends": list(depends), "auto_install": auto_install, **extra}
-    return web.manifest_graph_entry(manifest)
+    return manifests.manifest_graph_entry(manifest)
 
 
 class ModuleInstallPlanTests(unittest.TestCase):
@@ -295,7 +296,7 @@ class ModuleInstallPlanTests(unittest.TestCase):
             "mail": graph_entry(["base"]),
         }
 
-        plan = web.module_install_plan(graph, {"mail": {"state": "installed"}}, ["mrp"])
+        plan = manifests.module_install_plan(graph, {"mail": {"state": "installed"}}, ["mrp"])
 
         self.assertEqual(["mrp"], plan["requested"])
         self.assertEqual(["product", "resource", "stock"], [item["name"] for item in plan["dependencies"]])
@@ -319,7 +320,7 @@ class ModuleInstallPlanTests(unittest.TestCase):
             "stock_only": graph_entry(["stock", "purchase"], auto_install=True),
         }
 
-        plan = web.module_install_plan(
+        plan = manifests.module_install_plan(
             graph, {"account": {"state": "installed"}, "stock": {"state": "installed"}}, ["sale"]
         )
 
@@ -333,7 +334,7 @@ class ModuleInstallPlanTests(unittest.TestCase):
             "legacy": graph_entry(installable=False),
         }
 
-        plan = web.module_install_plan(graph, {}, ["helpdesk", "base"])
+        plan = manifests.module_install_plan(graph, {}, ["helpdesk", "base"])
 
         self.assertEqual([{"name": "mail", "required_by": "helpdesk"}], plan["missing"])
         self.assertEqual([{"name": "legacy", "required_by": "helpdesk"}], plan["uninstallable"])
@@ -351,7 +352,7 @@ class ModuleInstallPlanTests(unittest.TestCase):
             broken.mkdir()
             (broken / "__manifest__.py").write_text("{'name': open('x')}\n", encoding="utf-8")
 
-            graph = web.module_graph_from_paths([module, broken])
+            graph = manifests.module_graph_from_paths([module, broken])
 
         self.assertEqual(["sale"], graph["demo"]["depends"])
         self.assertEqual("Demo", graph["demo"]["title"])
@@ -368,3 +369,21 @@ class ModuleInstallPlanTests(unittest.TestCase):
             self.assertIn(section, section_ids)
             self.assertTrue(modules)
             self.assertTrue((icons / f"{app_id}.svg").is_file(), app_id)
+
+
+class ManifestRecordsTests(unittest.TestCase):
+    def test_graph_is_read_from_marked_manifest_records(self):
+        marker = manifests.MANIFEST_RECORD_MARKER
+        output = (
+            f"\n{marker}sale\n{{'name': 'Sale', 'depends': ['mail']}}\n"
+            f"\n{marker}sale\n{{'name': 'Doublon'}}\n"
+            f"\n{marker}../evil\n{{'name': 'Refusé'}}\n"
+            f"\n{marker}broken\nnot a manifest\n"
+        )
+
+        graph = manifests.module_graph_from_records(output, web.SAFE_MODULE_RE)
+
+        self.assertEqual(["broken", "sale"], sorted(graph))
+        self.assertEqual("Sale", graph["sale"]["title"])
+        self.assertEqual(["mail"], graph["sale"]["depends"])
+        self.assertEqual([], graph["broken"]["depends"])
