@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Boxes, Database, Logs, Settings } from "lucide-react";
+import { useApiAvailability } from "@/hooks/use-api-availability";
 import { useHiddenBelowStickyHeader } from "@/hooks/use-hidden-below-sticky-header";
+import { useJobs } from "@/hooks/use-jobs";
 import { useModuleFilters } from "@/hooks/use-module-filters";
 import { useScheduledTimeouts } from "@/hooks/use-scheduled-timeouts";
 import { useStickyProjectHeader } from "@/hooks/use-sticky-project-header";
@@ -31,16 +33,8 @@ import {
   openDockerDesktopNative,
   openExternalUrl,
   requestTaskNotificationPermission,
-  sendTaskNotification,
 } from "@/lib/desktop-runtime";
-import { type JobOutputCache, mergeIncrementalJobOutput } from "@/lib/job-output";
-import {
-  isJobActive,
-  isJobUnfinished,
-  jobCompletionTitle,
-  jobsFingerprint,
-  PROJECT_ARRIVAL_PREFIXES,
-} from "@/lib/jobs";
+import { isJobActive, isJobUnfinished, PROJECT_ARRIVAL_PREFIXES } from "@/lib/jobs";
 import { moduleRepositoryUrlError, socleAppInstalled } from "@/lib/modules";
 import { fallbackManagerSettings, firstOdooDatabase } from "@/lib/projects";
 import type {
@@ -177,9 +171,6 @@ export default function Home() {
   const [loadingSocleCatalog, setLoadingSocleCatalog] = useState(false);
   const [socleSearch, setSocleSearch] = useState("");
   const [soclePlan, setSoclePlan] = useState<SocleInstallPlan | null>(null);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const jobOutputCache = useRef<JobOutputCache>(new Map());
-  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [logDescriptionExpanded, setLogDescriptionExpanded] = useState(false);
   const [externalLogView, setExternalLogView] = useState<ExternalLogView | null>(null);
   const [loading, setLoading] = useState(false);
@@ -190,7 +181,6 @@ export default function Home() {
   const [initializationError, setInitializationError] = useState("");
   const [backendDiagnostics, setBackendDiagnostics] = useState<BackendDiagnostics | null>(null);
   const [error, setError] = useState("");
-  const [apiUnavailable, setApiUnavailable] = useState(false);
   const [desktopRuntime, setDesktopRuntime] = useState(false);
   const [repositoryOpen, setRepositoryOpen] = useState(false);
   const [repositoryUrl, setRepositoryUrl] = useState("");
@@ -235,21 +225,27 @@ export default function Home() {
   } | null>(null);
   const lastDockerState = useRef<string | null>(null);
   const pendingDockerState = useRef<{ state: string; count: number } | null>(null);
-  const consecutiveApiFailures = useRef(0);
   const initializingRef = useRef(true);
   const bootstrapGeneration = useRef(0);
   const overviewRefreshInFlight = useRef(false);
   const systemRefreshInFlight = useRef(false);
-  const jobsRefreshInFlight = useRef(false);
-  // Changement signalé pendant une lecture : relu à sa fin, sinon la dernière ligne attendrait le prochain signal.
-  const jobsRefreshQueued = useRef(false);
   const [jobsStreamConnected, setJobsStreamConnected] = useState(false);
-  const selectedJobIdRef = useRef<number | null>(null);
-  const jobStatuses = useRef<Map<number, string>>(new Map());
-  const jobNotificationsInitialized = useRef(false);
   const lastSynchronizedJobCompletion = useRef("");
   const modulesRequestGeneration = useRef(0);
   const schedule = useScheduledTimeouts();
+  const { toasts, pushToast } = useToasts(schedule);
+  const { apiUnavailable, markApiSuccess, markApiFailure } = useApiAvailability();
+  const {
+    jobs,
+    selectedJobId,
+    setSelectedJobId,
+    hasRunningJobs,
+    runningJobs,
+    applyJobs,
+    refreshJobs,
+    trackCreatedJob,
+    focusJob,
+  } = useJobs({ pushToast, markApiSuccess, markApiFailure });
   const onboardingPrompted = useRef(false);
   const wslSetupPrompted = useRef(false);
   const pendingProjectNames = useRef(new Set<string>());
@@ -299,8 +295,6 @@ export default function Home() {
     () => projectJobs.find((job) => job.id === selectedJobId) || projectJobs[0],
     [projectJobs, selectedJobId],
   );
-  const hasRunningJobs = useMemo(() => jobs.some(isJobUnfinished), [jobs]);
-  const runningJobs = useMemo(() => jobs.filter(isJobUnfinished), [jobs]);
   const pendingProjectArrivals = useMemo(
     () =>
       jobs.filter(
@@ -374,51 +368,6 @@ export default function Home() {
   );
   const allFilteredModulesSelected =
     filteredModuleNames.length > 0 && selectedFilteredModuleCount === filteredModuleNames.length;
-  const { toasts, pushToast } = useToasts(schedule);
-
-  const notifyJobCompletion = useCallback(
-    (job: Job) => {
-      const successful = job.status === "done";
-      const title = `${jobCompletionTitle(job)} : ${job.title}`;
-      const message = !successful && job.error_message ? `${title}\n${job.error_message}` : title;
-      pushToast(successful ? "success" : job.status === "cancelled" ? "info" : "error", message);
-      void sendTaskNotification(job).catch(() => {
-        // A refused system permission must not affect job polling.
-      });
-    },
-    [pushToast],
-  );
-
-  const applyJobs = useCallback(
-    (receivedJobs: Job[], notify = true) => {
-      const nextJobs = mergeIncrementalJobOutput(receivedJobs, jobOutputCache.current);
-      const previousStatuses = jobStatuses.current;
-      if (notify && jobNotificationsInitialized.current) {
-        for (const job of nextJobs) {
-          const previousStatus = previousStatuses.get(job.id);
-          if (previousStatus && isJobUnfinished({ status: previousStatus }) && !isJobUnfinished(job)) {
-            notifyJobCompletion(job);
-          }
-        }
-      }
-      jobStatuses.current = new Map(nextJobs.map((job) => [job.id, job.status]));
-      jobNotificationsInitialized.current = true;
-      setJobs((current) => (jobsFingerprint(current) === jobsFingerprint(nextJobs) ? current : nextJobs));
-    },
-    [notifyJobCompletion],
-  );
-
-  const markApiSuccess = useCallback(() => {
-    consecutiveApiFailures.current = 0;
-    setApiUnavailable(false);
-  }, []);
-
-  const markApiFailure = useCallback((error: unknown) => {
-    if (!(error instanceof ApiUnavailableError)) return false;
-    consecutiveApiFailures.current += 1;
-    if (consecutiveApiFailures.current >= 2) setApiUnavailable(true);
-    return consecutiveApiFailures.current === 2;
-  }, []);
 
   const applyBootstrapSnapshot = useCallback(
     (payload: BootstrapSnapshot) => {
@@ -441,7 +390,7 @@ export default function Home() {
       markApiSuccess();
       setError("");
     },
-    [applyJobs, markApiSuccess],
+    [applyJobs, markApiSuccess, setSelectedJobId],
   );
 
   const commitSystemStatus = useCallback(
@@ -643,42 +592,6 @@ export default function Home() {
       pushToast("error", err instanceof Error ? err.message : "Enregistrement impossible.");
     }
   }, [pushToast]);
-
-  const refreshJobs = useCallback(
-    async (detailJobId?: number | null) => {
-      if (jobsRefreshInFlight.current) {
-        jobsRefreshQueued.current = true;
-        return;
-      }
-      jobsRefreshInFlight.current = true;
-      try {
-        let requestedJobId = detailJobId ?? selectedJobIdRef.current;
-        do {
-          jobsRefreshQueued.current = false;
-          const knownOutput = requestedJobId ? jobOutputCache.current.get(requestedJobId) : undefined;
-          const params = new URLSearchParams();
-          if (requestedJobId) params.set("detail", String(requestedJobId));
-          if (requestedJobId && knownOutput?.total) params.set("output_from", String(knownOutput.total));
-          const query = params.size ? `?${params}` : "";
-          const payload = await api<{ jobs: Job[] }>(`/api/jobs${query}`);
-          applyJobs(payload.jobs);
-          markApiSuccess();
-          setSelectedJobId((currentId) => currentId ?? payload.jobs[0]?.id ?? null);
-          requestedJobId = selectedJobIdRef.current;
-        } while (jobsRefreshQueued.current);
-      } catch (err) {
-        markApiFailure(err);
-        // Jobs polling should not break the whole screen.
-      } finally {
-        jobsRefreshInFlight.current = false;
-      }
-    },
-    [applyJobs, markApiFailure, markApiSuccess],
-  );
-
-  useEffect(() => {
-    selectedJobIdRef.current = selectedJobId;
-  }, [selectedJobId]);
 
   const refreshAddonLinks = useCallback(async () => {
     const projectName = selectedProject?.name;
@@ -946,8 +859,7 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify({ action, ...payload }),
       });
-      setSelectedJobId(result.job.id);
-      jobStatuses.current.set(result.job.id, result.job.status);
+      trackCreatedJob(result.job);
       setExternalLogView(null);
       enableLogAutoFollow();
       if (result.job.status === "queued") {
@@ -1367,11 +1279,9 @@ export default function Home() {
   function selectJob(jobId: number) {
     stopLiveLogStream();
     setExternalLogView(null);
-    setSelectedJobId(jobId);
-    selectedJobIdRef.current = jobId;
     setRawOutputVisible(false);
     enableLogAutoFollow();
-    void refreshJobs(jobId);
+    focusJob(jobId);
   }
 
   function requestUninstall(moduleNames: string[]) {
@@ -1482,8 +1392,7 @@ export default function Home() {
     });
     try {
       const result = await uploadDatabaseBackup(payload, onProgress);
-      setSelectedJobId(result.job.id);
-      jobStatuses.current.set(result.job.id, result.job.status);
+      trackCreatedJob(result.job);
       setExternalLogView(null);
       enableLogAutoFollow();
       setRestoreDbOpen(false);
