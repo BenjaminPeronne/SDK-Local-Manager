@@ -1,7 +1,6 @@
 import http.client
 import json
 import os
-import re
 import tempfile
 import threading
 import time
@@ -139,8 +138,6 @@ class LocalApiRequestGuardTests(unittest.TestCase):
 class ApiContractTests(unittest.TestCase):
     """L'API publie sa version et ses capacités, et le contrat suit le code."""
 
-    SOURCE = (Path(__file__).resolve().parents[1] / "odoo_manager_web.py").read_text(encoding="utf-8")
-
     def setUp(self):
         self.server = web.ManagerHTTPServer(("127.0.0.1", 0), web.Handler)
         self.port = self.server.server_address[1]
@@ -158,20 +155,6 @@ class ApiContractTests(unittest.TestCase):
         status, body = response.status, response.read().decode("utf-8")
         connection.close()
         return status, json.loads(body)
-
-    def declared_actions(self):
-        """Actions réellement acceptées par POST /api/jobs, lues dans le code."""
-        found = set(re.findall(r'action == "([a-z_]+)"', self.SOURCE))
-        for group in re.findall(r"action in \(([^)]*)\)", self.SOURCE):
-            found.update(re.findall(r'"([a-z_]+)"', group))
-        return found
-
-    def routed_paths(self):
-        """Chemins servis, littéraux et gabarits, dans la forme publiée."""
-        literals = set(re.findall(r'path == "(/api/[^"]*)"', self.SOURCE))
-        for pattern in re.findall(r're\.match\(r"\^(/api/[^"]*)\$"', self.SOURCE):
-            literals.add(pattern.replace("([^/]+)", "{project}").replace("([0-9]+)", "{job}"))
-        return literals
 
     def test_version_identifies_the_service_before_any_other_call(self):
         status, payload = self.get("/api/version")
@@ -192,12 +175,13 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(web.platform_id(), payload["features"]["platform"])
 
     def test_published_actions_match_the_dispatcher(self):
-        self.assertEqual(sorted(self.declared_actions()), sorted(web.API_ACTIONS))
+        self.assertEqual(sorted(web.JOB_ACTIONS), sorted(web.API_ACTIONS))
 
-    def test_published_endpoints_cover_every_served_route(self):
-        published = {path for paths in web.API_ENDPOINTS.values() for path in paths}
-
-        self.assertEqual(set(), self.routed_paths() - published)
+    def test_published_endpoints_match_the_served_routes(self):
+        for method, published in web.API_ENDPOINTS.items():
+            with self.subTest(method=method):
+                self.assertEqual(sorted(published), sorted(web.ROUTER.templates(method)))
+        self.assertEqual({"GET", "POST", "DELETE"}, set(web.API_ENDPOINTS))
 
     def test_reading_a_vanished_project_is_a_quiet_404(self):
         # Le projet vient d'être supprimé alors que l'interface rafraîchit encore ses modules :
