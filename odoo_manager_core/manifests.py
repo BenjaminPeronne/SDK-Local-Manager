@@ -152,11 +152,7 @@ def module_install_plan(graph, states, requested):
 
 
 MANIFEST_FILENAMES = ("__manifest__.py", "__openerp__.py")
-
-
 MAX_MANIFEST_BYTES = 512 * 1024
-
-
 ODOO_SERIES_VERSION_RE = re.compile(r"^(\d+\.\d+)\.\d+\.\d+\.\d+$")
 
 

@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import Mock, patch
 
 import odoo_manager_web as web
+from odoo_manager_core import command_output, job_queue
 from odoo_manager_core.config import ManagerSettings
 from odoo_manager_core.traefik import reset_traefik_entrypoint_cache
 
@@ -238,7 +239,7 @@ class OutputProgressTests(unittest.TestCase):
         }
         for line, expected in cases.items():
             with self.subTest(line=line):
-                progress = web.parse_output_progress(line)
+                progress = command_output.parse_output_progress(line)
                 self.assertIsNotNone(progress)
                 self.assertEqual(
                     expected,
@@ -246,7 +247,7 @@ class OutputProgressTests(unittest.TestCase):
                 )
 
     def test_manager_counters_drive_the_bar_and_stay_in_the_history(self):
-        progress = web.parse_output_progress("Préparation des liens: 1200/1416")
+        progress = command_output.parse_output_progress("Préparation des liens: 1200/1416")
 
         self.assertEqual(
             ("Préparation des liens", 1200, 1416, False),
@@ -263,10 +264,10 @@ class OutputProgressTests(unittest.TestCase):
             "Unpacking objects: 100% (12/12)",
         ):
             with self.subTest(line=line):
-                self.assertIsNone(web.parse_output_progress(line))
+                self.assertIsNone(command_output.parse_output_progress(line))
 
     def test_rewritten_lines_feed_the_bar_only(self):
-        job = web.Job.__new__(web.Job)
+        job = job_queue.Job.__new__(job_queue.Job)
         job.lines, job.output, job.output_total, job.progress = [], "", 0, None
         job.control = Mock()
 
@@ -306,18 +307,18 @@ class UnfinishedJobTests(unittest.TestCase):
     """Une action déjà en file ou en cours n'est pas lancée une seconde fois."""
 
     def setUp(self):
-        patcher = patch("odoo_manager_web.schedule_jobs")
+        patcher = patch("odoo_manager_core.job_queue.schedule_jobs")
         patcher.start()
         self.addCleanup(patcher.stop)
         self.created = []
 
     def tearDown(self):
-        with web.JOBS_LOCK:
+        with job_queue.JOBS_LOCK:
             for job in self.created:
-                web.JOBS.pop(job.id, None)
+                job_queue.JOBS.pop(job.id, None)
 
     def make_job(self, target, project, status="queued"):
-        job = web.Job(f"Supprimer {project}", target, (project,), project=project)
+        job = job_queue.Job(f"Supprimer {project}", target, (project,), project=project)
         job.status = status
         self.created.append(job)
         return job
@@ -325,14 +326,14 @@ class UnfinishedJobTests(unittest.TestCase):
     def test_returns_the_pending_job_of_the_same_project(self):
         existing = self.make_job(web.delete_project_job, "DEMO")
 
-        self.assertIs(existing, web.unfinished_job(web.delete_project_job, "DEMO"))
+        self.assertIs(existing, job_queue.unfinished_job(web.delete_project_job, "DEMO"))
 
     def test_ignores_finished_jobs_other_projects_and_other_actions(self):
         self.make_job(web.delete_project_job, "DEMO", status="done")
         self.make_job(web.delete_project_job, "OTHER")
         self.make_job(web.install_socle_job, "DEMO")
 
-        self.assertIsNone(web.unfinished_job(web.delete_project_job, "DEMO"))
+        self.assertIsNone(job_queue.unfinished_job(web.delete_project_job, "DEMO"))
 
 
 class ServerRuntimeTests(unittest.TestCase):
@@ -631,23 +632,23 @@ class PostgreSqlConsoleTests(unittest.TestCase):
 
 class JobResourceTests(unittest.TestCase):
     def setUp(self):
-        with web.JOBS_LOCK:
-            self.previous_jobs = web.JOBS.copy()
-            self.previous_next_job_id = web.NEXT_JOB_ID
-            web.JOBS.clear()
-            web.NEXT_JOB_ID = 1
+        with job_queue.JOBS_LOCK:
+            self.previous_jobs = job_queue.JOBS.copy()
+            self.previous_next_job_id = job_queue.NEXT_JOB_ID
+            job_queue.JOBS.clear()
+            job_queue.NEXT_JOB_ID = 1
 
     def tearDown(self):
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
-            with web.JOBS_LOCK:
-                if not any(job.status == "running" for job in web.JOBS.values()):
+            with job_queue.JOBS_LOCK:
+                if not any(job.status == "running" for job in job_queue.JOBS.values()):
                     break
             time.sleep(0.01)
-        with web.JOBS_LOCK:
-            web.JOBS.clear()
-            web.JOBS.update(self.previous_jobs)
-            web.NEXT_JOB_ID = self.previous_next_job_id
+        with job_queue.JOBS_LOCK:
+            job_queue.JOBS.clear()
+            job_queue.JOBS.update(self.previous_jobs)
+            job_queue.NEXT_JOB_ID = self.previous_next_job_id
 
     def wait_for(self, job):
         deadline = time.monotonic() + 2
@@ -657,7 +658,7 @@ class JobResourceTests(unittest.TestCase):
 
     def test_completed_job_releases_target_arguments_and_thread(self):
         payload = b"zip-content" * 1000
-        job = web.Job("Import test", lambda _job, _payload: None, (payload,))
+        job = job_queue.Job("Import test", lambda _job, _payload: None, (payload,))
 
         self.wait_for(job)
 
@@ -666,20 +667,20 @@ class JobResourceTests(unittest.TestCase):
         self.assertIsNone(job.thread)
 
     def test_completed_job_history_is_bounded(self):
-        for index in range(web.MAX_RETAINED_JOBS + 5):
-            job = web.Job(f"Job {index}", lambda _job: None)
+        for index in range(job_queue.MAX_RETAINED_JOBS + 5):
+            job = job_queue.Job(f"Job {index}", lambda _job: None)
             self.wait_for(job)
 
-        with web.JOBS_LOCK:
-            self.assertLessEqual(len(web.JOBS), web.MAX_RETAINED_JOBS)
+        with job_queue.JOBS_LOCK:
+            self.assertLessEqual(len(job_queue.JOBS), job_queue.MAX_RETAINED_JOBS)
 
     def test_compact_job_snapshot_only_includes_selected_output(self):
-        first = web.Job("First", lambda job: job.add("first output"))
-        second = web.Job("Second", lambda job: job.add("second output"), project="DEMO")
+        first = job_queue.Job("First", lambda job: job.add("first output"))
+        second = job_queue.Job("Second", lambda job: job.add("second output"), project="DEMO")
         self.wait_for(first)
         self.wait_for(second)
 
-        snapshot = web.jobs_snapshot(detail_job_id=second.id, compact=True)
+        snapshot = job_queue.jobs_snapshot(detail_job_id=second.id, compact=True)
         by_id = {job["id"]: job for job in snapshot}
 
         self.assertEqual(by_id[first.id]["lines"], [])
@@ -689,14 +690,14 @@ class JobResourceTests(unittest.TestCase):
         self.assertIn("second output", by_id[second.id]["output"])
 
     def test_detail_job_output_can_be_fetched_incrementally(self):
-        job = web.Job("Stream", lambda current: [current.add(f"ligne {index}") for index in range(3)])
+        job = job_queue.Job("Stream", lambda current: [current.add(f"ligne {index}") for index in range(3)])
         self.wait_for(job)
-        full = web.jobs_snapshot(detail_job_id=job.id, compact=True)[0]
+        full = job_queue.jobs_snapshot(detail_job_id=job.id, compact=True)[0]
         self.assertEqual(0, full["output_from"])
         self.assertEqual(len(full["output"]), full["output_total"])
 
         job.add("ligne 3")
-        delta = web.jobs_snapshot(detail_job_id=job.id, compact=True, output_from=full["output_total"])[0]
+        delta = job_queue.jobs_snapshot(detail_job_id=job.id, compact=True, output_from=full["output_total"])[0]
 
         self.assertEqual("ligne 3\n", delta["output"])
         self.assertEqual(full["output_total"], delta["output_from"])
@@ -705,25 +706,25 @@ class JobResourceTests(unittest.TestCase):
         self.assertEqual(full["output"] + delta["output"], job.output)
 
     def test_incremental_request_outside_retained_window_returns_full_output(self):
-        job = web.Job("Long", lambda current: None)
+        job = job_queue.Job("Long", lambda current: None)
         self.wait_for(job)
         for index in range(30_000):
             job.add(f"2026-09-15 INFO odoo.modules.loading: ligne {index}")
 
-        self.assertLessEqual(len(job.lines), web.JOB_LINES_LIMIT * 2)
-        self.assertLessEqual(len(job.output), web.JOB_OUTPUT_LIMIT * 2)
-        snapshot = web.jobs_snapshot(detail_job_id=job.id, compact=True, output_from=10)[0]
+        self.assertLessEqual(len(job.lines), job_queue.JOB_LINES_LIMIT * 2)
+        self.assertLessEqual(len(job.output), job_queue.JOB_OUTPUT_LIMIT * 2)
+        snapshot = job_queue.jobs_snapshot(detail_job_id=job.id, compact=True, output_from=10)[0]
 
         self.assertEqual(0, snapshot["output_from"])
-        self.assertEqual(web.JOB_OUTPUT_LIMIT, len(snapshot["output"]))
-        self.assertEqual(web.JOB_LINES_LIMIT, len(snapshot["lines"]))
+        self.assertEqual(job_queue.JOB_OUTPUT_LIMIT, len(snapshot["output"]))
+        self.assertEqual(job_queue.JOB_LINES_LIMIT, len(snapshot["lines"]))
         self.assertTrue(snapshot["output"].endswith("ligne 29999\n"))
 
     def test_job_snapshot_exposes_structured_progress(self):
-        job = web.Job("Progress", lambda current_job: current_job.set_progress("Initialisation", 30, 120))
+        job = job_queue.Job("Progress", lambda current_job: current_job.set_progress("Initialisation", 30, 120))
         self.wait_for(job)
 
-        snapshot = web.jobs_snapshot(detail_job_id=job.id, compact=True)[0]
+        snapshot = job_queue.jobs_snapshot(detail_job_id=job.id, compact=True)[0]
 
         self.assertEqual(
             snapshot["progress"],
@@ -735,10 +736,10 @@ class JobResourceTests(unittest.TestCase):
         def reject_authentication(_job):
             raise RuntimeError("RIKA a refusé l'authentification. Vérifie tes identifiants.")
 
-        job = web.Job("Créer le projet sodial_dev", reject_authentication, project="sodial_dev")
+        job = job_queue.Job("Créer le projet sodial_dev", reject_authentication, project="sodial_dev")
         self.wait_for(job)
 
-        snapshot = web.jobs_snapshot(detail_job_id=job.id, compact=True)[0]
+        snapshot = job_queue.jobs_snapshot(detail_job_id=job.id, compact=True)[0]
         self.assertEqual(snapshot["status"], "error")
         self.assertEqual(
             snapshot["error_message"],
@@ -751,10 +752,10 @@ class JobResourceTests(unittest.TestCase):
         def odoo_failure(_job):
             raise web.OdooError("La commande Odoo a échoué avec le code 255. ParseError")
 
-        job = web.Job("Installer sodial_stock", odoo_failure, project="sodial")
+        job = job_queue.Job("Installer sodial_stock", odoo_failure, project="sodial")
         self.wait_for(job)
 
-        snapshot = web.jobs_snapshot(detail_job_id=job.id, compact=True)[0]
+        snapshot = job_queue.jobs_snapshot(detail_job_id=job.id, compact=True)[0]
         self.assertTrue(snapshot["error_message"].startswith("Erreur d'Odoo"))
         self.assertIn("pas le gestionnaire", snapshot["error_message"])
         self.assertIn("La commande Odoo a échoué avec le code 255.", snapshot["error_message"])
@@ -762,35 +763,35 @@ class JobResourceTests(unittest.TestCase):
 
 class JobHistoryTests(unittest.TestCase):
     def setUp(self):
-        with web.JOBS_LOCK:
-            self.previous_jobs = web.JOBS.copy()
-            self.previous_next_job_id = web.NEXT_JOB_ID
-            web.JOBS.clear()
-            web.NEXT_JOB_ID = 1
+        with job_queue.JOBS_LOCK:
+            self.previous_jobs = job_queue.JOBS.copy()
+            self.previous_next_job_id = job_queue.NEXT_JOB_ID
+            job_queue.JOBS.clear()
+            job_queue.NEXT_JOB_ID = 1
         self.sandbox = tempfile.TemporaryDirectory(prefix="odoo-manager-jobs-")
         self.history = Path(self.sandbox.name) / "jobs.json"
-        self.history_patch = patch.object(web, "JOB_HISTORY_PATH", None)
+        self.history_patch = patch.object(job_queue, "JOB_HISTORY_PATH", None)
         self.history_patch.start()
 
     def tearDown(self):
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
-            with web.JOBS_LOCK:
-                if not any(job.status in web.JOB_UNFINISHED_STATUSES for job in web.JOBS.values()):
+            with job_queue.JOBS_LOCK:
+                if not any(job.status in job_queue.JOB_UNFINISHED_STATUSES for job in job_queue.JOBS.values()):
                     break
             time.sleep(0.01)
         self.history_patch.stop()
-        with web.JOBS_LOCK:
-            web.JOBS.clear()
-            web.JOBS.update(self.previous_jobs)
-            web.NEXT_JOB_ID = self.previous_next_job_id
+        with job_queue.JOBS_LOCK:
+            job_queue.JOBS.clear()
+            job_queue.JOBS.update(self.previous_jobs)
+            job_queue.NEXT_JOB_ID = self.previous_next_job_id
         self.sandbox.cleanup()
 
     def wait_for(self, job):
         deadline = time.monotonic() + 2
-        while job.status in web.JOB_UNFINISHED_STATUSES and time.monotonic() < deadline:
+        while job.status in job_queue.JOB_UNFINISHED_STATUSES and time.monotonic() < deadline:
             time.sleep(0.01)
-        self.assertNotIn(job.status, web.JOB_UNFINISHED_STATUSES)
+        self.assertNotIn(job.status, job_queue.JOB_UNFINISHED_STATUSES)
 
     def wait_until_saved(self, job):
         """La fin d'action est enregistrée juste après le changement de statut, dans le fil de l'action."""
@@ -801,41 +802,41 @@ class JobHistoryTests(unittest.TestCase):
             except (OSError, ValueError):
                 saved = []
             record = next((item for item in saved if item["id"] == job.id), None)
-            if record and record["status"] not in web.JOB_UNFINISHED_STATUSES:
+            if record and record["status"] not in job_queue.JOB_UNFINISHED_STATUSES:
                 return record
             time.sleep(0.01)
         self.fail(f"Action {job.id} jamais enregistrée comme terminée.")
 
     def forget_jobs(self):
-        with web.JOBS_LOCK:
-            web.JOBS.clear()
-            web.NEXT_JOB_ID = 1
+        with job_queue.JOBS_LOCK:
+            job_queue.JOBS.clear()
+            job_queue.NEXT_JOB_ID = 1
 
     def test_finished_jobs_survive_a_restart(self):
-        web.load_job_history(self.history)
-        job = web.Job("Démarrer DEMO", lambda job: job.add("conteneurs démarrés"), project="DEMO")
+        job_queue.load_job_history(self.history)
+        job = job_queue.Job("Démarrer DEMO", lambda job: job.add("conteneurs démarrés"), project="DEMO")
         self.wait_until_saved(job)
         self.forget_jobs()
 
-        self.assertEqual(web.load_job_history(self.history), 1)
+        self.assertEqual(job_queue.load_job_history(self.history), 1)
 
-        restored = web.JOBS[job.id]
+        restored = job_queue.JOBS[job.id]
         self.assertEqual((restored.title, restored.project, restored.status), ("Démarrer DEMO", "DEMO", "done"))
         self.assertIn("conteneurs démarrés", restored.output)
         self.assertEqual(restored.lines[-1], "conteneurs démarrés")
-        self.assertGreater(web.NEXT_JOB_ID, job.id)
+        self.assertGreater(job_queue.NEXT_JOB_ID, job.id)
 
     def test_job_running_when_the_manager_stopped_is_restored_as_interrupted(self):
         record = {"id": 7, "title": "Mettre à jour", "status": "running", "started_at": "2026-09-25 10:00:00"}
         self.history.write_text(json.dumps({"version": 1, "jobs": [record]}), encoding="utf-8")
 
-        web.load_job_history(self.history)
+        job_queue.load_job_history(self.history)
 
-        restored = web.JOBS[7]
+        restored = job_queue.JOBS[7]
         self.assertEqual(restored.status, "error")
-        self.assertEqual(restored.error_message, web.JOB_INTERRUPTED_MESSAGE)
-        self.assertFalse(web.job_cancel_payload(restored)["cancellable"])
-        self.assertEqual(web.NEXT_JOB_ID, 8)
+        self.assertEqual(restored.error_message, job_queue.JOB_INTERRUPTED_MESSAGE)
+        self.assertFalse(job_queue.job_cancel_payload(restored)["cancellable"])
+        self.assertEqual(job_queue.NEXT_JOB_ID, 8)
         # L'interruption est réécrite : un second redémarrage ne la relit pas « en cours ».
         saved = json.loads(self.history.read_text(encoding="utf-8"))["jobs"]
         self.assertEqual(saved[0]["status"], "error")
@@ -844,36 +845,36 @@ class JobHistoryTests(unittest.TestCase):
         self.history.write_text("{pas du json", encoding="utf-8")
 
         with patch("traceback.print_exc"):
-            self.assertEqual(web.load_job_history(self.history), 0)
+            self.assertEqual(job_queue.load_job_history(self.history), 0)
 
-        self.assertEqual(web.JOBS, {})
+        self.assertEqual(job_queue.JOBS, {})
 
     def test_cleared_history_is_saved(self):
-        web.load_job_history(self.history)
-        job = web.Job("Arrêter DEMO", lambda _job: None, project="DEMO")
+        job_queue.load_job_history(self.history)
+        job = job_queue.Job("Arrêter DEMO", lambda _job: None, project="DEMO")
         self.wait_until_saved(job)
 
-        web.clear_jobs_history()
+        job_queue.clear_jobs_history()
 
         self.assertEqual(json.loads(self.history.read_text(encoding="utf-8"))["jobs"], [])
 
     def test_saved_output_keeps_the_end_of_long_actions(self):
-        web.load_job_history(self.history)
-        job = web.Job("Longue sortie", lambda job: [job.add(f"ligne {index:06d}") for index in range(5000)])
+        job_queue.load_job_history(self.history)
+        job = job_queue.Job("Longue sortie", lambda job: [job.add(f"ligne {index:06d}") for index in range(5000)])
         saved = self.wait_until_saved(job)["output"]
 
-        self.assertLessEqual(len(saved), web.JOB_HISTORY_OUTPUT_LIMIT)
+        self.assertLessEqual(len(saved), job_queue.JOB_HISTORY_OUTPUT_LIMIT)
         self.assertTrue(saved.endswith("ligne 004999\n"))
 
     def test_job_output_signals_a_change(self):
-        web.JOBS_CHANGED.clear()
-        job = web.Job("Signal", lambda _job: None)
+        job_queue.JOBS_CHANGED.clear()
+        job = job_queue.Job("Signal", lambda _job: None)
         self.wait_for(job)
-        web.JOBS_CHANGED.clear()
+        job_queue.JOBS_CHANGED.clear()
 
         job.add("nouvelle ligne")
 
-        self.assertTrue(web.JOBS_CHANGED.is_set())
+        self.assertTrue(job_queue.JOBS_CHANGED.is_set())
 
 
 class EventWatchCostTests(unittest.TestCase):
@@ -1202,7 +1203,7 @@ class WslManagerCommandTests(unittest.TestCase):
 
 
 class BootstrapSnapshotTests(unittest.TestCase):
-    @patch("odoo_manager_web.jobs_snapshot", return_value=[])
+    @patch("odoo_manager_core.job_queue.jobs_snapshot", return_value=[])
     @patch("odoo_manager_web.container_status", return_value="absent")
     @patch("odoo_manager_web.docker_status")
     def test_first_start_succeeds_before_default_workspace_exists(
@@ -1232,7 +1233,7 @@ class BootstrapSnapshotTests(unittest.TestCase):
         self.assertFalse(payload["system_status"]["workspace_exists"])
         self.assertFalse(payload["settings"]["workspace_exists"])
 
-    @patch("odoo_manager_web.jobs_snapshot", return_value=[])
+    @patch("odoo_manager_core.job_queue.jobs_snapshot", return_value=[])
     @patch("odoo_manager_web.container_status", return_value="absent")
     @patch("odoo_manager_web.docker_status")
     def test_inaccessible_wsl_workspace_does_not_block_startup(
@@ -1270,7 +1271,7 @@ class BootstrapSnapshotTests(unittest.TestCase):
         self.assertFalse(payload["system_status"]["workspace_exists"])
         self.assertFalse(payload["settings"]["workspace_exists"])
 
-    @patch("odoo_manager_web.jobs_snapshot", return_value=[])
+    @patch("odoo_manager_core.job_queue.jobs_snapshot", return_value=[])
     @patch("odoo_manager_web.project_dirs", return_value=[])
     @patch("odoo_manager_web.traefik_status")
     @patch("odoo_manager_web.docker_status")
@@ -1401,11 +1402,11 @@ class TraefikDetectionStatusTests(unittest.TestCase):
 
 class JobQueueAndCancellationTests(unittest.TestCase):
     def setUp(self):
-        with web.JOBS_LOCK:
-            self.previous_jobs = web.JOBS.copy()
-            self.previous_next_job_id = web.NEXT_JOB_ID
-            web.JOBS.clear()
-            web.NEXT_JOB_ID = 1
+        with job_queue.JOBS_LOCK:
+            self.previous_jobs = job_queue.JOBS.copy()
+            self.previous_next_job_id = job_queue.NEXT_JOB_ID
+            job_queue.JOBS.clear()
+            job_queue.NEXT_JOB_ID = 1
         self.releases = []
 
     def tearDown(self):
@@ -1413,14 +1414,14 @@ class JobQueueAndCancellationTests(unittest.TestCase):
             release.set()
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            with web.JOBS_LOCK:
-                if not any(job.status in web.JOB_UNFINISHED_STATUSES for job in web.JOBS.values()):
+            with job_queue.JOBS_LOCK:
+                if not any(job.status in job_queue.JOB_UNFINISHED_STATUSES for job in job_queue.JOBS.values()):
                     break
             time.sleep(0.01)
-        with web.JOBS_LOCK:
-            web.JOBS.clear()
-            web.JOBS.update(self.previous_jobs)
-            web.NEXT_JOB_ID = self.previous_next_job_id
+        with job_queue.JOBS_LOCK:
+            job_queue.JOBS.clear()
+            job_queue.JOBS.update(self.previous_jobs)
+            job_queue.NEXT_JOB_ID = self.previous_next_job_id
 
     def wait_until(self, predicate, timeout=5):
         deadline = time.monotonic() + timeout
@@ -1447,15 +1448,15 @@ class JobQueueAndCancellationTests(unittest.TestCase):
     def test_second_action_on_a_project_waits_then_starts(self):
         release, start_target = self.blocking_target()
         ran = []
-        start = web.Job("Démarrer DEMO", start_target, project="DEMO")
-        update = web.Job("Mettre à jour sale", lambda job: ran.append(job.id), project="DEMO")
-        other_project = web.Job("Démarrer AUTRE", lambda job: ran.append(job.id), project="AUTRE")
+        start = job_queue.Job("Démarrer DEMO", start_target, project="DEMO")
+        update = job_queue.Job("Mettre à jour sale", lambda job: ran.append(job.id), project="DEMO")
+        other_project = job_queue.Job("Démarrer AUTRE", lambda job: ran.append(job.id), project="AUTRE")
 
         self.assertEqual("running", start.status)
         self.assertEqual("queued", update.status)
         self.wait_until(lambda: other_project.status == "done")
-        with web.JOBS_LOCK:
-            self.assertEqual("Après « Démarrer DEMO »", web.job_cancel_payload(update)["waiting_for"])
+        with job_queue.JOBS_LOCK:
+            self.assertEqual("Après « Démarrer DEMO »", job_queue.job_cancel_payload(update)["waiting_for"])
 
         release.set()
         self.wait_until(lambda: update.status == "done")
@@ -1464,8 +1465,8 @@ class JobQueueAndCancellationTests(unittest.TestCase):
     def test_queued_actions_are_cancelled_when_the_previous_one_fails(self):
         release, failing = self.blocking_target(fail=True)
         ran = []
-        first = web.Job("Démarrer DEMO", failing, project="DEMO")
-        queued = web.Job("Mettre à jour sale", lambda job: ran.append(job.id), project="DEMO")
+        first = job_queue.Job("Démarrer DEMO", failing, project="DEMO")
+        queued = job_queue.Job("Mettre à jour sale", lambda job: ran.append(job.id), project="DEMO")
 
         release.set()
         self.wait_until(lambda: queued.status == "cancelled")
@@ -1476,9 +1477,9 @@ class JobQueueAndCancellationTests(unittest.TestCase):
 
     def test_action_on_all_projects_waits_for_project_actions(self):
         release, target = self.blocking_target()
-        web.Job("Démarrer DEMO", target, project="DEMO")
-        update_all = web.Job("MAJ tous les projets", lambda job: None, resources={"*"})
-        unrelated = web.Job("Installer Git pour Windows", lambda job: None, resources={"git"})
+        job_queue.Job("Démarrer DEMO", target, project="DEMO")
+        update_all = job_queue.Job("MAJ tous les projets", lambda job: None, resources={"*"})
+        unrelated = job_queue.Job("Installer Git pour Windows", lambda job: None, resources={"git"})
 
         self.assertEqual("queued", update_all.status)
         self.wait_until(lambda: unrelated.status == "done")
@@ -1487,11 +1488,11 @@ class JobQueueAndCancellationTests(unittest.TestCase):
 
     def test_queued_action_can_be_removed_without_running(self):
         release, target = self.blocking_target()
-        web.Job("Démarrer DEMO", target, project="DEMO")
+        job_queue.Job("Démarrer DEMO", target, project="DEMO")
         ran = []
-        queued = web.Job("Mettre à jour sale", lambda job: ran.append(job.id), project="DEMO")
+        queued = job_queue.Job("Mettre à jour sale", lambda job: ran.append(job.id), project="DEMO")
 
-        web.cancel_job(queued.id)
+        job_queue.cancel_job(queued.id)
         release.set()
         time.sleep(0.1)
 
@@ -1510,10 +1511,10 @@ class JobQueueAndCancellationTests(unittest.TestCase):
                 job.add("Attente Odoo...")
                 web.job_control.sleep(0.05)
 
-        job = web.Job("Restaurer demo", target, project="DEMO")
+        job = job_queue.Job("Restaurer demo", target, project="DEMO")
         self.wait_until(lambda: any("Attente Odoo" in line for line in job.lines))
 
-        web.cancel_job(job.id)
+        job_queue.cancel_job(job.id)
         self.wait_until(lambda: job.status == "cancelled")
 
         self.assertEqual(["conteneurs", "base"], steps)
@@ -1525,10 +1526,10 @@ class JobQueueAndCancellationTests(unittest.TestCase):
             while True:
                 web.job_control.sleep(0.05)
 
-        running = web.Job("Démarrer DEMO", target, project="DEMO")
-        queued = web.Job("Mettre à jour sale", lambda job: None, project="DEMO")
+        running = job_queue.Job("Démarrer DEMO", target, project="DEMO")
+        queued = job_queue.Job("Mettre à jour sale", lambda job: None, project="DEMO")
 
-        web.cancel_job(running.id)
+        job_queue.cancel_job(running.id)
         self.wait_until(lambda: queued.status == "cancelled")
 
         self.assertIn("a été arrêtée", queued.error_message)
@@ -1536,9 +1537,9 @@ class JobQueueAndCancellationTests(unittest.TestCase):
     def test_non_interruptible_and_irreversible_steps_refuse_cancellation(self):
         release, target = self.blocking_target()
         target.__name__ = "install_git_job"
-        installer = web.Job("Installer Git pour Windows", target, resources={"git"})
+        installer = job_queue.Job("Installer Git pour Windows", target, resources={"git"})
         with self.assertRaisesRegex(ValueError, "ne peut pas être arrêtée : l'installeur Windows"):
-            web.cancel_job(installer.id)
+            job_queue.cancel_job(installer.id)
         release.set()
 
         in_step = threading.Event()
@@ -1550,12 +1551,12 @@ class JobQueueAndCancellationTests(unittest.TestCase):
                 in_step.set()
                 leave_step.wait(5)
 
-        drop = web.Job("Supprimer base demo", dropping, project="DEMO")
+        drop = job_queue.Job("Supprimer base demo", dropping, project="DEMO")
         in_step.wait(5)
-        with web.JOBS_LOCK:
-            self.assertFalse(web.job_cancel_payload(drop)["cancellable"])
+        with job_queue.JOBS_LOCK:
+            self.assertFalse(job_queue.job_cancel_payload(drop)["cancellable"])
         with self.assertRaisesRegex(ValueError, "étape irréversible en cours"):
-            web.cancel_job(drop.id)
+            job_queue.cancel_job(drop.id)
         leave_step.set()
         self.wait_until(lambda: drop.status == "done")
 
@@ -1569,21 +1570,21 @@ class JobQueueAndCancellationTests(unittest.TestCase):
                 in_last_step.set()
                 finish.wait(5)
 
-        job = web.Job("MAJ projet DEMO", target, project="DEMO")
+        job = job_queue.Job("MAJ projet DEMO", target, project="DEMO")
         in_last_step.wait(5)
-        web.cancel_job(job.id)
+        job_queue.cancel_job(job.id)
         self.assertEqual("cancelling", job.status)
         finish.set()
-        self.wait_until(lambda: job.status not in web.JOB_UNFINISHED_STATUSES)
+        self.wait_until(lambda: job.status not in job_queue.JOB_UNFINISHED_STATUSES)
 
         # L'étape protégée se termine puis l'arrêt s'applique : aucun retour arrière n'était enregistré.
         self.assertEqual("cancelled", job.status)
 
     def test_finished_action_cannot_be_cancelled(self):
-        job = web.Job("Rapide", lambda current: None)
+        job = job_queue.Job("Rapide", lambda current: None)
         self.wait_until(lambda: job.status == "done")
         with self.assertRaisesRegex(ValueError, "déjà terminée"):
-            web.cancel_job(job.id)
+            job_queue.cancel_job(job.id)
 
 
 class ModuleFailureHintTests(unittest.TestCase):

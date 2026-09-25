@@ -12,14 +12,8 @@ import zipfile
 from pathlib import Path
 
 SAFE_IMPORT_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
-
-
 MAX_ZIP_ENTRIES = 100_000
-
-
 MAX_ZIP_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
-
-
 MAX_DATABASE_BACKUP_ENTRIES = 2_000_000
 
 
