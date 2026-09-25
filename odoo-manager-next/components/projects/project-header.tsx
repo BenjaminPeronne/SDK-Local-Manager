@@ -184,15 +184,21 @@ export function ProjectHeader({
             </Button>
           )}
           {selectedProject && (
-            <Button
-              className="col-span-2 w-full sm:col-span-1"
-              variant="outline"
-              disabled={!selectedProjectReady || openingOdoo}
-              onClick={requestOpenOdoo}
+            // Le bouton désactivé ne reçoit pas le survol : l'explication est portée par son conteneur.
+            <span
+              className="col-span-2 flex sm:col-span-1"
+              title={selectedProjectOnline ? undefined : "Démarre le projet pour ouvrir Odoo."}
             >
-              {openingOdoo ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
-              {openingOdoo ? "Ouverture…" : "Ouvrir Odoo"}
-            </Button>
+              <Button
+                className="w-full"
+                variant="outline"
+                disabled={!selectedProjectReady || !selectedProjectOnline || openingOdoo}
+                onClick={requestOpenOdoo}
+              >
+                {openingOdoo ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+                {openingOdoo ? "Ouverture…" : "Ouvrir Odoo"}
+              </Button>
+            </span>
           )}
         </div>
       </div>

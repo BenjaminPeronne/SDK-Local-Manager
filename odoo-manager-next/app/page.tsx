@@ -120,6 +120,9 @@ const BOOTSTRAP_RETRY_DELAYS_MS = [0, 500, 1000, 2000];
 
 const DOCKER_CONFIRM_DELAY_MS = 700;
 
+// Au-delà, les plus anciennes lignes du suivi en direct sont oubliées : la mémoire et le rendu restent constants.
+const LIVE_LOG_MAX_LINES = 2000;
+
 export default function Home() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
@@ -252,11 +255,15 @@ export default function Home() {
   const logAutoFollow = useRef(true);
   const lastLogOutputSource = useRef("");
   const logStreamRef = useRef<EventSource | null>(null);
-  const logStreamFirstLineRef = useRef(true);
+  // Dernières lignes du flux de logs en direct, bornées ; null tant qu'aucune n'est arrivée.
+  const logStreamLinesRef = useRef<string[] | null>(null);
+  const logStreamFrameRef = useRef<number | null>(null);
 
   const stopLiveLogStream = useCallback(() => {
     logStreamRef.current?.close();
     logStreamRef.current = null;
+    if (logStreamFrameRef.current !== null) window.cancelAnimationFrame(logStreamFrameRef.current);
+    logStreamFrameRef.current = null;
   }, []);
 
   const scrollLogOutputToBottom = useCallback(() => {
@@ -1273,7 +1280,7 @@ export default function Home() {
     if (!selectedProject) return;
     const projectName = selectedProject.name;
     stopLiveLogStream();
-    logStreamFirstLineRef.current = true;
+    logStreamLinesRef.current = null;
     setExternalLogView({
       title: `Logs Odoo${raw ? " (traces complètes)" : ""} - ${projectName}`,
       content: "Connexion au flux de logs en direct…",
@@ -1289,6 +1296,11 @@ export default function Home() {
       `${API_BASE}/api/projects/${encodeURIComponent(projectName)}/logs/stream${raw ? "?raw=1" : ""}`,
     );
     logStreamRef.current = source;
+    const renderLines = () => {
+      if (logStreamRef.current !== source || !logStreamLinesRef.current) return;
+      const content = logStreamLinesRef.current.join("\n");
+      setExternalLogView((current) => (current && current.project === projectName ? { ...current, content } : current));
+    };
     source.addEventListener("log", (event) => {
       let line = "";
       try {
@@ -1296,15 +1308,22 @@ export default function Home() {
       } catch {
         return;
       }
-      setExternalLogView((current) => {
-        if (!current || current.project !== projectName) return current;
-        const content = logStreamFirstLineRef.current ? line : `${current.content}\n${line}`;
-        logStreamFirstLineRef.current = false;
-        return { ...current, content };
+      const lines = logStreamLinesRef.current ?? [];
+      lines.push(line);
+      if (lines.length > LIVE_LOG_MAX_LINES) lines.splice(0, lines.length - LIVE_LOG_MAX_LINES);
+      logStreamLinesRef.current = lines;
+      // Une rafale de lignes ne redessine la sortie qu'une fois par image.
+      if (logStreamFrameRef.current !== null) return;
+      logStreamFrameRef.current = window.requestAnimationFrame(() => {
+        logStreamFrameRef.current = null;
+        renderLines();
       });
     });
     source.addEventListener("log_end", () => {
-      if (logStreamRef.current === source) stopLiveLogStream();
+      if (logStreamRef.current !== source) return;
+      // Les dernières lignes attendaient peut-être l'image suivante : elles s'affichent avant l'arrêt.
+      renderLines();
+      stopLiveLogStream();
     });
     source.onerror = () => {
       if (logStreamRef.current === source) pushToast("error", "Flux de logs interrompu, nouvelle tentative en cours…");

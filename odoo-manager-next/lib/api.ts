@@ -61,8 +61,12 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
         response = await fetch(`${API_BASE}${path}`, {
           ...init,
           cache: "no-store",
+          // Sans corps, pas de Content-Type : l'en-tête ferait précéder chaque GET d'un preflight
+          // CORS, jamais mis en cache pour /api/jobs dont l'adresse change à chaque appel.
           headers:
-            init?.body instanceof FormData ? init.headers : { "Content-Type": "application/json", ...init?.headers },
+            init?.body == null || init.body instanceof FormData
+              ? init?.headers
+              : { "Content-Type": "application/json", ...init.headers },
           signal: controller.signal,
         });
         break;

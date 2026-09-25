@@ -199,7 +199,8 @@ export function AppSidebar({
                       <span
                         className={cn(
                           "inline-flex h-6 w-6 shrink-0 items-center justify-center",
-                          displayedRunning ? "text-emerald-500" : "text-red-500",
+                          // Un projet arrêté n'est pas en erreur : le gris laisse le rouge aux vraies pannes.
+                          displayedRunning ? "text-emerald-500" : "text-muted-foreground/45",
                         )}
                         role="img"
                         aria-label={`${project.name} : ${displayedRunning ? "allumé" : "éteint"}`}

@@ -142,6 +142,13 @@ export function ActivityTab({
       <JobStopButton job={selectedJob} onRequest={setJobToCancelId} />
     ) : null;
   const rawOutputHidden = Boolean(finishedJobSummary) && !rawOutputVisible;
+  // Rien à montrer : un terminal vide occuperait la moitié de l'onglet pour dire « Aucune sortie ».
+  const outputEmpty = !scopedExternalLogView && !selectedJob;
+  const emptyOutputHint = outputEmpty ? (
+    <p className="rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+      Sélectionne une action pour voir sa sortie, ou ouvre les logs Odoo.
+    </p>
+  ) : null;
 
   return (
     <TabsContent value="logs">
@@ -329,10 +336,11 @@ export function ActivityTab({
                 onShowFull={() => onShowLogs(true)}
                 onShowSummary={() => onShowLogs()}
               />
+              {emptyOutputHint}
               <JobOutputPre
                 outputRef={logOutputRef}
                 content={outputContent}
-                hidden={rawOutputHidden}
+                hidden={rawOutputHidden || outputEmpty}
                 onScroll={onLogOutputScroll}
               />
             </div>
@@ -471,7 +479,13 @@ export function ActivityTab({
                 onShowFull={() => onShowLogs(true)}
                 onShowSummary={() => onShowLogs()}
               />
-              <JobOutputPre outputRef={logOutputRef} content={outputContent} onScroll={onLogOutputScroll} />
+              {emptyOutputHint}
+              <JobOutputPre
+                outputRef={logOutputRef}
+                content={outputContent}
+                hidden={outputEmpty}
+                onScroll={onLogOutputScroll}
+              />
             </CardContent>
           </Card>
         </div>
