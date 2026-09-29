@@ -42,7 +42,7 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 - Suppression réversible : le projet est déplacé dans `.odoo_manager_deleted/`.
 
 **Bases de données**
-- Création d'une base vide, restauration d'une sauvegarde ZIP Odoo (envoi en flux, avec progression) et suppression.
+- Création d'une base vide, restauration d'une sauvegarde ZIP Odoo (envoi en flux, avec progression), duplication d'une base existante (filestore inclus, copie neutralisée par défaut) et suppression.
 - Neutralisation contrôlée des copies : crons métier et serveurs de messagerie désactivés, puis vérification dans PostgreSQL.
 - Réinitialisation du mot de passe administrateur et des traductions, régénération des assets.
 - Console `psql` ouverte à la demande dans le conteneur, sans exposer de port SQL.
