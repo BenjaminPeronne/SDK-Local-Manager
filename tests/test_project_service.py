@@ -51,6 +51,7 @@ class FakeRunner:
         self.odoo_init_commands = []
         self.stream_codes = []
         self.stream_output = []
+        self.compose_up_output = []
         self.compose_container_ids = []
         self.localtime_mounts = {}
         self.container_networks = {}
@@ -71,6 +72,9 @@ class FakeRunner:
             log("$ " + " ".join(command))
             if self.stream_output and any("--stop-after-init" in argument for argument in command):
                 for line in self.stream_output:
+                    log(line)
+            if "compose" in command and "up" in command:
+                for line in self.compose_up_output:
                     log(line)
         code = self.stream_codes.pop(0) if self.stream_codes else 0
         self.missing_networks.update(self.networks_missing_after_stream)
@@ -1214,6 +1218,34 @@ class ProjectServiceTests(unittest.TestCase):
 
         commands = [command for command, _cwd in self.runner.streams]
         self.assertFalse(any("--force-recreate" in command for command in commands))
+
+    @patch("odoo_manager_core.project_service.platform.system", return_value="Linux")
+    def test_start_project_names_the_image_missing_from_the_registry(self, _system):
+        self.runner.stream_codes = [1]
+        self.runner.compose_up_output = [
+            " Image sudokeys/docker-odoo-local:20.0 Error manifest for sudokeys/docker-odoo-local:20.0 "
+            "not found: manifest unknown: manifest unknown",
+            "Error response from daemon: manifest for sudokeys/docker-odoo-local:20.0 not found: "
+            "manifest unknown: manifest unknown",
+        ]
+
+        with self.assertRaises(RuntimeError) as raised:
+            self.service.compose_up_project("DEMO", self.project_path, log=lambda _line: None)
+
+        self.assertEqual(
+            str(raised.exception),
+            "Image Docker introuvable sur le registre : sudokeys/docker-odoo-local:20.0. "
+            "Elle n'est pas (encore) publiée ; le projet démarrera une fois l'image disponible.",
+        )
+
+    def test_missing_image_pattern_reads_both_docker_wordings(self):
+        from odoo_manager_core.project_service import MISSING_IMAGE_RE
+
+        self.assertEqual(
+            MISSING_IMAGE_RE.findall("pull access denied for sudokeys/unknown, repository does not exist"),
+            ["sudokeys/unknown"],
+        )
+        self.assertEqual(MISSING_IMAGE_RE.findall("Error response from daemon: network not found"), [])
 
     @patch("odoo_manager_core.project_service.platform.system", return_value="Linux")
     def test_start_project_recovers_containers_attached_to_deleted_network(self, _system):

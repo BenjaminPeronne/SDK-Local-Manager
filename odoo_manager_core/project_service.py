@@ -209,6 +209,8 @@ def terminate_active_processes(wait_seconds=0.5):
 # Dernière ligne d'un traceback Python : « ValueError: … », mais aussi « psycopg2.errors.InsufficientPrivilege: … »,
 # dont la classe ne finit pas par Error. Les lignes de log Odoo (« odoo.service.server: … ») portent un préfixe
 # horodaté et sont traitées avant, une exception dotée d'un nom de module commence la ligne.
+# « manifest for img:tag not found » (tag absent) et « pull access denied for img » (dépôt absent).
+MISSING_IMAGE_RE = re.compile(r"(?:manifest for|pull access denied for) ([^\s,]+?)(?: not found|,|$)")
 PYTHON_EXCEPTION_LINE_RE = re.compile(r"\b[A-Za-z_][\w.]*(?:Error|Exception|Fault):\s*\S|^[A-Za-z_]\w*(?:\.\w+)+:\s*\S")
 
 
@@ -1106,6 +1108,17 @@ class ProjectService:
         )
 
     def compose_up_project(self, project, path, log=None):
+        # Une image absente du registre (branche du template publiée avant son image, par
+        # exemple) ne se lit que dans la sortie de Compose : le code retour seul reste muet.
+        missing_images = []
+        log_output = log
+
+        def log(line):
+            for image in MISSING_IMAGE_RE.findall(str(line)):
+                if image not in missing_images:
+                    missing_images.append(image)
+            self.log(log_output, line)
+
         stale_mounts = self.stale_macos_localtime_mounts(path)
         stale_networks = self.stale_container_networks(path)
         if stale_mounts or stale_networks:
@@ -1142,6 +1155,11 @@ class ProjectService:
                 self.log(log, "")
                 self.log(log, "État des conteneurs du projet:")
                 self.log(log, status)
+            if missing_images:
+                raise RuntimeError(
+                    f"Image Docker introuvable sur le registre : {', '.join(missing_images)}. "
+                    "Elle n'est pas (encore) publiée ; le projet démarrera une fois l'image disponible."
+                )
             raise RuntimeError(
                 "Docker Compose n'a pas démarré correctement. "
                 "Les conteneurs existants et les données ont été conservées."
