@@ -1703,9 +1703,7 @@ class ProjectService:
             content = requirements.read_text(encoding="utf-8", errors="ignore")
         except FileNotFoundError:
             content = ""
-        existing = {
-            line.strip() for line in content.splitlines() if line.strip() and not line.lstrip().startswith("#")
-        }
+        existing = {line.strip() for line in content.splitlines() if line.strip() and not line.lstrip().startswith("#")}
         if package in existing:
             return
         requirements.parent.mkdir(parents=True, exist_ok=True)

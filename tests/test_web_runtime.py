@@ -1622,8 +1622,8 @@ class ModuleFailureHintTests(unittest.TestCase):
 
     def test_missing_external_dependency_names_the_python_package(self):
         message = (
-            'La commande Odoo a échoué avec le code 255. Dernière erreur Odoo : odoo.exceptions.UserError: '
-            'Impossible d\'installer le module "sodial_stock" à cause d\'une dépendance externe non trouvée : svglib'
+            "La commande Odoo a échoué avec le code 255. Dernière erreur Odoo : odoo.exceptions.UserError: "
+            "Impossible d'installer le module \"sodial_stock\" à cause d'une dépendance externe non trouvée : svglib"
         )
 
         hint = web.external_dependency_failure_hint(message)
@@ -1665,9 +1665,7 @@ class AutomaticPythonDependencyTests(unittest.TestCase):
     @patch("odoo_manager_web.normalize_module_layout_for_action")
     @patch("odoo_manager_web.project_dirs", return_value=["demo"])
     @patch("odoo_manager_web.project_service")
-    def test_missing_dependency_is_recorded_and_the_install_is_retried(
-        self, project_service, _dirs, _normalize
-    ):
+    def test_missing_dependency_is_recorded_and_the_install_is_retried(self, project_service, _dirs, _normalize):
         service = project_service.return_value
         service.run_odoo_module_command.side_effect = [
             RuntimeError(
@@ -1704,9 +1702,7 @@ class AutomaticPythonDependencyTests(unittest.TestCase):
     @patch("odoo_manager_web.normalize_module_layout_for_action")
     @patch("odoo_manager_web.project_dirs", return_value=["demo"])
     @patch("odoo_manager_web.project_service")
-    def test_missing_postgres_extension_is_created_and_the_install_is_retried(
-        self, project_service, _dirs, _normalize
-    ):
+    def test_missing_postgres_extension_is_created_and_the_install_is_retried(self, project_service, _dirs, _normalize):
         service = project_service.return_value
         service.run_odoo_module_command.side_effect = [
             RuntimeError(

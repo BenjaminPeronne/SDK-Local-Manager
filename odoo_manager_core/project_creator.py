@@ -179,8 +179,7 @@ def resolve_rika_version(detected, requested):
     if requested:
         return requested
     raise RuntimeError(
-        "La copie RIKA ne précise pas sa version Odoo. Choisis la version dans le formulaire de création, "
-        "puis relance."
+        "La copie RIKA ne précise pas sa version Odoo. Choisis la version dans le formulaire de création, puis relance."
     )
 
 
