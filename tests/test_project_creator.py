@@ -480,8 +480,8 @@ class ProjectCreatorTests(unittest.TestCase):
         self.assertFalse((self.workspace / "broken").exists())
         self.assertFalse((self.workspace / ".odoo_manager_staging").exists())
 
-    def test_older_supported_versions_clone_their_own_template_branch(self):
-        for version in ("12.0", "14.0"):
+    def test_older_and_newer_supported_versions_clone_their_own_template_branch(self):
+        for version in ("12.0", "14.0", "20.0"):
             with self.subTest(version=version):
                 runner = FakeRunner()
 

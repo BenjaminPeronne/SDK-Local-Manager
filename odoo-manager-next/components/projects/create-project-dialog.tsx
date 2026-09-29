@@ -234,7 +234,7 @@ export function CreateProjectDialog({
                   {sourceType === "rika" && (
                     <SelectItem value={RIKA_AUTO_VERSION}>Détecter automatiquement</SelectItem>
                   )}
-                  {(prerequisites?.supported_versions || ["15.0", "16.0", "17.0", "18.0", "19.0"]).map((item) => (
+                  {(prerequisites?.supported_versions || ["15.0", "16.0", "17.0", "18.0", "19.0", "20.0"]).map((item) => (
                     <SelectItem key={item} value={item}>
                       Odoo {item}
                     </SelectItem>
