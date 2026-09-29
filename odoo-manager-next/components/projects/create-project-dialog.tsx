@@ -201,7 +201,7 @@ export function CreateProjectDialog({
         <DialogHeader>
           <DialogTitle>Créer un projet Odoo local</DialogTitle>
           <DialogDescription>
-            Le gestionnaire prépare Odoo, Enterprise, Docker et les liens d’addons sans ouvrir de terminal.
+            Le gestionnaire prépare Odoo Enterprise, Docker et les liens d’addons sans ouvrir de terminal.
           </DialogDescription>
         </DialogHeader>
 
@@ -260,7 +260,7 @@ export function CreateProjectDialog({
               >
                 <span className="block font-medium">Odoo standard</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  Odoo Community et Enterprise Sudokeys.
+                  Enterprise (dépôts Sudokeys).
                 </span>
               </InteractiveCard>
               <InteractiveCard
@@ -269,7 +269,7 @@ export function CreateProjectDialog({
               >
                 <span className="block font-medium">Dépôt d’addons GitLab</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  Ajoute le dépôt client au socle standard.
+                  Ajoute le dépôt client à Odoo Enterprise.
                 </span>
               </InteractiveCard>
               <InteractiveCard
