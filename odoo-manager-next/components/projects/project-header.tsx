@@ -166,7 +166,7 @@ export function ProjectHeader({
               : selectedProject?.url || "Sélectionne un projet."}
           </p>
         </div>
-        <div className="grid w-full shrink-0 grid-cols-2 items-stretch gap-2 sm:grid-cols-3 xl:w-[480px]">
+        <div className="grid w-full shrink-0 grid-cols-2 items-stretch gap-2 sm:grid-cols-3 xl:w-[540px]">
           <Button className="w-full" variant="outline" onClick={refreshAllViews}>
             <RefreshCcw className="h-4 w-4" />
             Actualiser
@@ -206,7 +206,7 @@ export function ProjectHeader({
                 title={selectedProjectOnline ? undefined : "Démarre le projet pour ouvrir Odoo."}
               >
                 <Button
-                  className="w-full rounded-r-none"
+                  className="w-full whitespace-nowrap rounded-r-none px-3"
                   variant="outline"
                   disabled={!selectedProjectReady || !selectedProjectOnline || openingOdoo}
                   onClick={() => requestOpenOdoo()}
@@ -218,7 +218,7 @@ export function ProjectHeader({
               <DropdownMenu.Root modal={false}>
                 <DropdownMenu.Trigger>
                   <Button
-                    className="-ml-px w-9 shrink-0 rounded-l-none px-0"
+                    className="-ml-px w-8 shrink-0 rounded-l-none px-0"
                     variant="outline"
                     disabled={!selectedProjectReady}
                     title="Mode debug et e-mails"
