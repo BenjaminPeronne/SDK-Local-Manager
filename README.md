@@ -38,12 +38,13 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 - Création d'un projet Odoo **standard**, **standard + dépôt d'addons GitLab**, ou **copie d'une instance RIKA** (version Odoo détectée automatiquement).
 - Connexion facultative à un compte GitLab (jeton personnel) pour rechercher les dépôts et choisir la branche ou le tag au clavier.
 - Préparation dans un dossier temporaire puis déplacement en une seule opération : un clone interrompu ne laisse pas de projet à moitié créé.
-- Démarrage, arrêt, logs en direct, diagnostic et ouverture d'Odoo dans le navigateur une fois Traefik prêt.
+- Démarrage, arrêt, logs en direct, diagnostic et ouverture d'Odoo dans le navigateur une fois Traefik prêt, en mode normal ou debug (`?debug=1`, `?debug=assets`).
 - Suppression réversible : le projet est déplacé dans `.odoo_manager_deleted/`.
 
 **Bases de données**
 - Création d'une base vide, restauration d'une sauvegarde ZIP Odoo (envoi en flux, avec progression), duplication d'une base existante (filestore inclus, copie neutralisée par défaut) et suppression.
 - Neutralisation contrôlée des copies : crons métier et serveurs de messagerie désactivés, puis vérification dans PostgreSQL.
+- Capture des e-mails des bases neutralisées dans **Mailpit** (`http://mail.localhost/`), installé en un clic : rien ne part vers l'extérieur, tout reste consultable.
 - Réinitialisation du mot de passe administrateur et des traductions, régénération des assets.
 - Console `psql` ouverte à la demande dans le conteneur, sans exposer de port SQL.
 
@@ -53,6 +54,9 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 - Import de modules par ZIP ou depuis un dépôt Git, avec aperçu des versions, contrôles préalables et sauvegarde des versions remplacées.
 - Liens symboliques Odoo Enterprise créés et vérifiés automatiquement.
 - Gestion des modules absents d'une copie locale, sans désinstaller ni supprimer de données.
+
+**Mises à jour**
+- Annonce d'une nouvelle version publiée sur GitLab, lue avec la clé SSH du poste, avec un lien vers la Release.
 
 **Actions et suivi**
 - Les actions d'un même projet sont mises en file au lieu de s'exécuter en parallèle.
@@ -318,7 +322,7 @@ Le backend récupère le modèle Docker, Odoo Community et Odoo Enterprise depui
 
 Dans l'onglet **Bases**, **Restaurer une sauvegarde ZIP** remplace le passage par `/web/database/selector`. Le fichier est écrit progressivement sur disque puis transmis en flux au contrôleur officiel `/web/database/restore`, sans charger la sauvegarde en mémoire. Le fichier temporaire est supprimé à la fin, y compris en cas d'erreur.
 
-La base est déclarée comme une copie et la **neutralisation** est activée par défaut. Pendant la restauration, Odoo tourne avec ses workers cron coupés ; le gestionnaire relance ensuite le moteur de neutralisation des modules installés et vérifie dans PostgreSQL que la base est marquée neutralisée, que les crons métier sont inactifs (seul l'autovacuum peut rester actif) et qu'aucun serveur de messagerie exploitable n'est actif. Odoo 16 à 19 utilisent le moteur natif ; Odoo 15 applique un repli limité aux crons et aux serveurs de messagerie. Le bouton **Neutraliser et contrôler** rejoue cette passe sur une base existante.
+La base est déclarée comme une copie et la **neutralisation** est activée par défaut. Pendant la restauration, Odoo tourne avec ses workers cron coupés ; le gestionnaire relance ensuite le moteur de neutralisation des modules installés et vérifie dans PostgreSQL que la base est marquée neutralisée, que les crons métier sont inactifs (seul l'autovacuum peut rester actif) et qu'aucun serveur de messagerie exploitable n'est actif. Le seul serveur sortant conservé est le SMTP factice de la neutralisation, redirigé vers `mailpit:1025` : quand Mailpit tourne sur le réseau `traefik-local`, les e-mails y sont capturés ; sinon, leur envoi échoue comme avant. Odoo 16 à 19 utilisent le moteur natif ; Odoo 15 applique un repli limité aux crons et aux serveurs de messagerie. Le bouton **Neutraliser et contrôler** rejoue cette passe sur une base existante.
 
 Une base neutralisée l'est de nouveau après chaque installation ou mise à jour de module, avant le redémarrage d'Odoo : un addon nouvellement chargé ne peut pas réactiver un cron ou une intégration externe.
 

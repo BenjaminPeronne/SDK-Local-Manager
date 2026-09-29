@@ -1,20 +1,26 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, FolderPlus, RefreshCcw, Settings } from "lucide-react";
+import type { ReactNode } from "react";
+import { AlertTriangle, CheckCircle2, ExternalLink, FolderPlus, Mail, RefreshCcw, Settings } from "lucide-react";
+import type { MailpitStatus } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 /**
  * Accueil affiché quand aucun projet n'est ouvert.
  *
  * Sans projet, les onglets ne montrent que des panneaux vides : l'écran dit plutôt ce que
- * l'application attend, et si ses deux dépendances sont prêtes.
+ * l'application attend, si ses deux dépendances sont prêtes, et si les e-mails sont capturés.
  */
 export function WelcomeScreen({
   icon,
   hasProjects,
   docker,
   traefik,
+  mailpit,
+  onStartMailpit,
+  onOpenMailpit,
   onCreateProject,
   onOpenSettings,
   onRefresh,
@@ -23,6 +29,9 @@ export function WelcomeScreen({
   hasProjects: boolean;
   docker: { ready: boolean; message: string };
   traefik: { ready: boolean; message: string } | null;
+  mailpit: MailpitStatus | undefined;
+  onStartMailpit: () => void;
+  onOpenMailpit: () => void;
   onCreateProject: () => void;
   onOpenSettings: () => void;
   onRefresh: () => void;
@@ -49,6 +58,30 @@ export function WelcomeScreen({
           ready={Boolean(traefik?.ready)}
           message={traefik?.message || "Vérification en cours…"}
         />
+        {mailpit && (
+          <WelcomeStatus
+            className="sm:col-span-2"
+            title="Mailpit"
+            ready={mailpit.running}
+            optional
+            readyLabel="Démarré"
+            pendingLabel="Facultatif"
+            message={mailpit.message}
+            action={
+              mailpit.running ? (
+                <Button size="sm" variant="outline" onClick={onOpenMailpit}>
+                  <ExternalLink className="h-4 w-4" />
+                  Voir les e-mails
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" disabled={!mailpit.can_start} onClick={onStartMailpit}>
+                  <Mail className="h-4 w-4" />
+                  {mailpit.installed ? "Démarrer" : "Installer"}
+                </Button>
+              )
+            }
+          />
+        )}
       </div>
 
       <div className="mt-8 flex w-full max-w-xl flex-col gap-2 sm:flex-row sm:justify-center">
@@ -73,21 +106,43 @@ export function WelcomeScreen({
   );
 }
 
-function WelcomeStatus({ title, ready, message }: { title: string; ready: boolean; message: string }) {
+function WelcomeStatus({
+  title,
+  ready,
+  message,
+  readyLabel = "Prêt",
+  pendingLabel = "À vérifier",
+  action,
+  className,
+  optional = false,
+}: {
+  title: string;
+  ready: boolean;
+  message: string;
+  readyLabel?: string;
+  pendingLabel?: string;
+  action?: ReactNode;
+  className?: string;
+  // Un outil facultatif arrêté n'est pas un problème : pas d'alerte orange.
+  optional?: boolean;
+}) {
   return (
-    <div className="flex min-w-0 items-start gap-3 rounded-lg border bg-card px-4 py-3 text-left">
+    <div className={cn("flex min-w-0 items-start gap-3 rounded-lg border bg-card px-4 py-3 text-left", className)}>
       {ready ? (
         <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+      ) : optional ? (
+        <Mail className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
       ) : (
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
       )}
       <div className="min-w-0">
         <div className="flex items-center gap-2 text-sm font-medium">
           {title}
-          <Badge variant={ready ? "success" : "outline"}>{ready ? "Prêt" : "À vérifier"}</Badge>
+          <Badge variant={ready ? "success" : "outline"}>{ready ? readyLabel : pendingLabel}</Badge>
         </div>
         <p className="mt-0.5 break-words text-xs text-muted-foreground">{message}</p>
       </div>
+      {action && <div className="ml-auto shrink-0 self-center">{action}</div>}
     </div>
   );
 }

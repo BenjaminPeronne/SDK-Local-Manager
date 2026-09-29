@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Boxes, Database, Logs, Settings } from "lucide-react";
 import { useApiAvailability } from "@/hooks/use-api-availability";
+import { useAppUpdate } from "@/hooks/use-app-update";
 import { useHiddenBelowStickyHeader } from "@/hooks/use-hidden-below-sticky-header";
 import { useJobs } from "@/hooks/use-jobs";
 import { useLiveUpdates } from "@/hooks/use-live-updates";
@@ -257,6 +258,7 @@ export default function Home() {
     applyOverview,
     commitSystemStatus,
   });
+  const { availableUpdate, dismissUpdate } = useAppUpdate(!initializing && !apiUnavailable);
   const onboardingPrompted = useRef(false);
   const wslSetupPrompted = useRef(false);
   const logOutputRef = useRef<HTMLPreElement>(null);
@@ -1355,9 +1357,12 @@ export default function Home() {
     <main className="sdk-shell min-h-screen overflow-x-clip">
       <div className="flex min-h-screen min-w-0 flex-col lg:flex-row">
         <AppSidebar
+          availableUpdate={availableUpdate}
+          dismissUpdate={dismissUpdate}
           jobs={jobs}
           openCreateProjectDialog={openCreateProjectDialog}
           openSettingsDialog={openSettingsDialog}
+          openUrl={openUrl}
           overview={overview}
           pendingProjectArrivals={pendingProjectArrivals}
           selectedAppIcon={selectedAppIcon}
@@ -1381,6 +1386,7 @@ export default function Home() {
               createJob={createJob}
               jobs={jobs}
               loading={loading}
+              mailpit={systemStatus?.mailpit}
               openingOdoo={openingOdoo}
               pendingSelectedProjectArrival={pendingSelectedProjectArrival}
               projectHeaderCompact={projectHeaderCompact}
@@ -1484,6 +1490,9 @@ export default function Home() {
                     ? { ready: systemStatus.traefik.running, message: systemStatus.traefik.message }
                     : null
                 }
+                mailpit={systemStatus?.mailpit}
+                onStartMailpit={() => void createJob("start_mailpit")}
+                onOpenMailpit={() => void openUrl(systemStatus?.mailpit?.url)}
                 onCreateProject={openCreateProjectDialog}
                 onOpenSettings={openSettingsDialog}
                 onRefresh={refreshAllViews}

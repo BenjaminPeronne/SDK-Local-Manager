@@ -122,6 +122,7 @@ from odoo_manager_core.project_creator import (
 )
 from odoo_manager_core.project_service import OdooError
 from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
+from odoo_manager_core.releases import RELEASES_REPOSITORY, release_update
 from odoo_manager_core.repositories import (
     REPOSITORY_COMMIT_RE,
     REPOSITORY_GIT_OPTIONS,
@@ -134,7 +135,7 @@ from odoo_manager_core.system import (
     docker_command,
     reset_docker_backend_cache,
 )
-from odoo_manager_core.traefik import url_with_port
+from odoo_manager_core.traefik import TRAEFIK_NETWORK, url_with_port
 from odoo_manager_core.version import APP_VERSION
 from odoo_manager_core.windows_links import (
     MIGRATION_JOURNAL_NAME,
@@ -159,6 +160,7 @@ API_ENDPOINTS = {
         "/api/health",
         "/api/bootstrap",
         "/api/overview",
+        "/api/app-update",
         "/api/settings",
         "/api/errors",
         "/api/jobs",
@@ -225,7 +227,9 @@ API_ACTIONS = (
     "reset_all_translations",
     "reset_module_translations",
     "restore_module_update_exclusions",
+    "start_mailpit",
     "start_project",
+    "stop_mailpit",
     "stop_project",
     "uninstall_module",
     "update_all",
@@ -841,6 +845,33 @@ def traefik_status(docker=None):
     }
 
 
+MAILPIT_CONTAINER = "mailpit"
+MAILPIT_IMAGE = "axllent/mailpit:v1.31"
+MAILPIT_HOST = "mail.localhost"
+
+
+def mailpit_status(docker, traefik):
+    """Capture locale des e-mails : les bases neutralisées envoient vers `mailpit:1025`."""
+    state = container_status(MAILPIT_CONTAINER) if docker["running"] else "absent"
+    running = state == "running"
+    if running:
+        message = "Les e-mails des bases neutralisées sont capturés et consultables."
+    elif not traefik["running"]:
+        message = "Traefik doit être démarré pour installer Mailpit."
+    elif state == "absent":
+        message = "Mailpit n'est pas installé : les e-mails des bases neutralisées ne sont pas visibles."
+    else:
+        message = "Mailpit est installé mais arrêté."
+    return {
+        "state": state,
+        "running": running,
+        "installed": state != "absent",
+        "message": message,
+        "url": url_with_port(f"http://{MAILPIT_HOST}/", traefik.get("http_port")),
+        "can_start": docker["running"] and traefik["running"] and not running,
+    }
+
+
 def abandoned_staging_snapshot():
     """Dossiers de créations interrompues, proposés au nettoyage par l'interface."""
     entries = abandoned_staging_entries(WORKSPACE)
@@ -853,9 +884,11 @@ def abandoned_staging_snapshot():
 
 def system_status_snapshot(docker=None):
     docker = docker or docker_status(SETTINGS)
+    traefik = traefik_status(docker)
     return {
         "docker": docker,
-        "traefik": traefik_status(docker),
+        "traefik": traefik,
+        "mailpit": mailpit_status(docker, traefik),
         "workspace": str(WORKSPACE),
         "workspace_exists": safe_path_is_dir(WORKSPACE),
         "abandoned_staging": abandoned_staging_snapshot(),
@@ -2531,6 +2564,39 @@ def overview(docker=None, databases_max_age=None):
     }
 
 
+APP_UPDATE_CHECK_SECONDS = 6 * 60 * 60
+APP_UPDATE_RETRY_SECONDS = 30 * 60
+APP_UPDATE_LOCK = threading.Lock()
+APP_UPDATE = {"checked_at": None, "value": None}
+
+
+def app_update_payload():
+    """Dernière version publiée sur GitLab, relue au plus toutes les six heures.
+
+    Sans accès à GitLab (hors réseau, clé SSH absente), la réponse le dit sans erreur :
+    l'interface n'affiche alors rien.
+    """
+    with APP_UPDATE_LOCK:
+        checked_at, value = APP_UPDATE["checked_at"], APP_UPDATE["value"]
+        if checked_at is not None and value is not None:
+            max_age = APP_UPDATE_CHECK_SECONDS if value.get("checked") else APP_UPDATE_RETRY_SECONDS
+            if time.monotonic() - checked_at < max_age:
+                return value
+    service = project_service()
+    code, output = service.capture(
+        service.git("ls-remote", "--tags", "--refs", RELEASES_REPOSITORY, "app-v*"),
+        cwd=Path.home(),
+        timeout=20,
+    )
+    if code == 0:
+        value = {**release_update(APP_VERSION, output), "checked": True}
+    else:
+        value = {"current": APP_VERSION, "latest": "", "update_available": False, "url": "", "checked": False}
+    with APP_UPDATE_LOCK:
+        APP_UPDATE.update(checked_at=time.monotonic(), value=value)
+    return value
+
+
 def api_version_payload():
     """Identité du service, lue avant tout autre appel.
 
@@ -2643,6 +2709,8 @@ JOB_CANCEL_POLICIES = {
         "La conversion s'arrête entre deux liens ; relance-la plus tard pour la terminer.",
     ),
     "install_git_job": (False, "l'installeur Windows ne peut pas être interrompu sans risque."),
+    "start_mailpit_job": (True, "Le téléchargement de l'image s'arrête ; relance l'action pour le reprendre."),
+    "stop_mailpit_job": (False, "arrêt court d'un conteneur."),
     "repair_enterprise_links_job": (False, "opération courte sur les liens de modules."),
     "cancel_missing_module_operations_job": (
         False,
@@ -3050,6 +3118,64 @@ def install_traefik_job(job):
         project_service().install_traefik(TRAEFIK_REPO, log=job.add)
     finally:
         invalidate_traefik_detection()
+
+
+def start_mailpit_job(job):
+    docker = docker_status(SETTINGS)
+    if not docker["running"]:
+        raise RuntimeError("Docker doit être démarré pour lancer Mailpit.")
+    code, _output = run_capture(docker_command(SETTINGS, "network", "inspect", TRAEFIK_NETWORK), timeout=10)
+    if code != 0:
+        raise RuntimeError(f"Le réseau {TRAEFIK_NETWORK} est introuvable : installe et démarre Traefik d'abord.")
+    state = container_status(MAILPIT_CONTAINER)
+    if state == "running":
+        job.add("Mailpit est déjà démarré.")
+        return
+    if state == "absent":
+        job.add(f"Installation de Mailpit ({MAILPIT_IMAGE})...")
+        command = docker_command(
+            SETTINGS,
+            "run",
+            "--detach",
+            "--name",
+            MAILPIT_CONTAINER,
+            "--restart",
+            "unless-stopped",
+            "--network",
+            TRAEFIK_NETWORK,
+            "--env",
+            "MP_MAX_MESSAGES=5000",
+            # Les serveurs SMTP copiés d'une base client peuvent tenter une authentification.
+            "--env",
+            "MP_SMTP_AUTH_ACCEPT_ANY=1",
+            "--env",
+            "MP_SMTP_AUTH_ALLOW_INSECURE=1",
+            "--label",
+            "traefik.enable=true",
+            "--label",
+            "traefik.http.routers.mailpit.entrypoints=web",
+            "--label",
+            f"traefik.http.routers.mailpit.rule=Host(`{MAILPIT_HOST}`)",
+            "--label",
+            "traefik.http.services.mailpit.loadbalancer.server.port=8025",
+            MAILPIT_IMAGE,
+        )
+    else:
+        job.add("Démarrage de Mailpit...")
+        command = docker_command(SETTINGS, "start", MAILPIT_CONTAINER)
+    if run_stream(job, command) != 0:
+        raise RuntimeError("Docker n'a pas pu démarrer Mailpit.")
+    job.add(f"Mailpit est disponible sur http://{MAILPIT_HOST}/ (SMTP : {MAILPIT_CONTAINER}:1025).")
+    job.add("Les bases neutralisées y envoient leurs e-mails ; relance « Neutraliser et contrôler » sur une base")
+    job.add("neutralisée avant cette version pour rediriger ses e-mails vers Mailpit.")
+
+
+def stop_mailpit_job(job):
+    if container_status(MAILPIT_CONTAINER) != "running":
+        job.add("Mailpit est déjà arrêté.")
+        return
+    if run_stream(job, docker_command(SETTINGS, "stop", MAILPIT_CONTAINER)) != 0:
+        raise RuntimeError("Docker n'a pas pu arrêter Mailpit.")
 
 
 def start_project_job(job, project):
@@ -6035,6 +6161,8 @@ JOB_ACTIONS = {
     "cleanup_staging": lambda _payload: Job("Nettoyer les créations interrompues", cleanup_staging_job),
     "install_traefik": lambda _payload: Job("Installer Traefik", install_traefik_job, resources={"traefik"}),
     "install_git": lambda _payload: Job("Installer Git pour Windows", install_git_job, resources={"git"}),
+    "start_mailpit": lambda _payload: Job("Démarrer Mailpit", start_mailpit_job, resources={"mailpit"}),
+    "stop_mailpit": lambda _payload: Job("Arrêter Mailpit", stop_mailpit_job, resources={"mailpit"}),
     "create_database": create_database_action,
     "drop_database": drop_database_action,
     "duplicate_database": duplicate_database_action,
@@ -6071,6 +6199,7 @@ ROUTER = Router(
         api_route("GET", "/", serve_fallback_page),
         api_route("GET", "/favicon.ico", serve_favicon),
         api_route("GET", "/api/version", payload_view(api_version_payload)),
+        api_route("GET", "/api/app-update", payload_view(app_update_payload)),
         api_route("GET", "/api/capabilities", payload_view(api_capabilities_payload)),
         api_route("GET", "/api/health", health_payload),
         api_route("GET", "/api/bootstrap", payload_view(bootstrap_snapshot)),

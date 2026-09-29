@@ -33,7 +33,8 @@ export function NeutralizeDatabaseDialog({
           <DialogDescription>
             Odoo sera arrêté brièvement. Tous les crons métier, dont le contrôle d’abonnement, ainsi que les serveurs de
             messagerie entrants et sortants seront désactivés. Sur les versions récentes, Odoo efface aussi les
-            identifiants SMTP. Cette opération n’est pas réversible automatiquement.
+            identifiants SMTP. Les e-mails sont ensuite envoyés vers Mailpit, qui les affiche sans les transmettre,
+            s’il est démarré. Cette opération n’est pas réversible automatiquement.
           </DialogDescription>
         </DialogHeader>
         <SimplifiedNeutralizationNotice odooVersion={selectedProject?.odoo_version} />

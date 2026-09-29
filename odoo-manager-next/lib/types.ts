@@ -61,9 +61,29 @@ export type AddonLinksStatus = {
   native_symlinks: boolean;
 };
 
+// Capture locale des e-mails : les bases neutralisées envoient vers mailpit:1025.
+export type MailpitStatus = {
+  state: string;
+  running: boolean;
+  installed: boolean;
+  message: string;
+  url: string;
+  can_start: boolean;
+};
+
+// Dernière version publiée sur GitLab. `checked` est faux quand GitLab n'a pas pu être lu.
+export type AppUpdate = {
+  current: string;
+  latest: string;
+  update_available: boolean;
+  url: string;
+  checked: boolean;
+};
+
 export type SystemStatus = {
   docker: DockerStatus;
   traefik?: TraefikStatus;
+  mailpit?: MailpitStatus;
   workspace: string;
   workspace_exists: boolean;
   abandoned_staging?: { count: number; names: string[]; oldest_modified_at: number };

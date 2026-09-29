@@ -1137,6 +1137,8 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertIn("    if crons:\n        crons.write", neutralize[-1])
         self.assertIn("    if outgoing:\n        outgoing.write", neutralize[-1])
         self.assertIn("dummies[1:].unlink()", neutralize[-1])
+        # Le SMTP factice envoie vers Mailpit, sur le port 1025 qu'il utilise déjà.
+        self.assertIn('dummies[:1].write({"smtp_host": "mailpit"})', neutralize[-1])
         self.assertTrue(any("0 cron métier actif" in line for line in logs))
         self.assertTrue(any("Neutralisation terminée et contrôlée." in line for line in logs))
         self.assertTrue(any("Redémarrage du serveur Odoo" in line for line in logs))

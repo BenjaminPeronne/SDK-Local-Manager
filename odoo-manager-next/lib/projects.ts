@@ -79,16 +79,22 @@ export function firstOdooDatabase(project?: Project) {
   return project?.databases?.find((db) => db !== "postgres") || "";
 }
 
-export function odooAccessUrl(project?: Project, db?: string) {
+/** `1` active le mode développeur d'Odoo, `assets` sert en plus les fichiers JS et CSS non minifiés. */
+export type OdooDebugMode = "1" | "assets";
+
+export function odooAccessUrl(project?: Project, db?: string, debug?: OdooDebugMode) {
   if (!project?.url) return "#";
-  if (!db || db === "postgres") return project.url;
+  const database = db && db !== "postgres" ? db : "";
+  if (!database && !debug) return project.url;
+  const params = new URLSearchParams();
+  if (database) params.set("db", database);
+  if (debug) params.set("debug", debug);
   try {
     const url = new URL("/web", project.url);
-    url.searchParams.set("db", db);
+    url.search = params.toString();
     return url.toString();
   } catch {
-    const separator = project.url.includes("?") ? "&" : "?";
-    return `${project.url.replace(/\/$/, "")}/web${separator}db=${encodeURIComponent(db)}`;
+    return `${project.url.replace(/\/$/, "")}/web?${params.toString()}`;
   }
 }
 

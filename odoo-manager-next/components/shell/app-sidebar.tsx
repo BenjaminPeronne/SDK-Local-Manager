@@ -1,11 +1,11 @@
 "use client";
 
 import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
-import { Circle, FolderPlus, Info, Loader2, Search, Settings } from "lucide-react";
+import { Circle, Download, FolderPlus, Info, Loader2, Search, Settings, X } from "lucide-react";
 import type { StaticImageData } from "next/image";
 import { statusVariant } from "@/lib/format";
 import { isJobActive, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
-import type { ExternalLogView, Job, ManagerSettings, Overview, Project, SystemStatus } from "@/lib/types";
+import type { AppUpdate, ExternalLogView, Job, ManagerSettings, Overview, Project, SystemStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,9 +13,12 @@ import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 type AppSidebarProps = {
+  availableUpdate: AppUpdate | null;
+  dismissUpdate: () => void;
   jobs: Job[];
   openCreateProjectDialog: () => void;
   openSettingsDialog: () => void;
+  openUrl: (url?: string) => Promise<void>;
   overview: Overview | null;
   pendingProjectArrivals: Job[];
   selectedAppIcon: StaticImageData;
@@ -32,9 +35,12 @@ type AppSidebarProps = {
 };
 
 export function AppSidebar({
+  availableUpdate,
+  dismissUpdate,
   jobs,
   openCreateProjectDialog,
   openSettingsDialog,
+  openUrl,
   overview,
   pendingProjectArrivals,
   selectedAppIcon,
@@ -232,6 +238,31 @@ export function AppSidebar({
           })}
         </div>
         <div className="grid grid-cols-2 gap-2 border-t p-3 lg:grid-cols-1">
+          {availableUpdate && (
+            <div className="col-span-2 flex items-start gap-2 rounded-md border border-primary/40 bg-primary/10 p-2.5 text-sm lg:col-span-1">
+              <Download className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">Version {availableUpdate.latest} disponible</div>
+                <div className="text-xs text-muted-foreground">Version installée : {availableUpdate.current}</div>
+                <button
+                  type="button"
+                  className="mt-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
+                  onClick={() => void openUrl(availableUpdate.url)}
+                >
+                  Télécharger depuis GitLab
+                </button>
+              </div>
+              <button
+                type="button"
+                className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                title="Masquer jusqu'à la prochaine version"
+                aria-label="Masquer l'annonce de mise à jour"
+                onClick={dismissUpdate}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
           <Button className="col-span-2 w-full lg:col-span-1" onClick={openCreateProjectDialog}>
             <FolderPlus className="h-4 w-4" />
             Nouveau projet

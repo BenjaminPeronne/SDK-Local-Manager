@@ -2231,7 +2231,7 @@ SELECT COALESCE((SELECT value FROM ir_config_parameter WHERE key = 'database.is_
                 WHERE model = 'ir.cron' AND module = 'base' AND name = 'autovacuum_job'
            )),
        (SELECT count(*) FROM ir_mail_server
-         WHERE active AND COALESCE(smtp_host, '') <> 'invalid');
+         WHERE active AND COALESCE(smtp_host, '') NOT IN ('invalid', 'mailpit'));
 """.strip(),
         )
         parts = core_status.split("|")
@@ -2263,7 +2263,7 @@ SELECT COALESCE((SELECT value FROM ir_config_parameter WHERE key = 'database.is_
         self.log(log, "Contrôles de neutralisation validés:")
         self.log(log, "- base marquée comme neutralisée")
         self.log(log, "- 0 cron métier actif (seul l'autovacuum Odoo peut rester actif)")
-        self.log(log, "- 0 serveur de messagerie sortant exploitable")
+        self.log(log, "- 0 serveur de messagerie sortant exploitable (e-mails capturés par Mailpit s'il est démarré)")
         self.log(log, f"- {active_incoming_servers} serveur de messagerie entrant actif")
 
     @staticmethod
@@ -2311,10 +2311,14 @@ else:
 # rend l'action réellement idempotente sans supprimer de serveur métier.
 dummies = env["ir.mail_server"].search([
     ("name", "=", "neutralization - disable emails"),
-    ("smtp_host", "=", "invalid"),
+    ("smtp_host", "in", ("invalid", "mailpit")),
 ], order="id desc")
 if len(dummies) > 1:
     dummies[1:].unlink()
+# Le SMTP factice écoute déjà sur 1025, le port de Mailpit : les e-mails y sont capturés
+# quand le conteneur mailpit tourne sur le réseau traefik-local, et échouent sinon.
+if dummies:
+    dummies[:1].write({"smtp_host": "mailpit"})
 
 env.cr.commit()
 print("ODOO_MANAGER_NEUTRALIZATION_DONE")

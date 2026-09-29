@@ -1774,6 +1774,98 @@ class TraefikInstallationTests(unittest.TestCase):
         project_service.return_value.install_traefik.assert_not_called()
 
 
+class MailpitTests(unittest.TestCase):
+    class LogJob:
+        def __init__(self):
+            self.lines = []
+
+        def add(self, line):
+            self.lines.append(line)
+
+    @patch("odoo_manager_web.run_stream", return_value=0)
+    @patch("odoo_manager_web.container_status", return_value="absent")
+    @patch("odoo_manager_web.run_capture", return_value=(0, "[]"))
+    @patch("odoo_manager_web.docker_command", side_effect=lambda _settings, *args: ["docker", *args])
+    @patch("odoo_manager_web.docker_status", return_value={"running": True})
+    def test_first_start_runs_mailpit_on_the_traefik_network(
+        self, _docker_status, _docker_command, _run_capture, _container_status, run_stream
+    ):
+        web.start_mailpit_job(self.LogJob())
+
+        command = run_stream.call_args.args[1]
+        self.assertEqual(["docker", "run", "--detach", "--name", "mailpit"], command[:5])
+        self.assertIn("traefik-local", command)
+        self.assertIn("traefik.http.routers.mailpit.rule=Host(`mail.localhost`)", command)
+        self.assertEqual(web.MAILPIT_IMAGE, command[-1])
+
+    @patch("odoo_manager_web.run_stream", return_value=0)
+    @patch("odoo_manager_web.container_status", return_value="exited")
+    @patch("odoo_manager_web.run_capture", return_value=(0, "[]"))
+    @patch("odoo_manager_web.docker_command", side_effect=lambda _settings, *args: ["docker", *args])
+    @patch("odoo_manager_web.docker_status", return_value={"running": True})
+    def test_a_stopped_mailpit_is_restarted_instead_of_recreated(
+        self, _docker_status, _docker_command, _run_capture, _container_status, run_stream
+    ):
+        web.start_mailpit_job(self.LogJob())
+
+        self.assertEqual(["docker", "start", "mailpit"], run_stream.call_args.args[1])
+
+    @patch("odoo_manager_web.run_stream")
+    @patch("odoo_manager_web.run_capture", return_value=(1, "network traefik-local not found"))
+    @patch("odoo_manager_web.docker_status", return_value={"running": True})
+    def test_mailpit_needs_the_traefik_network(self, _docker_status, _run_capture, run_stream):
+        with self.assertRaisesRegex(RuntimeError, "Traefik"):
+            web.start_mailpit_job(self.LogJob())
+
+        run_stream.assert_not_called()
+
+    @patch("odoo_manager_web.container_status", return_value="running")
+    def test_status_gives_the_mail_url_on_the_traefik_port(self, _container_status):
+        status = web.mailpit_status({"running": True}, {"running": True, "http_port": 8080})
+
+        self.assertTrue(status["running"])
+        self.assertFalse(status["can_start"])
+        self.assertEqual("http://mail.localhost:8080/", status["url"])
+
+    @patch("odoo_manager_web.container_status")
+    def test_status_without_docker_does_not_query_containers(self, container_status):
+        status = web.mailpit_status({"running": False}, {"running": False, "http_port": 80})
+
+        container_status.assert_not_called()
+        self.assertFalse(status["can_start"])
+
+
+class AppUpdateTests(unittest.TestCase):
+    def setUp(self):
+        web.APP_UPDATE.update(checked_at=None, value=None)
+        self.addCleanup(web.APP_UPDATE.update, checked_at=None, value=None)
+
+    @patch("odoo_manager_web.APP_VERSION", "0.9.0")
+    @patch("odoo_manager_web.project_service")
+    def test_a_newer_gitlab_release_is_reported_and_cached(self, project_service):
+        service = project_service.return_value
+        service.git.side_effect = lambda *args: ["git", *args]
+        service.capture.return_value = (0, "aaaa\trefs/tags/app-v0.10.0-build1\n")
+
+        first = web.app_update_payload()
+        second = web.app_update_payload()
+
+        self.assertTrue(first["update_available"])
+        self.assertEqual("0.10.0", first["latest"])
+        self.assertIs(first, second)
+        service.capture.assert_called_once()
+        self.assertIn(web.RELEASES_REPOSITORY, service.capture.call_args.args[0])
+
+    @patch("odoo_manager_web.project_service")
+    def test_an_unreachable_gitlab_reports_nothing(self, project_service):
+        project_service.return_value.capture.return_value = (128, "Permission denied (publickey).")
+
+        update = web.app_update_payload()
+
+        self.assertFalse(update["update_available"])
+        self.assertFalse(update["checked"])
+
+
 class ProjectCreationPrerequisitesTests(unittest.TestCase):
     @patch("odoo_manager_web.find_wsl_executable_distribution", return_value="Ubuntu-24.04")
     @patch("odoo_manager_web.host_executable_available", return_value=True)
