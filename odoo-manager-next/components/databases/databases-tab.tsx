@@ -11,6 +11,7 @@ import {
   Languages,
   Loader2,
   MoreHorizontal,
+  PackageX,
   Paintbrush,
   PlusCircle,
   ShieldCheck,
@@ -19,7 +20,7 @@ import {
   Upload,
 } from "lucide-react";
 import { statusVariant } from "@/lib/format";
-import type { DatabaseMenuAction, PendingDatabaseAction, Project } from "@/lib/types";
+import type { DatabaseMenuAction, DependencyReport, PendingDatabaseAction, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,11 +33,14 @@ import {
   RefinedPanel,
   RefinedSectionHeader,
 } from "@/components/common/refined-layout";
+import { Notice } from "@/components/common/notice";
+import { dependencySummary } from "@/components/databases/dependencies-dialog";
 import { FirstDatabaseCallout } from "@/components/databases/first-database-callout";
 
 type DatabasesTabProps = {
   canUseDb: boolean;
   chooseDatabase: (db: string, projectName?: string | undefined) => void;
+  dependencyReport: DependencyReport | null;
   executeDatabaseAction: (action: DatabaseMenuAction) => void;
   loading: boolean;
   odooDatabases: string[];
@@ -52,6 +56,7 @@ type DatabasesTabProps = {
   selectedProjectReady: boolean;
   setAdminPasswordOpen: Dispatch<SetStateAction<boolean>>;
   setCreateDbOpen: Dispatch<SetStateAction<boolean>>;
+  setDependenciesOpen: Dispatch<SetStateAction<boolean>>;
   setDropDbOpen: Dispatch<SetStateAction<boolean>>;
   setDuplicateDbOpen: Dispatch<SetStateAction<boolean>>;
   setNeutralizeDbOpen: Dispatch<SetStateAction<boolean>>;
@@ -63,6 +68,7 @@ type DatabasesTabProps = {
 export function DatabasesTab({
   canUseDb,
   chooseDatabase,
+  dependencyReport,
   executeDatabaseAction,
   loading,
   odooDatabases,
@@ -78,6 +84,7 @@ export function DatabasesTab({
   selectedProjectReady,
   setAdminPasswordOpen,
   setCreateDbOpen,
+  setDependenciesOpen,
   setDropDbOpen,
   setDuplicateDbOpen,
   setNeutralizeDbOpen,
@@ -95,8 +102,27 @@ export function DatabasesTab({
     executeDatabaseAction(action);
   }
 
+  const dependencyProblem = dependencyReport && !dependencyReport.ok ? dependencyReport : null;
+  const dependencyNotice = dependencyProblem && (
+    <Notice
+      tone={dependencyProblem.not_loaded.length ? "danger" : "warning"}
+      icon={PackageX}
+      title={`${dependencyProblem.db} : ${dependencySummary(dependencyProblem)}`}
+      actions={
+        <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => setDependenciesOpen(true)}>
+          Voir les dépendances
+        </Button>
+      }
+    >
+      {dependencyProblem.not_loaded.length
+        ? "Des modules présents ne sont pas chargés : leurs écrans peuvent planter dans le navigateur."
+        : "Des modules installés dans la base n’ont pas de code dans le projet."}
+    </Notice>
+  );
+
   return (
     <TabsContent value="bases">
+      {dependencyNotice && <div className="mb-5">{dependencyNotice}</div>}
       {refinedInterface ? (
         <div className="space-y-5">
           <RefinedSectionHeader
@@ -190,6 +216,10 @@ export function DatabasesTab({
                       </DropdownMenu.Item>
                       <DropdownMenu.Separator />
                       <DropdownMenu.Label>Outils</DropdownMenu.Label>
+                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "dependencies")}>
+                        <PackageX className="h-4 w-4" />
+                        Dépendances manquantes
+                      </DropdownMenu.Item>
                       <DropdownMenu.Item
                         disabled={!selectedProjectReady}
                         onSelect={() => runDatabaseAction(db, "duplicate")}
@@ -397,6 +427,15 @@ export function DatabasesTab({
                 >
                   <Copy className="h-4 w-4" />
                   Dupliquer la base
+                </Button>
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  disabled={!canUseDb}
+                  onClick={() => setDependenciesOpen(true)}
+                >
+                  <PackageX className="h-4 w-4" />
+                  Dépendances manquantes
                 </Button>
                 <Button
                   className="w-full text-destructive hover:text-destructive"

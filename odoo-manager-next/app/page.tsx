@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Boxes, Database, Logs, Settings } from "lucide-react";
 import { useApiAvailability } from "@/hooks/use-api-availability";
 import { useAppUpdate } from "@/hooks/use-app-update";
+import { useDatabaseDependencies } from "@/hooks/use-database-dependencies";
 import { useHiddenBelowStickyHeader } from "@/hooks/use-hidden-below-sticky-header";
 import { useJobs } from "@/hooks/use-jobs";
 import { useLiveUpdates } from "@/hooks/use-live-updates";
@@ -60,6 +61,7 @@ import { AdminPasswordDialog } from "@/components/databases/admin-password-dialo
 import { AllTranslationsResetDialog } from "@/components/databases/all-translations-reset-dialog";
 import { CreateDatabaseDialog } from "@/components/databases/create-database-dialog";
 import { DatabasesTab } from "@/components/databases/databases-tab";
+import { DependenciesDialog } from "@/components/databases/dependencies-dialog";
 import { DropDatabaseDialog } from "@/components/databases/drop-database-dialog";
 import { DuplicateDatabaseDialog } from "@/components/databases/duplicate-database-dialog";
 import { NeutralizeDatabaseDialog } from "@/components/databases/neutralize-database-dialog";
@@ -172,6 +174,7 @@ export default function Home() {
   const [neutralizeDbOpen, setNeutralizeDbOpen] = useState(false);
   const [dropDbOpen, setDropDbOpen] = useState(false);
   const [duplicateDbOpen, setDuplicateDbOpen] = useState(false);
+  const [dependenciesOpen, setDependenciesOpen] = useState(false);
   const [pendingDatabaseAction, setPendingDatabaseAction] = useState<PendingDatabaseAction | null>(null);
   const [postgresDetailsOpen, setPostgresDetailsOpen] = useState(false);
   const [rawOutputVisible, setRawOutputVisible] = useState(false);
@@ -1116,6 +1119,7 @@ export default function Home() {
     else if (action === "neutralize") setNeutralizeDbOpen(true);
     else if (action === "admin_password") setAdminPasswordOpen(true);
     else if (action === "psql") void openPostgresqlConsole();
+    else if (action === "dependencies") setDependenciesOpen(true);
     else if (action === "duplicate") setDuplicateDbOpen(true);
     else if (action === "drop") setDropDbOpen(true);
   }
@@ -1223,6 +1227,11 @@ export default function Home() {
     return () => window.removeEventListener("keydown", backToWelcomeOnEscape);
   }, [selectedModules, selectedProject, selectedProjectOnline, showWelcome]);
   const canUseDb = Boolean(selectedDb && odooDatabases.includes(selectedDb));
+  const databaseDependencies = useDatabaseDependencies(
+    selectedProject?.name,
+    selectedDb,
+    canUseDb && selectedProject?.postgres_status === "running",
+  );
 
   useEffect(() => {
     if (!pendingDatabaseAction || pendingDatabaseAction.db !== selectedDb) return;
@@ -1568,6 +1577,7 @@ export default function Home() {
                   <DatabasesTab
                     canUseDb={canUseDb}
                     chooseDatabase={chooseDatabase}
+                    dependencyReport={databaseDependencies.report}
                     executeDatabaseAction={executeDatabaseAction}
                     loading={loading}
                     odooDatabases={odooDatabases}
@@ -1583,6 +1593,7 @@ export default function Home() {
                     selectedProjectReady={selectedProjectReady}
                     setAdminPasswordOpen={setAdminPasswordOpen}
                     setCreateDbOpen={setCreateDbOpen}
+                    setDependenciesOpen={setDependenciesOpen}
                     setDropDbOpen={setDropDbOpen}
                     setDuplicateDbOpen={setDuplicateDbOpen}
                     setNeutralizeDbOpen={setNeutralizeDbOpen}
@@ -1884,6 +1895,31 @@ export default function Home() {
         open={neutralizeDbOpen}
         selectedDb={selectedDb}
         selectedProject={selectedProject}
+      />
+
+      <DependenciesDialog
+        open={dependenciesOpen}
+        onOpenChange={(open) => {
+          setDependenciesOpen(open);
+          if (open) void databaseDependencies.refresh();
+        }}
+        database={selectedDb}
+        report={databaseDependencies.report}
+        loading={databaseDependencies.loading}
+        error={databaseDependencies.error}
+        onRefresh={() => void databaseDependencies.refresh()}
+        onImportRepository={() => {
+          setDependenciesOpen(false);
+          openRepositoryImport();
+        }}
+        onCopy={async (text) => {
+          try {
+            await navigator.clipboard.writeText(text);
+            pushToast("success", "Liste des modules absents copiée.");
+          } catch {
+            pushToast("error", "Copie impossible dans le presse-papiers.");
+          }
+        }}
       />
 
       <DuplicateDatabaseDialog

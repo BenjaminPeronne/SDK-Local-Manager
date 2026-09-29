@@ -113,11 +113,37 @@ export type BootstrapSnapshot = {
   jobs: Job[];
 };
 
+// Dépendances d'une base : modules installés sans code, et modules qu'Odoo n'en chargera pas.
+export type MissingModule = {
+  name: string;
+  state: string;
+  reason: "code absent" | "non installable" | string;
+  required_by: string[];
+  excluded: boolean;
+};
+
+export type NotLoadedModule = { name: string; blocked_by: string[]; root_causes: string[] };
+
+export type DependencyReport = {
+  project: string;
+  db: string;
+  ok: boolean;
+  missing: MissingModule[];
+  not_loaded: NotLoadedModule[];
+};
+
 /** Action de menu d'une base, en attente de confirmation. */
 export type PendingDatabaseAction = { db: string; action: DatabaseMenuAction };
 
 export type DatabaseMenuAction =
-  "regenerate_assets" | "reset_translations" | "neutralize" | "admin_password" | "psql" | "duplicate" | "drop";
+  | "regenerate_assets"
+  | "reset_translations"
+  | "neutralize"
+  | "admin_password"
+  | "psql"
+  | "dependencies"
+  | "duplicate"
+  | "drop";
 
 export type ManagerSettings = {
   version: number;

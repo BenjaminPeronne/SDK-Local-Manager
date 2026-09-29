@@ -90,6 +90,7 @@ from odoo_manager_core.migration import (
     privileged_prefix,
     project_status,
 )
+from odoo_manager_core.module_dependencies import dependency_report
 from odoo_manager_core.odoo_log_display import OdooLogDisplay, compact_odoo_log_text
 from odoo_manager_core.platform import (
     command_uses_wsl,
@@ -173,6 +174,7 @@ API_ENDPOINTS = {
         "/api/projects/{project}/modules",
         "/api/projects/{project}/addon-links",
         "/api/projects/{project}/languages",
+        "/api/projects/{project}/dependencies",
         "/api/projects/{project}/socle",
         "/api/projects/{project}/socle/plan",
         "/api/projects/{project}/databases",
@@ -5658,6 +5660,22 @@ def project_languages_payload(request):
     return {"languages": installed_languages(project, db_name)}
 
 
+def project_dependencies_payload(request):
+    """Modules absents du code et modules qu'Odoo n'en chargera pas, pour une base."""
+    project = validate_project(request.param("project"))
+    db_name = validate_odoo_db(request.query_value("db"))
+    states = installed_modules(project, db_name)
+    if not states:
+        raise RuntimeError(f"Impossible de lire les modules de {db_name} : PostgreSQL est-il démarré ?")
+    report = dependency_report(
+        module_dependency_graph(project),
+        states,
+        excluded=ignored_missing_modules(project, db_name),
+        database_only=DATABASE_ONLY_MODULES,
+    )
+    return {"project": project, "db": db_name, **report}
+
+
 def project_socle_payload(request):
     project = validate_project(request.param("project"))
     db_name = request.query_value("db")
@@ -6243,6 +6261,7 @@ ROUTER = Router(
         api_route("GET", "/api/projects/{project}/modules", project_modules_payload),
         api_route("GET", "/api/projects/{project}/addon-links", project_addon_links_payload),
         api_route("GET", "/api/projects/{project}/languages", project_languages_payload),
+        api_route("GET", "/api/projects/{project}/dependencies", project_dependencies_payload),
         api_route("GET", "/api/projects/{project}/socle", project_socle_payload),
         api_route("GET", "/api/projects/{project}/socle/plan", project_socle_plan_payload),
         api_route("GET", "/api/projects/{project}/databases", project_databases_payload),
