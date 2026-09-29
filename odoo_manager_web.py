@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import errno
+import hmac
 import http.client
 import json
 import ntpath
@@ -259,6 +260,11 @@ LOCAL_MODULE_OVERRIDES = SETTINGS_STORE.path.with_name("local_module_overrides.j
 DELETED_PROJECTS = WORKSPACE / ".odoo_manager_deleted"
 DELETED_MODULES = WORKSPACE / ".odoo_manager_deleted_modules"
 HOST = os.environ.get("ODOO_GUI_HOST", "127.0.0.1")
+# Jeton tiré par l'application à chaque lancement. Retiré de l'environnement dès sa lecture :
+# git, docker et les scripts lancés par le backend n'en héritent pas. Vide quand le backend
+# tourne seul (développement) : l'API reste alors ouverte aux clients locaux.
+API_TOKEN = os.environ.pop("ODOO_MANAGER_API_TOKEN", "")
+API_TOKEN_HEADER = "X-SDK-Manager-Token"
 PORT = int(os.environ.get("ODOO_GUI_PORT", str(SETTINGS.api_port)))
 TRAEFIK_REPO = "ssh://git@gitlab.sudokeys.com:10022/devops/docker-local-tools.git"
 
@@ -598,6 +604,24 @@ def untrusted_request_reason(headers):
     if origin is not None and origin not in allowed_browser_origins():
         return "Origine non autorisée."
     return ""
+
+
+def api_token_error(headers, token=None):
+    """Refuse une requête sans le jeton de l'application.
+
+    Host et Origin arrêtent les pages web, pas un autre processus du poste : un module Odoo
+    exécuté dans un conteneur joint la boucle locale de l'hôte et peut forger ces en-têtes.
+    """
+    expected = API_TOKEN if token is None else token
+    if not expected:
+        return ""
+    provided = headers.get(API_TOKEN_HEADER) or ""
+    authorization = headers.get("Authorization") or ""
+    if not provided and authorization[:7].lower() == "bearer ":
+        provided = authorization[7:].strip()
+    if hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+        return ""
+    return "Jeton de l'API locale manquant ou invalide."
 
 
 def add_cors_headers(handler):
@@ -5365,14 +5389,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             remaining -= len(chunk)
 
-    def reject_untrusted_request(self):
-        reason = untrusted_request_reason(self.headers)
+    def reject_untrusted_request(self, require_token=True):
+        status, reason = 403, untrusted_request_reason(self.headers)
+        if not reason and require_token:
+            status, reason = 401, api_token_error(self.headers)
         if not reason:
             return False
         body = json.dumps({"error": reason}, ensure_ascii=False).encode("utf-8")
         try:
             self.discard_request_body()
-            self.send_response(403)
+            self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Connection", "close")
@@ -5395,14 +5421,16 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def do_OPTIONS(self):
-        if self.reject_untrusted_request():
+        # Le navigateur n'envoie aucun en-tête applicatif avec la requête préalable CORS.
+        if self.reject_untrusted_request(require_token=False):
             return
         self.send_response(204)
         add_cors_headers(self)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header(
             "Access-Control-Allow-Headers",
-            "Content-Type, X-Odoo-Database-Name, X-Odoo-Master-Password, X-Odoo-Copy, X-Odoo-Neutralize, X-File-Name",
+            "Content-Type, Authorization, X-SDK-Manager-Token, X-Odoo-Database-Name, X-Odoo-Master-Password, "
+            "X-Odoo-Copy, X-Odoo-Neutralize, X-File-Name",
         )
         self.send_header("Access-Control-Max-Age", "600")
         self.end_headers()

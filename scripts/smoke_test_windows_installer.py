@@ -23,6 +23,17 @@ PACKAGED_PROCESS_NAMES = (
 )
 
 
+# Fichier où l'application publie le jeton de l'API locale (dossier de configuration isolé).
+API_TOKEN_FILE: Path | None = None
+
+
+def api_token() -> str:
+    try:
+        return API_TOKEN_FILE.read_text(encoding="utf-8").strip() if API_TOKEN_FILE else ""
+    except OSError:
+        return ""
+
+
 def request(
     url: str,
     *,
@@ -31,6 +42,9 @@ def request(
     origin: str | None = None,
 ) -> tuple[bytes, dict[str, str]]:
     headers = {"Origin": origin} if origin else {}
+    # La requête préalable CORS n'en porte jamais, comme celle d'un navigateur.
+    if method != "OPTIONS" and api_token():
+        headers["X-SDK-Manager-Token"] = api_token()
     if method == "OPTIONS":
         headers.update(
             {
@@ -97,6 +111,9 @@ def wait_for_backend_shutdown(timeout: float = 10.0) -> None:
     while time.monotonic() < deadline:
         try:
             request(f"{BACKEND_URL}/api/health", timeout=0.5)
+        except urllib.error.HTTPError:
+            # Une réponse, même 401, prouve que le backend tourne encore.
+            pass
         except (OSError, urllib.error.URLError):
             return
         time.sleep(0.2)
@@ -206,6 +223,8 @@ def main() -> None:
         # Reproduce a real first launch: the configured workspace may not exist yet.
         workspace = root / "workspace"
         config_dir = root / "config"
+        global API_TOKEN_FILE
+        API_TOKEN_FILE = config_dir / "api-token"
         subprocess.run([str(installer), "/S", f"/D={install_dir}"], check=True, timeout=90)
 
         application, runtime = installed_paths(install_dir)

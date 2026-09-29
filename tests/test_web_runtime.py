@@ -127,6 +127,31 @@ class LocalApiRequestGuardTests(unittest.TestCase):
         self.assertTrue(self.logged("electron") and self.logged("next-dev") and self.logged("local-client"))
         self.assertFalse(self.logged("no-json"))
 
+    def get_status(self, path, headers=None, method="GET"):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        connection.request(method, path, headers={"Host": f"127.0.0.1:{self.port}", **(headers or {})})
+        status = connection.getresponse().status
+        connection.close()
+        return status
+
+    def test_without_an_application_token_local_clients_stay_allowed(self):
+        with patch.object(web, "API_TOKEN", ""):
+            self.assertEqual(200, self.get_status("/api/version"))
+
+    def test_the_application_token_is_required_on_every_route(self):
+        with patch.object(web, "API_TOKEN", "s3cret-token"):
+            self.assertEqual(401, self.get_status("/api/version"))
+            self.assertEqual(401, self.get_status("/api/version", {"X-SDK-Manager-Token": "wrong"}))
+            self.assertEqual(401, self.post_report("forged", {"Content-Type": "application/json"}))
+            self.assertFalse(self.logged("forged"))
+            self.assertEqual(200, self.get_status("/api/version", {"X-SDK-Manager-Token": "s3cret-token"}))
+            self.assertEqual(200, self.get_status("/api/version", {"Authorization": "Bearer s3cret-token"}))
+
+    def test_cors_preflight_needs_no_token_but_a_foreign_origin_is_still_refused(self):
+        with patch.object(web, "API_TOKEN", "s3cret-token"):
+            self.assertEqual(204, self.get_status("/api/jobs", {"Origin": "app://sdk"}, method="OPTIONS"))
+            self.assertEqual(403, self.get_status("/api/jobs", {"Origin": "https://evil.example"}, method="OPTIONS"))
+
     def test_hostname_parsing_accepts_only_loopback_names(self):
         self.assertEqual("127.0.0.1", web.request_hostname("127.0.0.1:18765"))
         self.assertEqual("::1", web.request_hostname("[::1]:18765"))

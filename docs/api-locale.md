@@ -16,16 +16,36 @@ sait faire, comment lancer une action et la suivre, et ce qui est garanti d'une 
 
 ## Règles d'accès
 
-L'API n'a pas d'authentification. Elle se protège des pages web ouvertes dans un navigateur, qui
-pourraient sinon l'appeler à la place de l'utilisateur.
+L'application tire un **jeton** à chaque lancement. Toute requête doit le présenter : sans lui,
+un autre processus du poste (un module Odoo exécuté dans un conteneur, par exemple) pourrait
+supprimer une base ou un projet. L'API se protège aussi des pages web ouvertes dans un navigateur.
 
 | Règle | Sinon |
 | --- | --- |
 | L'en-tête `Host` désigne la boucle locale (`127.0.0.1`, `localhost`, `::1`). | `403` |
 | Un en-tête `Origin`, s'il est présent, est celui de l'application. Un script local n'en envoie pas. | `403` |
+| L'en-tête `X-SDK-Manager-Token` (ou `Authorization: Bearer …`) porte le jeton de la session. | `401` |
 | Un corps de requête est en `Content-Type: application/json`. | `400` |
 
-`curl` et les clients HTTP usuels respectent ces règles sans réglage.
+Le jeton est écrit, lisible par le seul utilisateur, dans le fichier `api-token` du dossier de
+configuration (à côté de `config.json`) :
+
+| Système | Fichier |
+| --- | --- |
+| macOS | `~/Library/Application Support/Odoo Manager/api-token` |
+| Linux | `~/.config/odoo-manager/api-token` |
+| Windows | `%APPDATA%\Odoo Manager\api-token` |
+
+Il change à chaque lancement de l'application et disparaît à sa fermeture : relisez-le avant
+chaque série d'appels.
+
+```bash
+TOKEN=$(cat ~/Library/Application\ Support/Odoo\ Manager/api-token)
+curl -s -H "X-SDK-Manager-Token: $TOKEN" http://127.0.0.1:18765/api/version
+```
+
+Un backend lancé seul, hors de l'application (développement), n'a pas de jeton : il accepte alors
+les clients locaux sans cet en-tête.
 
 ## Découvrir le gestionnaire
 
@@ -35,7 +55,7 @@ WSL : elles répondent immédiatement.
 ### `GET /api/version`
 
 ```bash
-curl -s http://127.0.0.1:18765/api/version
+curl -s -H "X-SDK-Manager-Token: $TOKEN" http://127.0.0.1:18765/api/version
 ```
 
 ```json
@@ -50,7 +70,7 @@ curl -s http://127.0.0.1:18765/api/version
 ### `GET /api/capabilities`
 
 ```bash
-curl -s http://127.0.0.1:18765/api/capabilities
+curl -s -H "X-SDK-Manager-Token: $TOKEN" http://127.0.0.1:18765/api/capabilities
 ```
 
 ```json
@@ -98,7 +118,7 @@ servies, et `/api/version` à la version des manifestes de l'application.
 ### Créer
 
 ```bash
-curl -s -X POST http://127.0.0.1:18765/api/jobs \
+curl -s -X POST http://127.0.0.1:18765/api/jobs -H "X-SDK-Manager-Token: $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"action": "start_project", "project": "DEMO"}'
 ```
@@ -132,7 +152,7 @@ autre tourne sur le projet est mise en file (`queued`), et `waiting_for` dit laq
 ### Suivre
 
 ```bash
-curl -s 'http://127.0.0.1:18765/api/jobs?detail=12'
+curl -s -H "X-SDK-Manager-Token: $TOKEN" 'http://127.0.0.1:18765/api/jobs?detail=12'
 ```
 
 La réponse `{"jobs": [...]}` liste les 30 dernières actions. Seule l'action désignée par
@@ -159,7 +179,8 @@ Statuts :
 ### Arrêter
 
 ```bash
-curl -s -X POST http://127.0.0.1:18765/api/jobs/12/cancel -H 'Content-Type: application/json' -d '{}'
+curl -s -X POST http://127.0.0.1:18765/api/jobs/12/cancel -H "X-SDK-Manager-Token: $TOKEN" \
+  -H 'Content-Type: application/json' -d '{}'
 ```
 
 Une étape irréversible ne peut pas être interrompue : la réponse est alors `409`, et

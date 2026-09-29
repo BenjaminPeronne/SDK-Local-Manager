@@ -3,9 +3,11 @@ const path = require("node:path");
 const os = require("node:os");
 const net = require("node:net");
 const { spawn } = require("node:child_process");
-const { randomUUID, createHash } = require("node:crypto");
+const { randomBytes, randomUUID, createHash } = require("node:crypto");
 
 const APP_ORIGIN = "app://sdk";
+const API_TOKEN_HEADER = "X-SDK-Manager-Token";
+const API_TOKEN_VARIABLE = "ODOO_MANAGER_API_TOKEN";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function configPath(env = process.env, platform = process.platform, home = os.homedir()) {
@@ -29,6 +31,20 @@ function configuredPort(env = process.env) {
     /* First launch uses the established port. */
   }
   return 18765;
+}
+
+// Scripts et intégrateurs lisent le jeton de la session dans ce fichier, à côté de config.json.
+function apiTokenPath(env = process.env) {
+  return path.join(path.dirname(configPath(env)), "api-token");
+}
+
+// `wsl.exe` ne transmet à Linux que les variables Windows listées dans WSLENV. Passer le jeton
+// ainsi, plutôt qu'en argument de la commande, le garde hors de la liste des processus.
+function mergeWslenv(current, name) {
+  const names = String(current || "")
+    .split(":")
+    .filter(Boolean);
+  return names.some((entry) => entry.split("/")[0] === name) ? names.join(":") : [...names, name].join(":");
 }
 
 function reservePort(port) {
@@ -101,12 +117,40 @@ class Backend {
     this.logPath = path.join(logDir, "backend.log");
     this.env = env;
     this.instance = randomUUID();
+    // Tiré à chaque lancement : toute requête au backend doit le présenter.
+    this.apiToken = randomBytes(32).toString("base64url");
+    this.tokenPath = apiTokenPath(env);
     this.child = null;
     this.ready = false;
   }
 
   log(message) {
     fs.appendFileSync(this.logPath, message + "\n");
+  }
+
+  authorized(init = {}) {
+    return { ...init, headers: { ...init.headers, [API_TOKEN_HEADER]: this.apiToken } };
+  }
+
+  // Écrit par renommage, lisible par le seul utilisateur : un fichier à moitié écrit n'est jamais lu.
+  writeTokenFile() {
+    try {
+      fs.mkdirSync(path.dirname(this.tokenPath), { recursive: true });
+      const temporary = `${this.tokenPath}.${process.pid}.tmp`;
+      fs.writeFileSync(temporary, this.apiToken, { mode: 0o600 });
+      fs.renameSync(temporary, this.tokenPath);
+    } catch (error) {
+      this.log(`Fichier du jeton de l'API non écrit : ${error.message}`);
+    }
+  }
+
+  removeTokenFile() {
+    try {
+      // Une autre instance a pu le réécrire depuis : on ne supprime que le sien.
+      if (fs.readFileSync(this.tokenPath, "utf8") === this.apiToken) fs.rmSync(this.tokenPath, { force: true });
+    } catch {
+      /* Déjà absent. */
+    }
   }
 
   // Réserve le port et ouvre le journal, sans lancer le backend. La politique de sécurité de la
@@ -161,6 +205,8 @@ class Backend {
           ODOO_GUI_PORT: String(this.port),
           ODOO_MANAGER_LOG_DIR: this.logDir,
           ODOO_MANAGER_INSTANCE_ID: this.instance,
+          [API_TOKEN_VARIABLE]: this.apiToken,
+          ...(process.platform === "win32" ? { WSLENV: mergeWslenv(this.env.WSLENV, API_TOKEN_VARIABLE) } : {}),
         },
         windowsHide: true,
         stdio: ["ignore", fd, fd],
@@ -179,10 +225,14 @@ class Backend {
       if (this.error) throw this.error;
       if (this.child.exitCode !== null) throw new Error(`Le backend s’est arrêté (code ${this.child.exitCode}).`);
       try {
-        const response = await fetch(this.endpoint + "/api/health", { signal: AbortSignal.timeout(500) });
+        const response = await fetch(
+          this.endpoint + "/api/health",
+          this.authorized({ signal: AbortSignal.timeout(500) }),
+        );
         const health = await response.json();
         if (response.ok && health.ok && health.instance_id === this.instance) {
           this.ready = true;
+          this.writeTokenFile();
           this.log("Backend opérationnel et identité vérifiée.");
           return;
         }
@@ -212,12 +262,18 @@ class Backend {
 
   async terminate() {
     const child = this.child;
+    this.removeTokenFile();
     if (!child || child.exitCode !== null || this.error) return;
     // Never send shutdown to a different instance that acquired the port after a crash.
     try {
-      const health = await (await fetch(this.endpoint + "/api/health", { signal: AbortSignal.timeout(750) })).json();
+      const health = await (
+        await fetch(this.endpoint + "/api/health", this.authorized({ signal: AbortSignal.timeout(750) }))
+      ).json();
       if (health.instance_id === this.instance) {
-        await fetch(this.endpoint + "/api/system/shutdown", { method: "POST", signal: AbortSignal.timeout(1500) });
+        await fetch(
+          this.endpoint + "/api/system/shutdown",
+          this.authorized({ method: "POST", signal: AbortSignal.timeout(1500) }),
+        );
       }
     } catch {
       /* The child may already be exiting. */
@@ -241,8 +297,11 @@ class Backend {
 
 module.exports = {
   APP_ORIGIN,
+  API_TOKEN_HEADER,
   Backend,
+  apiTokenPath,
   configPath,
+  mergeWslenv,
   configuredPort,
   selectPort,
   externalUrl,

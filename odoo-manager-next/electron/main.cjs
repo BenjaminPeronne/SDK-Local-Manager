@@ -15,7 +15,15 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { execFile, spawn } = require("node:child_process");
-const { APP_ORIGIN, Backend, configPath, externalUrl, staticPath, contentPolicy } = require("./runtime.cjs");
+const {
+  APP_ORIGIN,
+  API_TOKEN_HEADER,
+  Backend,
+  configPath,
+  externalUrl,
+  staticPath,
+  contentPolicy,
+} = require("./runtime.cjs");
 const { CredentialStore } = require("./credentials.cjs");
 const { GitLabClient } = require("./gitlab.cjs");
 const {
@@ -333,6 +341,14 @@ async function start() {
     callback(mayWriteClipboard(contents, permission)),
   );
   session.defaultSession.setPermissionCheckHandler((contents, permission) => mayWriteClipboard(contents, permission));
+  // Le jeton de l'API reste dans ce processus : il est ajouté ici à chaque requête vers le
+  // backend (fetch, téléversements, flux SSE) et n'est jamais exposé au JavaScript de l'interface.
+  // Ajouté après la décision CORS, il ne provoque pas de requête préalable supplémentaire.
+  const backendPrefix = backend.endpoint + "/";
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    if (!details.url.startsWith(backendPrefix)) return callback({ requestHeaders: details.requestHeaders });
+    callback({ requestHeaders: { ...details.requestHeaders, [API_TOKEN_HEADER]: backend.apiToken } });
+  });
   installHandlers();
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
@@ -395,8 +411,11 @@ async function smokeCheck() {
       rendered: !!document.querySelector('button'),
       bootstrap: Object.keys(await (await fetch((await window.sdkDesktop.backendEndpoint()) + '/api/bootstrap')).json())
     }); })()`);
+    // Hors de la fenêtre, sans le jeton ajouté par la session : le backend doit refuser.
+    report.unauthenticatedStatus = (await fetch(backend.endpoint + "/api/health")).status;
     report.ok =
       report.backendReady &&
+      report.unauthenticatedStatus === 401 &&
       report.renderer.bridge &&
       !report.renderer.nodeExposed &&
       report.renderer.health.ok &&

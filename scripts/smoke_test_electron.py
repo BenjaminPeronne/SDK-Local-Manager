@@ -63,8 +63,13 @@ def main():
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1):
                 raise SystemExit("Le backend reste actif après la fermeture d’Electron.")
+        except urllib.error.HTTPError as error:
+            # Un 401 est une réponse : le backend tourne encore.
+            raise SystemExit("Le backend reste actif après la fermeture d’Electron.") from error
         except (OSError, urllib.error.URLError):
             pass
+        if (root / "config" / "api-token").exists():
+            raise SystemExit("Le jeton de l'API locale reste sur disque après la fermeture d’Electron.")
         print(json.dumps({**payload, "backendStopped": True}, indent=2, ensure_ascii=False))
 
 

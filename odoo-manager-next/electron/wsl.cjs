@@ -118,9 +118,10 @@ function importArguments({ archive, distribution = DISTRIBUTION, location }) {
 }
 
 function backendCommand({ distribution = DISTRIBUTION, port, instance, logLevel, legacyWorkspace } = {}) {
-  // `wsl.exe --exec` ne transmet aucune variable d'environnement de Windows : les
-  // réglages du backend passent par `env`. Tuer wsl.exe arrête le processus Linux,
-  // ce qui interdit un backend orphelin.
+  // `wsl.exe --exec` ne transmet que les variables Windows listées dans WSLENV : les
+  // réglages du backend passent par `env`. Le jeton de l'API, secret, passe seul par
+  // WSLENV (voir Backend.launch) pour ne pas figurer dans la ligne de commande.
+  // Tuer wsl.exe arrête le processus Linux, ce qui interdit un backend orphelin.
   const variables = [`ODOO_GUI_HOST=127.0.0.1`, `ODOO_GUI_PORT=${port}`];
   if (instance) variables.push(`ODOO_MANAGER_INSTANCE_ID=${instance}`);
   if (logLevel) variables.push(`ODOO_MANAGER_LOG_LEVEL=${logLevel}`);

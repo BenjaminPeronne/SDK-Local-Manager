@@ -4,7 +4,16 @@ const fs = require("node:fs");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
-const { Backend, configPath, selectPort, externalUrl, staticPath, contentPolicy } = require("../runtime.cjs");
+const {
+  Backend,
+  apiTokenPath,
+  configPath,
+  mergeWslenv,
+  selectPort,
+  externalUrl,
+  staticPath,
+  contentPolicy,
+} = require("../runtime.cjs");
 
 test("preserves configuration paths and explicit overrides", () => {
   assert.equal(
@@ -94,4 +103,57 @@ test("a backend command that fails falls back to the native executable", async (
   assert.equal(backend.command, null, "la commande défaillante ne doit pas être réessayée");
   assert.equal(failures.length, 1);
   assert.match(fs.readFileSync(path.join(directory, "backend.log"), "utf8"), /Backend opérationnel/);
+});
+
+test("the backend receives a per-launch token, requires it, and publishes it for local scripts", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-token-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const fakeBackend = path.join(directory, "backend.cjs");
+  // Refuse toute requête sans le jeton reçu dans son environnement, comme le vrai backend.
+  fs.writeFileSync(
+    fakeBackend,
+    `
+    const http = require('node:http');
+    const token = process.env.ODOO_MANAGER_API_TOKEN;
+    const server = http.createServer((request, response) => {
+      if (!token || request.headers['x-sdk-manager-token'] !== token) {
+        response.writeHead(401).end('{}');
+        return;
+      }
+      if (request.url === '/api/system/shutdown') {
+        response.writeHead(204).end();
+        server.close(() => process.exit(0));
+        return;
+      }
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ ok: true, instance_id: process.env.ODOO_MANAGER_INSTANCE_ID }));
+    }).listen(Number(process.env.ODOO_GUI_PORT), '127.0.0.1');
+  `,
+  );
+  const backend = new Backend({
+    executable: process.execPath,
+    args: [fakeBackend],
+    logDir: directory,
+    env: { ...process.env, ODOO_MANAGER_CONFIG_DIR: directory },
+  });
+  t.after(() => backend.stop());
+
+  await backend.start();
+
+  assert.equal(backend.ready, true);
+  const tokenFile = apiTokenPath({ ODOO_MANAGER_CONFIG_DIR: directory });
+  assert.equal(fs.readFileSync(tokenFile, "utf8"), backend.apiToken);
+  if (process.platform !== "win32") assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600);
+  assert.equal((await fetch(backend.endpoint + "/api/health")).status, 401);
+
+  await backend.stop();
+
+  assert.equal(fs.existsSync(tokenFile), false, "le jeton d'une session terminée ne doit pas rester sur disque");
+  assert.notEqual(backend.child.exitCode, null, "l'arrêt authentifié doit être accepté par le backend");
+});
+
+test("the token variable is added once to WSLENV without dropping existing entries", () => {
+  assert.equal(mergeWslenv("", "ODOO_MANAGER_API_TOKEN"), "ODOO_MANAGER_API_TOKEN");
+  assert.equal(mergeWslenv("USERPROFILE/p", "ODOO_MANAGER_API_TOKEN"), "USERPROFILE/p:ODOO_MANAGER_API_TOKEN");
+  assert.equal(mergeWslenv("ODOO_MANAGER_API_TOKEN:A", "ODOO_MANAGER_API_TOKEN"), "ODOO_MANAGER_API_TOKEN:A");
 });
