@@ -1744,6 +1744,41 @@ class AutomaticPythonDependencyTests(unittest.TestCase):
         service.create_postgres_extension.assert_called_once_with("demo", "test_compare", "vector", log=job.add)
         self.assertTrue(any("vector" in line for line in job.lines))
 
+    REPORT_DUPLICATE_ERROR = (
+        "La commande Odoo a échoué avec le code 255. Dernière erreur Odoo : odoo.tools.convert.ParseError: "
+        "while parsing /home/odoo/srv/server/odoo/addons/l10n_fr/data/tax_report_data.xml:3, somewhere inside "
+        "— cause d'origine : psycopg2.errors.UniqueViolation: duplicate key value violates unique constraint "
+        '"account_report_expression_line_label_uniq"'
+    )
+
+    @patch("odoo_manager_web.normalize_module_layout_for_action")
+    @patch("odoo_manager_web.project_dirs", return_value=["demo"])
+    @patch("odoo_manager_web.project_service")
+    def test_duplicate_report_expression_is_cleaned_and_the_update_is_retried(self, project_service, _dirs, _normalize):
+        service = project_service.return_value
+        service.run_odoo_module_command.side_effect = [RuntimeError(self.REPORT_DUPLICATE_ERROR), None]
+        service.remove_orphan_report_expressions.return_value = 12
+        job = self.LogJob()
+
+        web.module_command_job(job, "--update-module", "demo", "db1", "all")
+
+        self.assertEqual(2, service.run_odoo_module_command.call_count)
+        service.remove_orphan_report_expressions.assert_called_once_with("demo", "db1", "l10n_fr", log=job.add)
+
+    @patch("odoo_manager_web.normalize_module_layout_for_action")
+    @patch("odoo_manager_web.project_dirs", return_value=["demo"])
+    @patch("odoo_manager_web.project_service")
+    def test_duplicate_report_expression_with_nothing_to_clean_is_not_retried(self, project_service, _dirs, _normalize):
+        service = project_service.return_value
+        service.run_odoo_module_command.side_effect = RuntimeError(self.REPORT_DUPLICATE_ERROR)
+        service.remove_orphan_report_expressions.return_value = 0
+        job = self.LogJob()
+
+        with self.assertRaisesRegex(RuntimeError, "account_report_expression_line_label_uniq"):
+            web.module_command_job(job, "--update-module", "demo", "db1", "all")
+
+        self.assertEqual(1, service.run_odoo_module_command.call_count)
+
 
 class TraefikInstallationTests(unittest.TestCase):
     class LogJob:

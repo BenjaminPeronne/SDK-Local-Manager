@@ -1491,6 +1491,28 @@ class ProjectServiceTests(unittest.TestCase):
 
         self.assertEqual([], self.runner.captures)
 
+    def test_orphan_report_expressions_of_the_module_are_deleted_through_the_postgres_role(self):
+        def capture(command, cwd=None, timeout=10):
+            self.runner.captures.append((list(command), cwd, timeout))
+            return 0, "163\n174\n"
+
+        logs = []
+        with patch.object(self.service, "capture", side_effect=capture):
+            removed = self.service.remove_orphan_report_expressions("DEMO", "db1", "l10n_fr", log=logs.append)
+
+        self.assertEqual(2, removed)
+        sql = self.runner.captures[-1][0][-1]
+        self.assertIn("postgresql-DEMO", self.runner.captures[-1][0])
+        self.assertIn("line_data.module = 'l10n_fr'", sql)
+        self.assertIn("account_report_external_value", sql)
+        self.assertTrue(any("2 expression(s)" in line for line in logs))
+
+    def test_orphan_report_expression_cleanup_validates_the_module_name(self):
+        with self.assertRaises(ValueError):
+            self.service.remove_orphan_report_expressions("DEMO", "db1", "l10n_fr'; DROP TABLE x; --")
+
+        self.assertEqual([], self.runner.captures)
+
 
 if __name__ == "__main__":
     unittest.main()

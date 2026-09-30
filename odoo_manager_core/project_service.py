@@ -1760,6 +1760,52 @@ class ProjectService:
             raise RuntimeError(f"Installation de l'extension PostgreSQL {extension} impossible : {output.strip()}")
         self.log(log, f"Extension PostgreSQL {extension} installée.")
 
+    def remove_orphan_report_expressions(self, project, db_name, module, log=None):
+        """Supprime les expressions de rapport `balance` d'un module que sa version actuelle recrée.
+
+        Une base créée avec une ancienne version du module porte des expressions d'agrégation sans
+        identifiant XML sur les lignes du module. La version actuelle les déclare explicitement :
+        Odoo ne les reconnaît pas et échoue sur l'unicité (ligne, libellé). Les supprimer laisse
+        Odoo les recréer à l'identique au réessai. Seules les lignes de ce module sont touchées, et
+        pas les expressions qui portent des valeurs saisies (ajustements, reports).
+        """
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", module):
+            raise ValueError(f"Nom de module invalide : {module}")
+        sql = (
+            "DELETE FROM account_report_expression e "
+            "USING ir_model_data line_data "
+            "WHERE line_data.model = 'account.report.line' AND line_data.res_id = e.report_line_id "
+            f"AND line_data.module = '{module}' "
+            "AND e.engine = 'aggregation' AND e.label = 'balance' "
+            "AND NOT EXISTS (SELECT 1 FROM ir_model_data d "
+            "WHERE d.model = 'account.report.expression' AND d.res_id = e.id) "
+            "AND NOT EXISTS (SELECT 1 FROM account_report_external_value v "
+            "WHERE v.target_report_expression_id = e.id) "
+            "RETURNING e.id;"
+        )
+        code, output = self.capture(
+            self.docker(
+                "exec",
+                f"postgresql-{project}",
+                "psql",
+                "-X",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "postgres",
+                "-d",
+                db_name,
+                "-Atc",
+                sql,
+            ),
+            timeout=30,
+        )
+        if code != 0:
+            raise RuntimeError(f"Nettoyage des expressions de rapport de {module} impossible : {output.strip()}")
+        removed = [line for line in output.splitlines() if line.strip().isdigit()]
+        self.log(log, f"{len(removed)} expression(s) de rapport de {module} supprimée(s) : Odoo les recrée au réessai.")
+        return len(removed)
+
     def ensure_odoo_containers_ready(self, project, log=None):
         container = f"odoo-{project}"
         postgres = f"postgresql-{project}"

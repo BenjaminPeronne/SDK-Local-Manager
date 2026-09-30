@@ -128,6 +128,25 @@ PIP_PACKAGE_ALIASES = {
 MISSING_POSTGRES_EXTENSION_RE = re.compile(r'permission denied to create extension "(?P<extension>[\w-]+)"')
 
 
+# Doublon d'expression de rapport comptable : une base créée avec une version plus ancienne d'un
+# module de localisation porte des expressions « balance » sans identifiant XML, que la version
+# actuelle déclare explicitement. Odoo ne les reconnaît pas et tente d'en créer une seconde.
+REPORT_EXPRESSION_DUPLICATE_RE = re.compile(r"account_report_expression_line_label_uniq")
+PARSED_DATA_FILE_RE = re.compile(r"while parsing (?P<path>\S+?\.xml):\d+")
+
+
+def report_expression_duplicate_module(message):
+    """Module dont le fichier de données a déclenché un doublon d'expression de rapport ; "" sinon."""
+    if not REPORT_EXPRESSION_DUPLICATE_RE.search(message):
+        return ""
+    match = PARSED_DATA_FILE_RE.search(message)
+    if not match:
+        return ""
+    # …/addons/l10n_fr/data/tax_report_data.xml : le module est le dossier qui précède le sous-dossier.
+    parts = [part for part in match.group("path").split("/") if part]
+    return parts[-3] if len(parts) >= 3 and re.fullmatch(r"[a-z][a-z0-9_]*", parts[-3]) else ""
+
+
 def missing_python_import(message):
     """Nom d'import Python manquant, déduit d'une erreur Odoo ou d'un traceback brut."""
     match = MISSING_PYTHON_IMPORT_RE.search(message)

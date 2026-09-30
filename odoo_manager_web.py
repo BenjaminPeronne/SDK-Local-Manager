@@ -47,6 +47,7 @@ from odoo_manager_core.command_output import (
     missing_python_import,
     odoo_restore_error,
     python_package_for_import,
+    report_expression_duplicate_module,
 )
 from odoo_manager_core.docker_api import EngineUnavailable
 from odoo_manager_core.events import EVENT_SUBSCRIBERS, EVENT_SUBSCRIBERS_LOCK, publish_event
@@ -4551,6 +4552,19 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
                 job.add(f"Extension PostgreSQL manquante détectée automatiquement : {extension}. Installation...")
                 project_service().create_postgres_extension(project, db_name, extension, log=job.add)
                 continue
+            report_module = report_expression_duplicate_module(message)
+            if (
+                report_module
+                and f"report:{report_module}" not in attempted_fixes
+                and len(attempted_fixes) < MAX_AUTO_DEPENDENCY_FIXES
+            ):
+                attempted_fixes.add(f"report:{report_module}")
+                job.add(
+                    f"Rapports comptables de {report_module} créés par une autre version du module dans cette base : "
+                    "nettoyage des expressions en doublon et nouvelle tentative..."
+                )
+                if project_service().remove_orphan_report_expressions(project, db_name, report_module, log=job.add):
+                    continue
 
             hint = missing_code_failure_hint(project, db_name, message) or external_dependency_failure_hint(message)
             if hint:
