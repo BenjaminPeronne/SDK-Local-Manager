@@ -513,7 +513,9 @@ class DatabaseRestoreTests(unittest.TestCase):
             '<div class="alert alert-danger">Could not create database. Access Denied</div></body></html>'
         ).encode()
         connection.getresponse.return_value = response
-        with self.assertRaisesRegex(RuntimeError, r"^Odoo a refusé la demande \(HTTP 422\) : Could not create database\. Access Denied$"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"^Odoo a refusé la demande \(HTTP 422\) : Could not create database\. Access Denied$"
+        ):
             web.post_form_no_redirect("http://dev.demo.localhost/web/database/create", {})
 
         connection.request.side_effect = ConnectionRefusedError("refused")
