@@ -49,6 +49,13 @@ from odoo_manager_core.command_output import (
     python_package_for_import,
     report_expression_duplicate_module,
 )
+from odoo_manager_core.disk_usage import (
+    compose_image_references,
+    parse_docker_size,
+    parse_du_output,
+    trash_entry,
+    unused_images,
+)
 from odoo_manager_core.docker_api import EngineUnavailable
 from odoo_manager_core.events import EVENT_SUBSCRIBERS, EVENT_SUBSCRIBERS_LOCK, publish_event
 from odoo_manager_core.http_routes import Route, Router, RouteRequest
@@ -164,6 +171,7 @@ API_ENDPOINTS = {
         "/api/bootstrap",
         "/api/overview",
         "/api/app-update",
+        "/api/disk-usage",
         "/api/settings",
         "/api/errors",
         "/api/jobs",
@@ -214,6 +222,12 @@ API_ACTIONS = (
     "create_project",
     "delete_module_code",
     "delete_project",
+    "prune_docker_build_cache",
+    "purge_deleted_projects",
+    "purge_manager_folder",
+    "remove_docker_images",
+    "restore_deleted_project",
+    "scan_disk_usage",
     "drop_database",
     "duplicate_database",
     "ignore_missing_modules_locally",
@@ -2736,6 +2750,18 @@ JOB_CANCEL_POLICIES = {
         "La conversion s'arrête entre deux liens ; relance-la plus tard pour la terminer.",
     ),
     "install_git_job": (False, "l'installeur Windows ne peut pas être interrompu sans risque."),
+    "scan_disk_usage_job": (True, "L'analyse s'arrête ; relance-la quand tu veux."),
+    "purge_deleted_projects_job": (
+        True,
+        "Possible entre deux projets ; un projet en cours de suppression va à son terme.",
+    ),
+    "restore_deleted_project_job": (False, "déplacement court d'un dossier."),
+    "purge_manager_folder_job": (
+        True,
+        "Possible entre deux dossiers ; un dossier en cours de suppression va à son terme.",
+    ),
+    "remove_docker_images_job": (True, "Possible entre deux images."),
+    "prune_docker_build_cache_job": (False, "opération courte de Docker."),
     "start_mailpit_job": (True, "Le téléchargement de l'image s'arrête ; relance l'action pour le reprendre."),
     "stop_mailpit_job": (False, "arrêt court d'un conteneur."),
     "repair_enterprise_links_job": (False, "opération courte sur les liens de modules."),
@@ -3760,6 +3786,358 @@ def drop_partial_database(job, project, db_name):
 def restart_odoo_server(job, service, project):
     service.stop_odoo_server(project, log=job.add)
     service.start_odoo_server(project, log=job.add)
+
+
+# --- Espace disque ------------------------------------------------------------
+
+# Dossiers techniques du gestionnaire que l'utilisateur peut vider. Les imports en cours y
+# déposent leurs fichiers : ce dossier n'est vidé que sans autre action en cours.
+MANAGER_FOLDERS = {
+    "deleted_modules": (".odoo_manager_deleted_modules", "Modules retirés des projets"),
+    "backups": (".odoo_manager_backups", "Versions de modules remplacées lors des imports"),
+    "failures": (".odoo_manager_failures", "Journaux des commandes Odoo en échec"),
+    "imports": (".odoo_manager_imports", "Fichiers temporaires d'imports et de restaurations"),
+}
+DISK_USAGE_LOCK = threading.Lock()
+DISK_USAGE = {"report": None}
+DU_TIMEOUT_SECONDS = 1800
+
+
+def directory_sizes(path, depth=0):
+    """{chemin: octets} de `path` et, avec depth=1, de ses sous-dossiers directs.
+
+    `du` mesure l'espace réellement occupé et reste rapide sur des centaines de milliers de
+    fichiers ; Windows sans `du` additionne les tailles en Python.
+    """
+    path = Path(path)
+    if platform_id() != "windows":
+        code, output = run_capture(
+            ["du", "-k", "-d", str(depth), str(path)], cwd=path.parent, timeout=DU_TIMEOUT_SECONDS
+        )
+        # Code 1 : un fichier illisible (données PostgreSQL d'un autre utilisateur), le reste est mesuré.
+        sizes = parse_du_output(output) if code in (0, 1) else {}
+        if str(path) in sizes:
+            return sizes
+    sizes = {}
+    targets = [path]
+    if depth:
+        targets += [child for child in path.iterdir() if child.is_dir() and not child.is_symlink()]
+    for target in targets:
+        total = 0
+        for directory, _subdirectories, names in os.walk(target, followlinks=False):
+            job_control.checkpoint()
+            for name in names:
+                try:
+                    entry = Path(directory) / name
+                    if not entry.is_symlink():
+                        total += entry.stat().st_size
+                except OSError:
+                    continue
+        sizes[str(target)] = total
+    return sizes
+
+
+def directory_size(path):
+    return directory_sizes(path).get(str(Path(path)), 0)
+
+
+def apparent_directory_size(path):
+    """Taille des fichiers, stockés ou non sur ce disque : iCloud peut n'en garder qu'une partie.
+
+    `du` compte l'espace occupé, nul pour un fichier dont seul iCloud garde le contenu.
+    """
+    if platform_id() == "windows":
+        return directory_size(path)
+    option = "-A" if platform_id() == "macos" else "--apparent-size"
+    code, output = run_capture(
+        ["du", "-k", option, "-d", "0", str(path)], cwd=Path(path).parent, timeout=DU_TIMEOUT_SECONDS
+    )
+    return parse_du_output(output).get(str(Path(path)), 0) if code in (0, 1) else 0
+
+
+def workspace_synced_by_icloud():
+    """Vrai quand le dossier des projets est dans iCloud Drive (Bureau et Documents inclus)."""
+    if platform_id() != "macos":
+        return False
+    home = Path.home()
+    try:
+        workspace = WORKSPACE.resolve()
+        cloud = home / "Library" / "Mobile Documents"
+        if path_is_relative_to(workspace, cloud.resolve()):
+            return True
+        # « Bureau et Documents » : iCloud Drive les expose par un lien vers le dossier local.
+        for folder in ("Documents", "Desktop"):
+            link = cloud / "com~apple~CloudDocs" / folder
+            if link.is_symlink() and path_is_relative_to(workspace, (home / folder).resolve()):
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def trash_entries():
+    try:
+        children = sorted(DELETED_PROJECTS.iterdir()) if DELETED_PROJECTS.is_dir() else []
+    except OSError:
+        return []
+    return [entry for child in children if child.is_dir() and (entry := trash_entry(child.name))]
+
+
+def docker_images_snapshot():
+    """Images présentes, et celles qu'aucun conteneur n'utilise ni aucun projet ne déclare."""
+    image_format = "{{.ID}}\t{{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}"
+    code, output = run_capture(docker_command(SETTINGS, "images", "--no-trunc", "--format", image_format), timeout=60)
+    if code != 0:
+        raise RuntimeError(output or "Docker ne liste pas ses images.")
+    images = []
+    for line in output.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 5:
+            image_id, repository, tag, size, created = parts
+            images.append(
+                {
+                    "id": image_id,
+                    "repository": repository,
+                    "tag": tag,
+                    "bytes": parse_docker_size(size),
+                    "created": created,
+                }
+            )
+    code, containers = run_capture(docker_command(SETTINGS, "ps", "-aq", "--no-trunc"), timeout=30)
+    used = set()
+    if code == 0 and containers.split():
+        code, output = run_capture(
+            docker_command(SETTINGS, "inspect", "--format", "{{.Image}}", *containers.split()), timeout=60
+        )
+        if code != 0:
+            raise RuntimeError(output or "Docker n'indique pas les images de ses conteneurs.")
+        used = {line.strip() for line in output.splitlines() if line.strip()}
+    referenced = {MAILPIT_IMAGE}
+    compose_files = [compose_file(project) for project in project_dirs()]
+    compose_files.append(local_traefik_directory() / "docker-compose.yml")
+    for compose in compose_files:
+        if compose is None or not safe_path_exists(compose):
+            continue
+        try:
+            referenced |= compose_image_references(compose.read_text(encoding="utf-8", errors="ignore"))
+        except OSError:
+            continue
+    return images, unused_images(images, used, referenced)
+
+
+def docker_build_cache_bytes():
+    code, output = run_capture(
+        docker_command(SETTINGS, "system", "df", "--format", "{{.Type}}\t{{.Reclaimable}}"), timeout=60
+    )
+    if code != 0:
+        return 0
+    for line in output.splitlines():
+        kind, _, reclaimable = line.partition("\t")
+        if kind.strip().lower() == "build cache":
+            return parse_docker_size(reclaimable)
+    return 0
+
+
+def scan_disk_usage_job(job):
+    projects = project_dirs()
+    trash = trash_entries()
+    folders = [key for key, (name, _label) in MANAGER_FOLDERS.items() if (WORKSPACE / name).is_dir()]
+    total = len(projects) + len(trash) + len(folders) + 1
+    step = 0
+
+    def advance(label):
+        nonlocal step
+        job.set_progress(label, step, total)
+        step += 1
+
+    project_rows = []
+    for project in projects:
+        advance(f"Projet {project}")
+        path = WORKSPACE / project
+        sizes = directory_sizes(path, depth=1)
+        project_rows.append(
+            {
+                "name": project,
+                "bytes": sizes.get(str(path), 0),
+                "databases_bytes": sizes.get(str(path / "postgresql_data"), 0),
+                "filestore_bytes": sizes.get(str(path / "odoo_data"), 0),
+                "code_bytes": sizes.get(str(path / "odoo"), 0),
+            }
+        )
+    trash_rows = []
+    for entry in trash:
+        advance(f"Corbeille : {entry['name']}")
+        path = DELETED_PROJECTS / entry["name"]
+        trash_rows.append({**entry, "bytes": directory_size(path), "apparent_bytes": apparent_directory_size(path)})
+    folder_rows = []
+    for key in folders:
+        name, label = MANAGER_FOLDERS[key]
+        advance(label)
+        folder_rows.append({"key": key, "name": name, "label": label, "bytes": directory_size(WORKSPACE / name)})
+    advance("Images Docker")
+    docker = {"available": False, "images_bytes": 0, "unused_images": [], "build_cache_bytes": 0}
+    if docker_available()[0]:
+        try:
+            images, unused = docker_images_snapshot()
+            docker = {
+                "available": True,
+                "images_bytes": sum(image["bytes"] for image in images),
+                "unused_images": unused,
+                "build_cache_bytes": docker_build_cache_bytes(),
+            }
+        except RuntimeError as exc:
+            job.add(f"Images Docker non analysées : {exc}")
+    job.set_progress("Analyse terminée", total, total)
+    report = {
+        "scanned_at": time.time(),
+        "workspace": str(WORKSPACE),
+        "icloud_synced": workspace_synced_by_icloud(),
+        "projects": sorted(project_rows, key=lambda row: row["bytes"], reverse=True),
+        "trash": sorted(trash_rows, key=lambda row: row["name"], reverse=True),
+        "folders": folder_rows,
+        "docker": docker,
+    }
+    with DISK_USAGE_LOCK:
+        DISK_USAGE["report"] = report
+    freeable = (
+        sum(row["bytes"] for row in trash_rows)
+        + sum(row["bytes"] for row in folder_rows)
+        + sum(image["bytes"] for image in docker["unused_images"])
+        + docker["build_cache_bytes"]
+    )
+    job.add(f"Projets : {sum(row['bytes'] for row in project_rows) / 1024**3:.1f} Go")
+    job.add(f"Espace libérable : {freeable / 1024**3:.1f} Go")
+    job.result = {"kind": "disk_usage"}
+
+
+def update_disk_usage_report(update):
+    with DISK_USAGE_LOCK:
+        if DISK_USAGE["report"] is not None:
+            update(DISK_USAGE["report"])
+
+
+def remove_tree(job, path):
+    """Supprime un dossier ; les données PostgreSQL d'un autre utilisateur passent par sudo -n."""
+    try:
+        shutil.rmtree(path)
+        return
+    except FileNotFoundError:
+        return
+    except PermissionError:
+        pass
+    prefix = privileged_prefix()
+    if not prefix:
+        raise RuntimeError(
+            f"Droits insuffisants pour supprimer {path} (données PostgreSQL d'un autre utilisateur). "
+            f"Supprime-le à la main : sudo rm -rf '{path}'"
+        )
+    job.add(f"Suppression avec droits administrateur : {path}")
+    code, output = run_capture([*prefix, "rm", "-rf", "--", str(path)], timeout=DU_TIMEOUT_SECONDS)
+    if code != 0:
+        raise RuntimeError(output or f"Suppression impossible : {path}")
+
+
+def validated_trash_entry(name):
+    name = str(name or "")
+    entry = trash_entry(name)
+    path = DELETED_PROJECTS / name
+    if entry is None or path.parent != DELETED_PROJECTS or not path.is_dir():
+        raise ValueError(f"Projet introuvable dans la corbeille : {name}")
+    return entry, path
+
+
+def purge_deleted_projects_job(job, names):
+    entries = [validated_trash_entry(name) for name in names]
+    for entry, path in entries:
+        job.add(f"Suppression définitive de {entry['name']}...")
+        with job_control.protected(f"suppression de {entry['name']}", irreversible=True):
+            remove_tree(job, path)
+    removed = {entry["name"] for entry, _path in entries}
+    update_disk_usage_report(
+        lambda report: report.update(trash=[row for row in report["trash"] if row["name"] not in removed])
+    )
+    job.add(f"{len(removed)} projet(s) supprimé(s) définitivement.")
+
+
+def restore_deleted_project_job(job, name):
+    entry, path = validated_trash_entry(name)
+    # Nom déjà filtré par TRASH_ENTRY_RE : les projets existants gardent leurs majuscules.
+    project = entry["project"]
+    destination = WORKSPACE / project
+    if destination.parent != WORKSPACE:
+        raise ValueError(f"Nom de projet invalide : {project}")
+    if destination.exists():
+        raise RuntimeError(f"Un projet {project} existe déjà : renomme-le ou supprime-le avant de restaurer celui-ci.")
+    with job_control.protected(f"restauration de {project}", irreversible=True):
+        shutil.move(str(path), str(destination))
+    clear_project_module_cache(project)
+    update_disk_usage_report(
+        lambda report: report.update(trash=[row for row in report["trash"] if row["name"] != entry["name"]])
+    )
+    job.add(f"Projet {project} restauré dans {destination}. Démarre-le pour recréer ses conteneurs.")
+
+
+def purge_manager_folder_job(job, key):
+    if key not in MANAGER_FOLDERS:
+        raise ValueError(f"Dossier inconnu : {key}")
+    name, label = MANAGER_FOLDERS[key]
+    with JOBS_LOCK:
+        busy = any(other is not job and other.status in JOB_UNFINISHED_STATUSES for other in JOBS.values())
+    if key == "imports" and busy:
+        raise RuntimeError("Une action est en cours : ses fichiers temporaires sont peut-être dans ce dossier.")
+    folder = WORKSPACE / name
+    job.add(f"Vidage de {folder} ({label.lower()})...")
+    with job_control.protected(f"vidage de {name}", irreversible=True):
+        for child in sorted(folder.iterdir()) if folder.is_dir() else []:
+            if child.is_dir() and not child.is_symlink():
+                remove_tree(job, child)
+            else:
+                child.unlink(missing_ok=True)
+    update_disk_usage_report(
+        lambda report: report.update(folders=[row for row in report["folders"] if row["key"] != key])
+    )
+    job.add("Dossier vidé.")
+
+
+def remove_docker_images_job(job, image_ids):
+    requested = set(image_ids)
+    _images, unused = docker_images_snapshot()
+    # Relu au moment de supprimer : une image utilisée depuis l'analyse n'est jamais retirée.
+    targets = [image for image in unused if image["id"] in requested]
+    skipped = requested - {image["id"] for image in targets}
+    if skipped:
+        job.add(f"{len(skipped)} image(s) désormais utilisée(s) ou déjà supprimée(s) : conservée(s).")
+    failures = []
+    for image in targets:
+        # Une image nommée est retirée par son nom : ses autres noms éventuels restent.
+        reference = image["id"] if image["reference"] == "image orpheline" else image["reference"]
+        job.add(f"Suppression de l'image {reference}...")
+        if run_stream(job, docker_command(SETTINGS, "rmi", reference)) != 0:
+            failures.append(reference)
+    removed = {image["id"] for image in targets}
+    update_disk_usage_report(
+        lambda report: report["docker"].update(
+            unused_images=[image for image in report["docker"]["unused_images"] if image["id"] not in removed]
+        )
+    )
+    if failures:
+        raise RuntimeError("Images non supprimées : " + ", ".join(failures))
+
+
+def prune_docker_build_cache_job(job):
+    if run_stream(job, docker_command(SETTINGS, "builder", "prune", "--force")) != 0:
+        raise RuntimeError("Docker n'a pas vidé son cache de construction.")
+    update_disk_usage_report(lambda report: report["docker"].update(build_cache_bytes=0))
+
+
+def disk_usage_payload():
+    with DISK_USAGE_LOCK:
+        report = DISK_USAGE["report"]
+    with JOBS_LOCK:
+        scanning = any(
+            job.status in JOB_UNFINISHED_STATUSES and job.target is scan_disk_usage_job for job in JOBS.values()
+        )
+    return {"report": report, "scanning": scanning}
 
 
 def delete_project_job(job, project):
@@ -6136,6 +6514,12 @@ def drop_database_action(payload):
     )
 
 
+def validated_name_list(value):
+    if not isinstance(value, list) or not value or not all(isinstance(item, str) and item for item in value):
+        raise ValueError("Liste d'éléments à traiter invalide.")
+    return sorted(set(value))
+
+
 def duplicate_database_action(payload):
     project = payload_project(payload)
     db_name = payload_database(payload)
@@ -6232,6 +6616,31 @@ JOB_ACTIONS = {
     "cleanup_staging": lambda _payload: Job("Nettoyer les créations interrompues", cleanup_staging_job),
     "install_traefik": lambda _payload: Job("Installer Traefik", install_traefik_job, resources={"traefik"}),
     "install_git": lambda _payload: Job("Installer Git pour Windows", install_git_job, resources={"git"}),
+    "scan_disk_usage": lambda _payload: Job("Analyser l'espace disque", scan_disk_usage_job, resources={"disk"}),
+    "purge_deleted_projects": lambda payload: Job(
+        "Vider la corbeille des projets",
+        purge_deleted_projects_job,
+        (validated_name_list(payload.get("names")),),
+        resources={"disk"},
+    ),
+    "restore_deleted_project": lambda payload: Job(
+        "Restaurer un projet supprimé", restore_deleted_project_job, (str(payload.get("name", "")),), resources={"disk"}
+    ),
+    "purge_manager_folder": lambda payload: Job(
+        "Vider un dossier du gestionnaire",
+        purge_manager_folder_job,
+        (str(payload.get("folder", "")),),
+        resources={"disk"},
+    ),
+    "remove_docker_images": lambda payload: Job(
+        "Supprimer des images Docker inutilisées",
+        remove_docker_images_job,
+        (validated_name_list(payload.get("images")),),
+        resources={"disk"},
+    ),
+    "prune_docker_build_cache": lambda _payload: Job(
+        "Vider le cache de construction Docker", prune_docker_build_cache_job, resources={"disk"}
+    ),
     "start_mailpit": lambda _payload: Job("Démarrer Mailpit", start_mailpit_job, resources={"mailpit"}),
     "stop_mailpit": lambda _payload: Job("Arrêter Mailpit", stop_mailpit_job, resources={"mailpit"}),
     "create_database": create_database_action,
@@ -6271,6 +6680,7 @@ ROUTER = Router(
         api_route("GET", "/favicon.ico", serve_favicon),
         api_route("GET", "/api/version", payload_view(api_version_payload)),
         api_route("GET", "/api/app-update", payload_view(app_update_payload)),
+        api_route("GET", "/api/disk-usage", payload_view(disk_usage_payload)),
         api_route("GET", "/api/capabilities", payload_view(api_capabilities_payload)),
         api_route("GET", "/api/health", health_payload),
         api_route("GET", "/api/bootstrap", payload_view(bootstrap_snapshot)),

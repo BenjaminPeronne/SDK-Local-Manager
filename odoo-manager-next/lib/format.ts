@@ -34,3 +34,17 @@ export function compactWorkspacePath(path: string | undefined, workspace: string
   if (!workspace) return path;
   return path.replace(`${workspace.replace(/\/$/, "")}/`, "");
 }
+
+const BYTE_UNITS = ["o", "Ko", "Mo", "Go", "To"];
+
+/** Taille lisible en unités binaires, comme le Finder : 1,5 Go, 820 Mo. */
+export function formatBytes(bytes: number) {
+  let value = Math.max(0, bytes || 0);
+  let unit = 0;
+  while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const digits = unit >= 3 && value < 100 ? 1 : 0;
+  return `${value.toLocaleString("fr-FR", { maximumFractionDigits: digits })} ${BYTE_UNITS[unit]}`;
+}

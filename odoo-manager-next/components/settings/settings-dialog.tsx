@@ -17,6 +17,7 @@ import { desktopErrorMessage, type GitLabStatus, type StoredRikaCredentials } fr
 import { openExternalUrl, pickDirectory } from "@/lib/desktop-runtime";
 import { windowsPathFromMount } from "@/lib/projects";
 import type {
+  Job,
   ManagerErrorEntry,
   ManagerSettings,
   MigrationCandidate,
@@ -37,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import appIcon from "@/app/icon.png";
 import localIcon from "@/app/local-icon.png";
 import { MigrationProposal } from "@/components/projects/migration-proposal";
+import { DiskUsagePanel } from "@/components/settings/disk-usage-panel";
 import {
   SETTINGS_SAVED_KEYS,
   SETTINGS_SECTIONS,
@@ -49,8 +51,10 @@ const GITLAB_TOKEN_URL =
   "https://gitlab.sudokeys.com/-/user_settings/personal_access_tokens?name=SDK%20Local%20Manager&scopes=read_api";
 
 type SettingsDialogProps = {
+  createJob: (action: string, payload?: Record<string, unknown>) => Promise<Job | null>;
   desktopRuntime: boolean;
   gitlabStatus: GitLabStatus | null;
+  jobs: Job[];
   loadCreationPrerequisites: () => Promise<ProjectCreationPrerequisites | null>;
   loading: boolean;
   loadingManagerErrors: boolean;
@@ -81,7 +85,7 @@ type SettingsDialogProps = {
   setStoredRikaCredentials: Dispatch<SetStateAction<StoredRikaCredentials | null>>;
   settings: ManagerSettings | null;
   settingsDraft: ManagerSettings | null;
-  settingsSection: "general" | "appearance" | "accounts" | "advanced" | "diagnostic";
+  settingsSection: SettingsSectionId;
   storedRikaCredentials: StoredRikaCredentials | null;
   systemStatus: SystemStatus | null;
   /** Backend dans l'environnement Linux sous Windows : la migration des anciens projets s'y applique. */
@@ -89,8 +93,10 @@ type SettingsDialogProps = {
 };
 
 export function SettingsDialog({
+  createJob,
   desktopRuntime,
   gitlabStatus,
+  jobs,
   loadCreationPrerequisites,
   loading,
   loadingManagerErrors,
@@ -853,6 +859,8 @@ export function SettingsDialog({
                     </div>
                   </SettingsSection>
                 )}
+
+                {settingsSection === "disk" && <DiskUsagePanel createJob={createJob} jobs={jobs} />}
 
                 {settingsSection === "diagnostic" && (
                   <SettingsSection title="Diagnostic" description="Erreurs enregistrées localement pour le support.">

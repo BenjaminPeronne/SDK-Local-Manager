@@ -191,6 +191,23 @@ export type SshPublicKey = {
   public_key: string;
 };
 
+// Dernière analyse de l'espace disque : projets, corbeille, dossiers du gestionnaire et Docker.
+export type DiskUsageReport = {
+  scanned_at: number;
+  workspace: string;
+  icloud_synced?: boolean;
+  projects: { name: string; bytes: number; databases_bytes: number; filestore_bytes: number; code_bytes: number }[];
+  // `apparent_bytes` compte aussi les fichiers qu'iCloud ne garde plus sur ce disque.
+  trash: { name: string; project: string; deleted_at: string; bytes: number; apparent_bytes?: number }[];
+  folders: { key: string; name: string; label: string; bytes: number }[];
+  docker: {
+    available: boolean;
+    images_bytes: number;
+    unused_images: { id: string; reference: string; bytes: number; created: string }[];
+    build_cache_bytes: number;
+  };
+};
+
 export type Job = {
   id: number;
   title: string;

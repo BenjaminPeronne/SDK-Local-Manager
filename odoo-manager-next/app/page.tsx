@@ -1758,8 +1758,10 @@ export default function Home() {
       />
 
       <SettingsDialog
+        createJob={createJob}
         desktopRuntime={desktopRuntime}
         gitlabStatus={gitlabStatus}
+        jobs={jobs}
         loadCreationPrerequisites={loadCreationPrerequisites}
         loading={loading}
         loadingManagerErrors={loadingManagerErrors}

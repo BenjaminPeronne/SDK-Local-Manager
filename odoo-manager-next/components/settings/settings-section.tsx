@@ -1,5 +1,5 @@
 import type { HTMLAttributes, ReactNode } from "react";
-import { Bug, FolderOpen, KeyRound, Palette, SlidersHorizontal } from "lucide-react";
+import { Bug, FolderOpen, HardDrive, KeyRound, Palette, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const SETTINGS_SECTIONS = [
@@ -7,6 +7,7 @@ export const SETTINGS_SECTIONS = [
   { id: "appearance", label: "Apparence", icon: Palette },
   { id: "accounts", label: "Comptes et accès", icon: KeyRound },
   { id: "advanced", label: "Avancé", icon: SlidersHorizontal },
+  { id: "disk", label: "Espace disque", icon: HardDrive },
   { id: "diagnostic", label: "Diagnostic", icon: Bug },
 ] as const;
 
