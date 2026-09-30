@@ -2307,18 +2307,19 @@ except ImportError:
 else:
     neutralize_database(env.cr)
 
-# Le SQL natif insère un SMTP factice à chaque passe. N'en conserver qu'un
-# rend l'action réellement idempotente sans supprimer de serveur métier.
-dummies = env["ir.mail_server"].search([
+# Le SQL natif insère un SMTP factice à chaque passe, et les passes précédentes en ont
+# parfois archivé : les archivés comptent aussi. N'en conserver qu'un rend l'action réellement
+# idempotente sans supprimer de serveur métier ; le plus récent actif est gardé.
+dummies = env["ir.mail_server"].with_context(active_test=False).search([
     ("name", "=", "neutralization - disable emails"),
     ("smtp_host", "in", ("invalid", "mailpit")),
-], order="id desc")
+], order="active desc, id desc")
 if len(dummies) > 1:
     dummies[1:].unlink()
 # Le SMTP factice écoute déjà sur 1025, le port de Mailpit : les e-mails y sont capturés
 # quand le conteneur mailpit tourne sur le réseau traefik-local, et échouent sinon.
 if dummies:
-    dummies[:1].write({"smtp_host": "mailpit"})
+    dummies[:1].write({"smtp_host": "mailpit", "active": True})
 
 env.cr.commit()
 print("ODOO_MANAGER_NEUTRALIZATION_DONE")

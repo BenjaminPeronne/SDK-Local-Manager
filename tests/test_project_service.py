@@ -1138,7 +1138,9 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertIn("    if outgoing:\n        outgoing.write", neutralize[-1])
         self.assertIn("dummies[1:].unlink()", neutralize[-1])
         # Le SMTP factice envoie vers Mailpit, sur le port 1025 qu'il utilise déjà.
-        self.assertIn('dummies[:1].write({"smtp_host": "mailpit"})', neutralize[-1])
+        # Les SMTP factices archivés par les passes précédentes sont dédupliqués eux aussi.
+        self.assertIn('env["ir.mail_server"].with_context(active_test=False).search(', neutralize[-1])
+        self.assertIn('dummies[:1].write({"smtp_host": "mailpit", "active": True})', neutralize[-1])
         self.assertTrue(any("0 cron métier actif" in line for line in logs))
         self.assertTrue(any("Neutralisation terminée et contrôlée." in line for line in logs))
         self.assertTrue(any("Redémarrage du serveur Odoo" in line for line in logs))
