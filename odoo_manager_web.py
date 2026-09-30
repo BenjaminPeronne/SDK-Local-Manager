@@ -3334,7 +3334,12 @@ def send_form_no_redirect(connection, target, host_header, body):
         if response.status in (301, 302, 303, 307, 308):
             return response.status, ""
         if response.status >= 400:
-            content = response.read(4096).decode("utf-8", errors="replace")
+            content = response.read(131072).decode("utf-8", errors="replace")
+            # Odoo 20 renvoie ses refus en HTTP 422, le message dans l'alerte de la page : sans
+            # l'extraire, seul l'en-tête HTML de la page remontait.
+            odoo_error = extract_odoo_page_error(content)
+            if odoo_error:
+                raise RuntimeError(f"Odoo a refusé la demande (HTTP {response.status}) : {odoo_error}")
             raise RuntimeError(f"Odoo a retourne HTTP {response.status}: {content[:600]}")
         return response.status, response.read(131072).decode("utf-8", errors="replace")
     except (OSError, http.client.HTTPException) as exc:
@@ -3479,6 +3484,9 @@ def restore_database_job(job, project, backup_path, filename, db_name, master_pw
         if restore_error:
             raise OdooError(restore_error)
         if status not in {200, 201, 202, 301, 302, 303}:
+            odoo_error = extract_odoo_page_error(content)
+            if odoo_error:
+                raise OdooError(odoo_error)
             raise RuntimeError(f"Odoo a refusé la restauration avec le statut HTTP {status}.")
 
         for waited in range(0, 122, 2):
@@ -3550,8 +3558,11 @@ def create_database_job(job, project, db_name, master_pwd, login, password, lang
         "password": password,
         "lang": lang,
         "phone": "",
-        "demo": "on" if demo else "",
     }
+    # Comme une case à cocher du navigateur : absente si décochée. Odoo 20 lit la valeur avec
+    # str2bool, qui refuse une chaîne vide (HTTP 422).
+    if demo:
+        form["demo"] = "on"
     if country:
         form["country_code"] = country
 

@@ -506,6 +506,16 @@ class DatabaseRestoreTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "HTTP 500: Internal Server Error"):
             web.post_form_no_redirect("http://dev.demo.localhost/web/database/drop", {})
 
+        # Odoo 20 : refus en HTTP 422, le message dans l'alerte d'une longue page HTML.
+        response = Mock(status=422)
+        response.read.return_value = (
+            "<html><head>" + "<link rel='stylesheet' href='/x.css'/>" * 200 + "</head><body>"
+            '<div class="alert alert-danger">Could not create database. Access Denied</div></body></html>'
+        ).encode()
+        connection.getresponse.return_value = response
+        with self.assertRaisesRegex(RuntimeError, r"^Odoo a refusé la demande \(HTTP 422\) : Could not create database\. Access Denied$"):
+            web.post_form_no_redirect("http://dev.demo.localhost/web/database/create", {})
+
         connection.request.side_effect = ConnectionRefusedError("refused")
         with self.assertRaisesRegex(RuntimeError, "ne répond pas sur dev.demo.localhost"):
             web.post_form_no_redirect("http://dev.demo.localhost/web/database/drop", {})
@@ -2517,6 +2527,23 @@ class DatabaseNeutralizationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "HTTP 500"):
             web.drop_database_job(job, "DEMO", "demo", "secret")
+
+    @patch("odoo_manager_web.job_control.sleep")
+    @patch("odoo_manager_web.clear_project_module_cache")
+    @patch("odoo_manager_web.post_form_no_redirect", return_value=(303, ""))
+    @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
+    @patch("odoo_manager_web.project_service")
+    @patch("odoo_manager_web.list_databases_for", side_effect=[["postgres"], ["postgres", "test_v20"]] * 2)
+    @patch("odoo_manager_web.validate_project", return_value="DEMO")
+    def test_create_database_sends_demo_only_when_enabled(
+        self, _validate_project, _list_databases, _service, _project_url, post_form, _clear_cache, _sleep
+    ):
+        # Odoo 20 lit « demo » avec str2bool : une valeur vide y est refusée en HTTP 422.
+        web.create_database_job(Mock(), "DEMO", "test_v20", "secret", "admin", "admin", "fr_FR", "FR", False)
+        self.assertNotIn("demo", post_form.call_args.args[1])
+
+        web.create_database_job(Mock(), "DEMO", "test_v20", "secret", "admin", "admin", "fr_FR", "FR", True)
+        self.assertEqual(post_form.call_args.args[1]["demo"], "on")
 
     @patch(
         "odoo_manager_web.post_form_no_redirect",
