@@ -17,44 +17,135 @@ MAX_ZIP_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_DATABASE_BACKUP_ENTRIES = 2_000_000
 
 
-def parse_multipart_form(content_type, body):
+MAX_MULTIPART_HEADER_BYTES = 16 * 1024
+MAX_MULTIPART_FIELD_BYTES = 64 * 1024
+
+
+class _Discard:
+    def write(self, _data):
+        return None
+
+
+class _LimitedField:
+    """Champ texte d'un formulaire : petit par nature, refusé au-delà de la limite."""
+
+    def __init__(self, limit):
+        self.limit = limit
+        self.data = bytearray()
+
+    def write(self, data):
+        if len(self.data) + len(data) > self.limit:
+            raise ValueError("Champ de formulaire trop volumineux.")
+        self.data += data
+
+
+def multipart_boundary(content_type):
     match = re.search(r"boundary=([^;]+)", content_type or "")
     if not match:
         raise ValueError("Boundary multipart manquante.")
-    boundary = match.group(1).strip().strip('"').encode("utf-8")
-    fields = {}
-    files = {}
+    return match.group(1).strip().strip('"').encode("utf-8")
 
-    for part in body.split(b"--" + boundary):
-        part = part.strip(b"\r\n")
-        if not part or part == b"--":
-            continue
-        if part.endswith(b"--"):
-            part = part[:-2].strip(b"\r\n")
-        header_blob, separator, payload = part.partition(b"\r\n\r\n")
-        if not separator:
-            continue
-        headers = {}
-        for line in header_blob.decode("utf-8", errors="replace").split("\r\n"):
-            key, sep, value = line.partition(":")
-            if sep:
-                headers[key.strip().lower()] = value.strip()
-        disposition = headers.get("content-disposition", "")
-        name_match = re.search(r'name="([^"]+)"', disposition)
-        if not name_match:
-            continue
-        name = name_match.group(1)
-        filename_match = re.search(r'filename="([^"]*)"', disposition)
-        payload = payload.rstrip(b"\r\n")
-        if filename_match:
-            files[name] = {
-                "filename": Path(filename_match.group(1)).name,
-                "data": payload,
-            }
-        else:
-            fields[name] = payload.decode("utf-8", errors="replace")
 
-    return fields, files
+def save_multipart_upload(stream, content_length, content_type, destination, file_field, chunk_size=1024 * 1024):
+    """Lit un formulaire multipart au fil de l'eau et écrit son fichier `file_field` dans `destination`.
+
+    Le corps n'est jamais gardé entier en mémoire : un ZIP de 250 Mo occupait auparavant
+    deux à trois fois sa taille le temps du découpage. Seuls les champs texte, plafonnés,
+    restent en mémoire. Retourne (champs, nom du fichier envoyé), ce nom valant None si le
+    formulaire ne contient pas `file_field`.
+    """
+    delimiter = b"\r\n--" + multipart_boundary(content_type)
+    destination = Path(destination)
+    remaining = int(content_length)
+    # Le premier délimiteur n'est pas précédé d'un saut de ligne : on l'ajoute pour qu'un seul
+    # motif reconnaisse tous les délimiteurs.
+    buffer = b"\r\n"
+
+    def fill():
+        nonlocal buffer, remaining
+        if remaining <= 0:
+            return False
+        chunk = stream.read(min(chunk_size, remaining))
+        if not chunk:
+            raise ValueError("Le téléversement a été interrompu.")
+        remaining -= len(chunk)
+        buffer += chunk
+        return True
+
+    def parse():
+        nonlocal buffer
+        while (index := buffer.find(delimiter)) < 0:
+            if len(buffer) > MAX_MULTIPART_HEADER_BYTES or not fill():
+                raise ValueError("Formulaire multipart illisible.")
+        buffer = buffer[index + len(delimiter) :]
+
+        fields = {}
+        filename = None
+        while True:
+            while len(buffer) < 2 and fill():
+                pass
+            if buffer.startswith(b"--"):
+                break
+            while (header_end := buffer.find(b"\r\n\r\n")) < 0:
+                if len(buffer) > MAX_MULTIPART_HEADER_BYTES or not fill():
+                    raise ValueError("En-têtes multipart illisibles.")
+            headers = {}
+            for line in buffer[:header_end].decode("utf-8", errors="replace").split("\r\n"):
+                key, separator, value = line.partition(":")
+                if separator:
+                    headers[key.strip().lower()] = value.strip()
+            buffer = buffer[header_end + 4 :]
+            disposition = headers.get("content-disposition", "")
+            name_match = re.search(r'name="([^"]+)"', disposition)
+            filename_match = re.search(r'filename="([^"]*)"', disposition)
+            name = name_match.group(1) if name_match else ""
+
+            output = None
+            if filename_match and name == file_field and filename is None:
+                output = destination.open("wb")
+                sink = output
+            elif filename_match or not name:
+                sink = _Discard()
+            else:
+                sink = _LimitedField(MAX_MULTIPART_FIELD_BYTES)
+            try:
+                # Un délimiteur peut chevaucher deux morceaux : sa longueur moins un octet reste en attente.
+                keep = len(delimiter) - 1
+                while (index := buffer.find(delimiter)) < 0:
+                    if len(buffer) > keep:
+                        sink.write(buffer[:-keep])
+                        buffer = buffer[-keep:]
+                    if not fill():
+                        raise ValueError("Formulaire multipart tronqué.")
+                sink.write(buffer[:index])
+                buffer = buffer[index + len(delimiter) :]
+            finally:
+                if output is not None:
+                    output.close()
+            if output is not None:
+                filename = Path(filename_match.group(1)).name
+            elif isinstance(sink, _LimitedField):
+                fields[name] = sink.data.decode("utf-8", errors="replace")
+
+        return fields, filename
+
+    try:
+        fields, filename = parse()
+    except ValueError:
+        # Refus en cours de lecture : le reste du corps est lu quand même. Sous Windows, fermer
+        # la connexion sur des octets non lus la coupe, et l'interface perd le message d'erreur.
+        try:
+            while remaining > 0:
+                buffer = b""
+                fill()
+        except ValueError:
+            pass
+        raise
+    # Épilogue éventuel : lu pour que la connexion ne soit pas coupée avant la réponse.
+    while remaining > 0:
+        buffer = b""
+        fill()
+    return fields, filename
 
 
 def validate_odoo_backup_archive(backup_path):

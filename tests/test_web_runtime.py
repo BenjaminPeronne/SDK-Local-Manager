@@ -7,7 +7,7 @@ import time
 import unittest
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, PropertyMock, call, patch
 
 import odoo_manager_web as web
 from odoo_manager_core import command_output, job_queue
@@ -2760,6 +2760,38 @@ class DatabaseNeutralizationTests(unittest.TestCase):
         for invalid in ("", "   ", "a\nb", "x" * 129):
             with self.assertRaises(ValueError):
                 web.validate_admin_password(invalid)
+
+
+class DockerEventsWiringTests(unittest.TestCase):
+    def setUp(self):
+        web.EVENT_WAKE.clear()
+        web.EVENT_DOCKER_REFRESH.clear()
+
+    def connected(self, value):
+        return patch.object(type(web.DOCKER_EVENTS), "connected", new_callable=PropertyMock, return_value=value)
+
+    def test_without_the_event_stream_the_loop_keeps_its_short_polling(self):
+        with self.connected(False):
+            self.assertEqual(web.EVENT_WATCH_INTERVAL_SECONDS, web.event_watch_timeout())
+
+    def test_with_the_event_stream_the_loop_follows_the_docker_interval_up_to_its_ceiling(self):
+        with self.connected(True), patch.object(web, "SETTINGS", ManagerSettings(docker_poll_interval=10)):
+            self.assertEqual(10, web.event_watch_timeout())
+        with self.connected(True), patch.object(web, "SETTINGS", ManagerSettings(docker_poll_interval=60)):
+            self.assertEqual(web.EVENT_WATCH_IDLE_SECONDS, web.event_watch_timeout())
+
+    def test_a_container_event_wakes_the_loop_and_a_cut_also_rereads_docker(self):
+        web.on_docker_event("container start odoo-demo")
+        self.assertTrue(web.EVENT_WAKE.is_set())
+        self.assertFalse(web.EVENT_DOCKER_REFRESH.is_set())
+        web.EVENT_WAKE.clear()
+        web.on_docker_event("")
+        self.assertTrue(web.EVENT_WAKE.is_set())
+        self.assertTrue(web.EVENT_DOCKER_REFRESH.is_set())
+
+    def test_a_finished_action_publishes_the_new_state_without_waiting(self):
+        web.refresh_after_job()
+        self.assertTrue(web.EVENT_WAKE.is_set())
 
 
 if __name__ == "__main__":

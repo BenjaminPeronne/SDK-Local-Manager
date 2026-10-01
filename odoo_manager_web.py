@@ -33,9 +33,9 @@ from odoo_manager_core import jobs as job_control
 from odoo_manager_core.archives import (
     SAFE_IMPORT_NAME_RE,
     multipart_field,
-    parse_multipart_form,
     safe_extract_zip,
     safe_import_name,
+    save_multipart_upload,
     save_request_body_to_file,
     validate_odoo_backup_archive,
 )
@@ -57,6 +57,7 @@ from odoo_manager_core.disk_usage import (
     unused_images,
 )
 from odoo_manager_core.docker_api import EngineUnavailable
+from odoo_manager_core.docker_events import DockerEventWatcher, docker_events_arguments
 from odoo_manager_core.events import EVENT_SUBSCRIBERS, EVENT_SUBSCRIBERS_LOCK, publish_event
 from odoo_manager_core.http_routes import Route, Router, RouteRequest
 from odoo_manager_core.job_queue import (
@@ -390,6 +391,12 @@ ACTIVE_PROCESSES = set()
 ACTIVE_PROCESSES_LOCK = threading.Lock()
 
 EVENT_WATCH_INTERVAL_SECONDS = 2
+# Flux `docker events` branché : chaque changement de conteneur réveille la boucle, la
+# relecture complète ne sert plus que de filet, au rythme de l'intervalle Docker des réglages.
+EVENT_WATCH_IDLE_SECONDS = 15
+EVENT_WAKE = threading.Event()
+# Rafale d'événements d'un `docker compose up` : une seule relecture pour l'ensemble.
+EVENT_DEBOUNCE_SECONDS = 0.3
 # La liste des bases coûte un `docker exec psql` par projet démarré : inutile toutes les 2 s.
 EVENT_DATABASES_MAX_AGE_SECONDS = 30
 OVERVIEW_DATABASES_CACHE = {}
@@ -572,6 +579,8 @@ def apply_settings(settings):
         MODULE_CACHE.clear()
         WSL_MODULE_METADATA.clear()
     reset_docker_backend_cache()
+    # Moteur, exécutable ou distribution ont pu changer : l'écoute suit les nouveaux réglages.
+    DOCKER_EVENTS.restart()
 
 
 def settings_snapshot():
@@ -2816,6 +2825,7 @@ def refresh_after_job():
     """Une action a pu démarrer ou arrêter des conteneurs, créer ou supprimer des bases."""
     invalidate_overview_databases()
     EVENT_DOCKER_REFRESH.set()
+    EVENT_WAKE.set()
 
 
 # Les fonctions sont relues à chaque appel : un test peut remplacer record_manager_error dans ce module.
@@ -5500,11 +5510,18 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
         job.result = {"kind": "repository_modules", "modules": names, "added": added, "updated": updated}
 
 
-def extract_zip_module_candidates(project, filename, data):
+def extract_zip_module_candidates(project, filename, upload):
+    """Extrait un ZIP de modules dans la zone de préparation ; `upload` est son contenu ou son chemin.
+
+    Un chemin est déplacé, pas copié : l'extraction devient propriétaire du fichier reçu.
+    """
     project = validate_project(project)
     if not filename.lower().endswith(".zip"):
         raise RuntimeError("Le fichier doit etre un ZIP.")
-    if not data:
+    if isinstance(upload, Path):
+        if not upload.is_file() or upload.stat().st_size == 0:
+            raise RuntimeError("Fichier ZIP vide.")
+    elif not upload:
         raise RuntimeError("Fichier ZIP vide.")
 
     imports_root = project_staging_imports_root(project)
@@ -5519,7 +5536,10 @@ def extract_zip_module_candidates(project, filename, data):
     zip_path = import_dir.with_suffix(".zip")
 
     try:
-        zip_path.write_bytes(data)
+        if isinstance(upload, Path):
+            shutil.move(str(upload), str(zip_path))
+        else:
+            zip_path.write_bytes(upload)
         skipped_links = safe_extract_zip(zip_path, import_dir)
         candidates = find_module_candidates(import_dir)
         names = [candidate.name for candidate in candidates]
@@ -5543,8 +5563,8 @@ def extract_zip_module_candidates(project, filename, data):
             pass
 
 
-def inspect_zip_modules(project, filename, data):
-    import_dir, candidates, skipped_links = extract_zip_module_candidates(project, filename, data)
+def inspect_zip_modules(project, filename, upload):
+    import_dir, candidates, skipped_links = extract_zip_module_candidates(project, filename, upload)
     try:
         return {
             "modules": [candidate.name for candidate in candidates],
@@ -5554,7 +5574,7 @@ def inspect_zip_modules(project, filename, data):
         shutil.rmtree(import_dir, ignore_errors=True)
 
 
-def import_zip_modules_job(job, project, filename, data, replace_existing=False, selected_modules=None):
+def import_zip_modules_job(job, project, filename, upload, replace_existing=False, selected_modules=None):
     project = validate_project(project)
     job.add(f"Import ZIP: {filename}")
     job.add(f"Projet cible: {project}")
@@ -5563,7 +5583,7 @@ def import_zip_modules_job(job, project, filename, data, replace_existing=False,
 
     import_dir = None
     try:
-        import_dir, candidates, skipped_links = extract_zip_module_candidates(project, filename, data)
+        import_dir, candidates, skipped_links = extract_zip_module_candidates(project, filename, upload)
         if skipped_links:
             job.add(f"Liens symboliques internes ignores pendant l'extraction securisee: {len(skipped_links)}")
             for name in skipped_links[:10]:
@@ -5595,6 +5615,9 @@ def import_zip_modules_job(job, project, filename, data, replace_existing=False,
         if import_dir is not None:
             shutil.rmtree(import_dir, ignore_errors=True)
             job.add(f"Archive temporaire nettoyée: {import_dir}")
+        # ZIP reçu que l'extraction n'a pas pris en charge (nom refusé, fichier vide) : retiré.
+        if isinstance(upload, Path):
+            upload.unlink(missing_ok=True)
 
 
 def compose_service_for(project, pattern="odoo"):
@@ -5647,7 +5670,34 @@ def event_watch_loop():
                 docker = None
         except Exception:
             traceback.print_exc()
-        time.sleep(EVENT_WATCH_INTERVAL_SECONDS)
+        if EVENT_WAKE.wait(event_watch_timeout()):
+            time.sleep(EVENT_DEBOUNCE_SECONDS)
+            EVENT_WAKE.clear()
+
+
+def event_watch_timeout():
+    if not DOCKER_EVENTS.connected:
+        return EVENT_WATCH_INTERVAL_SECONDS
+    return min(EVENT_WATCH_IDLE_SECONDS, docker_poll_seconds())
+
+
+def docker_events_command():
+    """Commande `docker events` du moteur des réglages, passée par WSL si besoin."""
+    command = [str(argument) for argument in docker_command(SETTINGS, *docker_events_arguments())]
+    if platform_id() == "windows" and command_uses_wsl(command):
+        command = wsl_command_with_cwd(command, Path.home(), SETTINGS, WORKSPACE)
+    options = {"cwd": str(Path.home()), "env": command_env(), **hidden_process_kwargs()}
+    return command, options
+
+
+def on_docker_event(line):
+    # Ligne vide : l'écoute s'est coupée, Docker vient peut-être de s'arrêter.
+    if not line:
+        EVENT_DOCKER_REFRESH.set()
+    EVENT_WAKE.set()
+
+
+DOCKER_EVENTS = DockerEventWatcher(docker_events_command, on_docker_event)
 
 
 def ensure_event_watch_thread_started():
@@ -5658,6 +5708,7 @@ def ensure_event_watch_thread_started():
         _EVENT_WATCH_THREAD_STARTED = True
         threading.Thread(target=event_watch_loop, daemon=True).start()
         threading.Thread(target=jobs_event_loop, daemon=True).start()
+        DOCKER_EVENTS.start()
 
 
 CONTAINER_LOG_FILE_CANDIDATES = (
@@ -6158,6 +6209,7 @@ def shutdown_service(request):
     json_response(handler, {"ok": True})
 
     def shutdown_server():
+        DOCKER_EVENTS.stop()
         terminate_active_subprocesses()
         terminate_project_processes()
         handler.server.shutdown()
@@ -6288,41 +6340,65 @@ def inspect_repository_view(request):
 
 
 MAX_MODULE_ZIP_BYTES = 250 * 1024 * 1024
+MODULE_ZIP_FREE_SPACE_MARGIN_BYTES = 256 * 1024 * 1024
 
 
-def read_module_zip_upload(handler):
-    """Champs et fichier ZIP d'un formulaire multipart de modules."""
+def receive_module_zip_upload(handler, project):
+    """Champs du formulaire et ZIP reçu, écrit sur disque au fil de la réception.
+
+    Le ZIP ne passe plus par la mémoire : ni pendant la réception, ni pendant l'attente de
+    l'action dans la file du projet. Retourne (champs, chemin du ZIP, nom du fichier).
+    """
     length = int(handler.headers.get("Content-Length", "0"))
     if length <= 0:
         raise ValueError("Fichier ZIP manquant.")
     if length > MAX_MODULE_ZIP_BYTES:
         raise ValueError("ZIP trop volumineux. Limite: 250 Mo.")
-    fields, files = parse_multipart_form(handler.headers.get("Content-Type", ""), handler.rfile.read(length))
-    upload = files.get("zip")
-    if not upload:
-        raise ValueError("Champ fichier ZIP introuvable.")
-    return fields, upload, upload.get("filename") or "modules.zip"
+    staging = project_staging_imports_root(project)
+    staging.mkdir(parents=True, exist_ok=True)
+    # Le ZIP reçu, puis son contenu extrait : de quoi tenir les deux, avec une marge.
+    if shutil.disk_usage(staging).free < 2 * length + MODULE_ZIP_FREE_SPACE_MARGIN_BYTES:
+        raise ValueError("Espace disque insuffisant pour importer ce ZIP.")
+    destination = staging / f".upload-{time.time_ns()}.zip"
+    try:
+        fields, filename = save_multipart_upload(
+            handler.rfile, length, handler.headers.get("Content-Type", ""), destination, "zip"
+        )
+        if filename is None:
+            raise ValueError("Champ fichier ZIP introuvable.")
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
+    return fields, destination, filename or "modules.zip"
 
 
 def inspect_module_zip_view(request):
     project = validate_project(request.param("project"))
-    _fields, upload, filename = read_module_zip_upload(request.handler)
-    return inspect_zip_modules(project, filename, upload["data"])
+    _fields, upload, filename = receive_module_zip_upload(request.handler, project)
+    try:
+        return inspect_zip_modules(project, filename, upload)
+    finally:
+        upload.unlink(missing_ok=True)
 
 
 def import_module_zip_view(request):
     project = validate_project(request.param("project"))
-    fields, upload, filename = read_module_zip_upload(request.handler)
-    replace_existing = truthy(fields.get("replace_existing"))
-    selected_modules = fields.get("modules")
-    if selected_modules is not None:
-        module_name_list(selected_modules)
-    job = Job(
-        f"Importer ZIP {filename}",
-        import_zip_modules_job,
-        (project, filename, upload["data"], replace_existing, selected_modules),
-        project=project,
-    )
+    fields, upload, filename = receive_module_zip_upload(request.handler, project)
+    try:
+        replace_existing = truthy(fields.get("replace_existing"))
+        selected_modules = fields.get("modules")
+        if selected_modules is not None:
+            module_name_list(selected_modules)
+        job = Job(
+            f"Importer ZIP {filename}",
+            import_zip_modules_job,
+            (project, filename, upload, replace_existing, selected_modules),
+            project=project,
+        )
+    except BaseException:
+        # Refusé, le ZIP ne reste pas dans la zone de préparation ; accepté, l'action en devient propriétaire.
+        upload.unlink(missing_ok=True)
+        raise
     return {"job": job_creation_payload(job)}, 201
 
 
@@ -6794,6 +6870,7 @@ def main():
     except KeyboardInterrupt:
         print("")
     finally:
+        DOCKER_EVENTS.stop()
         terminate_active_subprocesses()
         terminate_project_processes()
         server.server_close()
