@@ -100,6 +100,8 @@ import { AppSidebar } from "@/components/shell/app-sidebar";
 import { LoadingScreen } from "@/components/shell/loading-screen";
 import { WelcomeScreen } from "@/components/welcome/welcome-screen";
 import { useSeason } from "@/hooks/use-season";
+import { celebrateWithConfetti } from "@/components/seasonal/confetti";
+import { confettiPreviewRequested, type Season } from "@/lib/seasonal";
 import { WslSetupDialog } from "@/components/wsl-setup";
 import appIcon from "./icon.png";
 import localIcon from "./local-icon.png";
@@ -213,6 +215,11 @@ export default function Home() {
   const schedule = useScheduledTimeouts();
   const { toasts, pushToast } = useToasts(schedule);
   const { apiUnavailable, markApiSuccess, markApiFailure } = useApiAvailability();
+  // Lue à la fin d'une action : la saison dépend des réglages, chargés plus bas.
+  const seasonRef = useRef<Season | null>(null);
+  const celebrateJobSuccess = useCallback(() => {
+    if (seasonRef.current === "new-year") celebrateWithConfetti();
+  }, []);
   const {
     jobs,
     selectedJobId,
@@ -223,7 +230,7 @@ export default function Home() {
     refreshJobs,
     trackCreatedJob,
     focusJob,
-  } = useJobs({ pushToast, markApiSuccess, markApiFailure });
+  } = useJobs({ pushToast, markApiSuccess, markApiFailure, onJobSucceeded: celebrateJobSuccess });
   const pendingProjectNames = useRef(new Set<string>());
   const {
     overview,
@@ -347,6 +354,12 @@ export default function Home() {
   const refinedInterface = settings?.interface_layout !== "classic";
   const stickyHeader = settings?.sticky_header ?? false;
   const season = useSeason(settings?.seasonal_decorations !== false);
+  useEffect(() => {
+    seasonRef.current = season;
+    if (season === "new-year" && confettiPreviewRequested(window.location.search)) {
+      celebrateWithConfetti({ everyTime: true });
+    }
+  }, [season]);
   // Sur grand écran, le panneau arrondi défile seul : barre latérale et en-tête restent en place.
   const wideScreen = useMediaQuery("(min-width: 1024px)");
   const [projectPanel, setProjectPanel] = useState<HTMLElement | null>(null);

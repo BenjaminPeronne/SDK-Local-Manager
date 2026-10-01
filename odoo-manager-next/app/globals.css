@@ -420,11 +420,22 @@ textarea {
   background: linear-gradient(hsl(var(--primary) / 0.16), hsl(var(--primary) / 0.16)), hsl(var(--muted));
 }
 
-/* Décorations de Noël (data-season sur .sdk-shell) : guirlande sous la marque, flocons sur l'accueil. */
-.sdk-shell[data-season="christmas"] .sdk-brand {
+/* Décorations de saison (data-season sur .sdk-shell) : guirlande sous la marque, aux couleurs de la fête,
+   et flocons sur l'accueil à Noël. Les confettis du Nouvel An sont dessinés à part, dans un canevas. */
+.sdk-shell[data-season="christmas"] {
+  --garland-1: #e53935;
+  --garland-2: #2e9d4f;
+  --garland-3: #f2b632;
+}
+.sdk-shell[data-season="new-year"] {
+  --garland-1: #f2b632;
+  --garland-2: #c0c7d1;
+  --garland-3: #e8a0bf;
+}
+.sdk-shell[data-season] .sdk-brand {
   position: relative;
 }
-.sdk-shell[data-season="christmas"] .sdk-brand::after {
+.sdk-shell[data-season] .sdk-brand::after {
   content: "";
   position: absolute;
   inset-inline: 0;
@@ -432,9 +443,9 @@ textarea {
   height: 6px;
   pointer-events: none;
   background:
-    radial-gradient(circle, #e53935 2px, transparent 2.5px) 0 0 / 36px 6px repeat-x,
-    radial-gradient(circle, #2e9d4f 2px, transparent 2.5px) 12px 0 / 36px 6px repeat-x,
-    radial-gradient(circle, #f2b632 2px, transparent 2.5px) 24px 0 / 36px 6px repeat-x;
+    radial-gradient(circle, var(--garland-1) 2px, transparent 2.5px) 0 0 / 36px 6px repeat-x,
+    radial-gradient(circle, var(--garland-2) 2px, transparent 2.5px) 12px 0 / 36px 6px repeat-x,
+    radial-gradient(circle, var(--garland-3) 2px, transparent 2.5px) 24px 0 / 36px 6px repeat-x;
   animation: sdk-garland-twinkle 2.4s ease-in-out infinite alternate;
 }
 @keyframes sdk-garland-twinkle {
@@ -473,7 +484,7 @@ textarea {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sdk-shell[data-season="christmas"] .sdk-brand::after {
+  .sdk-shell[data-season] .sdk-brand::after {
     animation: none;
   }
   .sdk-snowfall {

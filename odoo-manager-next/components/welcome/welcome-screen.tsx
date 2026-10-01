@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, ExternalLink, FolderPlus, Mail, RefreshCcw, Settings } from "lucide-react";
-import type { Season } from "@/lib/seasonal";
+import { newYearGreeting, type Season } from "@/lib/seasonal";
 import type { MailpitStatus } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,9 @@ export function WelcomeScreen({
       <h2 className="mt-5 text-2xl font-semibold sm:text-3xl">SDK Local Manager</h2>
       {season === "christmas" && (
         <p className="mt-1 text-sm font-medium text-red-700 dark:text-red-400">Joyeux Noël et belles fêtes ! 🎄</p>
+      )}
+      {season === "new-year" && (
+        <p className="mt-1 text-sm font-medium text-amber-700 dark:text-amber-400">{newYearGreeting(new Date())}</p>
       )}
       <p className="mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
         {hasProjects

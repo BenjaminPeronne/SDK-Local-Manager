@@ -11,13 +11,15 @@ type UseJobsOptions = {
   pushToast: (kind: Toast["kind"], message: string) => void;
   markApiSuccess: () => void;
   markApiFailure: (error: unknown) => boolean;
+  /** Appelé quand une action suivie se termine bien, après sa notification. */
+  onJobSucceeded?: () => void;
 };
 
 /**
  * Actions du gestionnaire : liste, action suivie, lecture incrémentale de sa sortie et
  * notification de fin. Le rythme des relectures appartient à l'appelant (flux, filet de secours).
  */
-export function useJobs({ pushToast, markApiSuccess, markApiFailure }: UseJobsOptions) {
+export function useJobs({ pushToast, markApiSuccess, markApiFailure, onJobSucceeded }: UseJobsOptions) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   // Lue par les relectures en cours : l'état React ne l'est qu'au rendu suivant.
@@ -46,8 +48,9 @@ export function useJobs({ pushToast, markApiSuccess, markApiFailure }: UseJobsOp
       void sendTaskNotification(job).catch(() => {
         // A refused system permission must not affect job polling.
       });
+      if (successful) onJobSucceeded?.();
     },
-    [pushToast],
+    [pushToast, onJobSucceeded],
   );
 
   /** Applique une liste reçue ; `notify` à faux au démarrage, pour ne pas annoncer des actions déjà finies. */
