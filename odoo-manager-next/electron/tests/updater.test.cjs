@@ -27,6 +27,14 @@ function sha512(data) {
   return crypto.createHash("sha512").update(data).digest("hex");
 }
 
+/**
+ * Exécutable d'une application macOS écrit comme sur un Mac, quel que soit le système qui lance
+ * les tests : sous Windows, path.join produirait des « \\ » qu'aucun chemin macOS ne contient.
+ */
+function macExecutablePath(bundle) {
+  return [...bundle.split(path.sep), "Contents", "MacOS", "SDK Local Manager"].join("/");
+}
+
 function temporaryDirectory(t, prefix = "sdk-update-") {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -139,7 +147,7 @@ test("each installation says how it can be updated", (t) => {
   const applications = temporaryDirectory(t);
   const bundle = path.join(applications, "SDK Local Manager.app");
   fs.mkdirSync(path.join(bundle, "Contents", "MacOS"), { recursive: true });
-  const macExecutable = path.join(bundle, "Contents", "MacOS", "SDK Local Manager");
+  const macExecutable = macExecutablePath(bundle);
 
   assert.equal(updater(t, { packaged: false }).support().mode, "none");
   assert.equal(updater(t, { platform: "darwin", execPath: macExecutable }).support().mode, "restart");
@@ -239,7 +247,7 @@ test("on macOS the downloaded image is opened, copied and checked before anythin
     ...registry({ [DMG]: image }),
     platform: "darwin",
     arch: "arm64",
-    execPath: path.join(bundle, "Contents", "MacOS", "SDK Local Manager"),
+    execPath: macExecutablePath(bundle),
     run,
   });
 
@@ -273,7 +281,7 @@ test("on macOS an image holding another application is refused", async (t) => {
     ...registry({ [DMG]: Buffer.from("disk image") }),
     platform: "darwin",
     arch: "arm64",
-    execPath: path.join(bundle, "Contents", "MacOS", "SDK Local Manager"),
+    execPath: macExecutablePath(bundle),
     run,
   });
   await assert.rejects(update.download(TAG), /ne correspond pas/);
@@ -354,7 +362,8 @@ test("an AppImage is replaced in place, then relaunched once the application has
   await update.install({ beforeExit: async () => undefined, exit: () => undefined });
 
   assert.equal(fs.readFileSync(appImage, "utf8"), "new version");
-  assert.equal(fs.statSync(appImage).mode & 0o111, 0o111);
+  // Windows n'a pas de droit d'exécution sur les fichiers : vérifié là où il existe.
+  if (process.platform !== "win32") assert.equal(fs.statSync(appImage).mode & 0o111, 0o111);
   assert.deepEqual(launches[0].args.slice(2), ["sdk-update", "4242", appImage]);
   assert.equal(launches[0].env.APPIMAGE, undefined);
   assert.equal(launches[0].env.APPDIR, undefined);
