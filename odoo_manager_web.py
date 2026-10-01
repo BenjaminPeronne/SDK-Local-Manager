@@ -896,13 +896,13 @@ def mailpit_status(docker, traefik):
     state = container_status(MAILPIT_CONTAINER) if docker["running"] else "absent"
     running = state == "running"
     if running:
-        message = "Les e-mails des bases neutralisées sont capturés et consultables."
+        message = "Les e-mails de tes bases de test arrivent ici, sans partir chez personne."
     elif not traefik["running"]:
-        message = "Traefik doit être démarré pour installer Mailpit."
+        message = "Démarre d'abord Traefik pour pouvoir installer Mailpit."
     elif state == "absent":
-        message = "Mailpit n'est pas installé : les e-mails des bases neutralisées ne sont pas visibles."
+        message = "Installe-le pour voir les e-mails envoyés par tes bases de test."
     else:
-        message = "Mailpit est installé mais arrêté."
+        message = "Mailpit est arrêté : démarre-le pour voir les e-mails."
     return {
         "state": state,
         "running": running,

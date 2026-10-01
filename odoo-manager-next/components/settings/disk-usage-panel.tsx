@@ -29,9 +29,9 @@ const OFFLOADED_THRESHOLD_BYTES = 50 * 1024 ** 2;
  * qu'iCloud ne garde plus sur ce disque (`du` ne les compte pas, leur taille totale si).
  */
 function trashNote(bytes: number, apparentBytes = bytes) {
-  if (apparentBytes < EMPTY_TRASH_ENTRY_BYTES) return " · contenu déjà supprimé, il ne reste que des dossiers vides";
+  if (apparentBytes < EMPTY_TRASH_ENTRY_BYTES) return " · déjà vide, tu peux le supprimer";
   if (apparentBytes - bytes > OFFLOADED_THRESHOLD_BYTES) {
-    return ` · ${formatBytes(apparentBytes)} au total, dont ${formatBytes(apparentBytes - bytes)} stockés seulement dans iCloud`;
+    return ` · ${formatBytes(apparentBytes - bytes)} de plus sont gardés en ligne dans iCloud`;
   }
   return "";
 }
@@ -178,15 +178,15 @@ export function DiskUsagePanel({
   return (
     <SettingsSection
       title="Espace disque"
-      description="Place occupée par les projets, et ce que le gestionnaire peut libérer sans toucher aux projets actifs."
+      description="La place prise par tes projets, et ce que tu peux supprimer sans risque pour libérer de l’espace."
     >
       <SettingsGroup className="gap-3 sm:flex sm:items-center">
         <div className="min-w-0 flex-1">
           {report ? (
             <>
               <div className="text-sm">
-                <span className="font-semibold">{formatBytes(freeable)} libérables</span>
-                <span className="text-muted-foreground"> · projets : {formatBytes(projectsTotal)}</span>
+                <span className="font-semibold">{formatBytes(freeable)} peuvent être libérés</span>
+                <span className="text-muted-foreground"> · tes projets occupent {formatBytes(projectsTotal)}</span>
               </div>
               <div className="mt-0.5 break-all text-xs text-muted-foreground">
                 Analyse du {new Date(report.scanned_at * 1000).toLocaleString("fr-FR")} · {report.workspace}
@@ -194,7 +194,7 @@ export function DiskUsagePanel({
             </>
           ) : (
             <div className="text-sm text-muted-foreground">
-              {error || "Aucune analyse pour l’instant. La mesure de tous les projets peut prendre plusieurs minutes."}
+              {error || "Clique sur Analyser pour voir la place utilisée. Cela peut prendre quelques minutes."}
             </div>
           )}
           {scanJob?.progress && (
@@ -211,11 +211,10 @@ export function DiskUsagePanel({
       </SettingsGroup>
 
       {report?.icloud_synced && (
-        <Notice tone="warning" icon={Cloud} title="Le dossier des projets est synchronisé par iCloud Drive">
-          Les bases PostgreSQL ne supportent pas d’être synchronisées : macOS peut retirer leurs fichiers du disque pour
-          libérer de la place, et une base s’abîme alors. Déplace le dossier des projets hors de Documents et du Bureau
-          (par exemple dans ton dossier personnel), puis indique son nouvel emplacement dans Général. Les tailles
-          affichées ici ne comptent que ce qui occupe ce disque.
+        <Notice tone="warning" icon={Cloud} title="Tes projets sont enregistrés dans iCloud">
+          Tes projets sont dans Documents, qu’iCloud copie en ligne. Ce n’est pas fait pour des bases Odoo : elles
+          peuvent s’abîmer. Pour éviter ça, déplace le dossier des projets ailleurs (par exemple dans ton dossier
+          personnel), puis indique le nouvel emplacement dans Général.
         </Notice>
       )}
 
@@ -224,7 +223,7 @@ export function DiskUsagePanel({
           <Group
             icon={<Trash2 className="h-4 w-4 text-muted-foreground" />}
             title="Corbeille des projets supprimés"
-            description="Projets supprimés depuis le gestionnaire, gardés pour pouvoir les restaurer."
+            description="Les projets que tu as supprimés. Ils sont gardés ici au cas où tu voudrais les récupérer."
             total={trashTotal}
             actions={
               report.trash.length > 1 && (
@@ -276,8 +275,8 @@ export function DiskUsagePanel({
 
           <Group
             icon={<FolderOpen className="h-4 w-4 text-muted-foreground" />}
-            title="Dossiers du gestionnaire"
-            description="Sauvegardes et fichiers temporaires créés par les imports, les retraits de modules et les échecs."
+            title="Fichiers de travail du gestionnaire"
+            description="Anciennes copies et fichiers temporaires gardés par sécurité. Tu peux les supprimer si tout fonctionne."
             total={foldersTotal}
           >
             {report.folders.length ? (
@@ -306,8 +305,8 @@ export function DiskUsagePanel({
 
           <Group
             icon={<Box className="h-4 w-4 text-muted-foreground" />}
-            title="Docker"
-            description="Images qu’aucun conteneur n’utilise et qu’aucun projet ne déclare. Les images des projets arrêtés sont conservées."
+            title="Téléchargements inutilisés"
+            description="Éléments téléchargés dont plus aucun projet n’a besoin. Ceux de tes projets, même arrêtés, sont toujours gardés."
             total={imagesTotal + report.docker.build_cache_bytes}
             actions={
               report.docker.unused_images.length > 0 && (
@@ -325,20 +324,22 @@ export function DiskUsagePanel({
             }
           >
             {!report.docker.available ? (
-              <p className="text-sm text-muted-foreground">Docker n’était pas disponible pendant l’analyse.</p>
+              <p className="text-sm text-muted-foreground">
+                Docker était arrêté pendant l’analyse : lance Docker puis analyse de nouveau.
+              </p>
             ) : (
               <ul className="divide-y rounded-md border">
                 {report.docker.unused_images.map((image) => (
                   <Row
                     key={`${image.id}-${image.reference}`}
-                    title={image.reference}
-                    detail={`Créée ${image.created}`}
+                    title={image.reference === "image orpheline" ? "Élément sans nom" : image.reference}
+                    detail={image.reference === "image orpheline" ? "Reste d’une ancienne mise à jour." : undefined}
                     size={image.bytes}
                   />
                 ))}
                 <Row
-                  title="Cache de construction"
-                  detail="Couches intermédiaires des images construites sur ce poste."
+                  title="Cache de Docker"
+                  detail="Fichiers temporaires gardés par Docker. Ils seront recréés si besoin."
                   size={report.docker.build_cache_bytes}
                   actions={
                     <ConfirmButton
@@ -356,7 +357,7 @@ export function DiskUsagePanel({
           <Group
             icon={<HardDrive className="h-4 w-4 text-muted-foreground" />}
             title="Projets"
-            description="Taille de chaque projet : bases PostgreSQL, filestores et code."
+            description="La place prise par chaque projet : ses bases de données, ses fichiers joints et son code."
             total={projectsTotal}
           >
             <ul className="divide-y rounded-md border">
@@ -364,7 +365,7 @@ export function DiskUsagePanel({
                 <Row
                   key={row.name}
                   title={row.name}
-                  detail={`Bases ${formatBytes(row.databases_bytes)} · filestores ${formatBytes(row.filestore_bytes)} · code ${formatBytes(row.code_bytes)}`}
+                  detail={`Bases ${formatBytes(row.databases_bytes)} · fichiers joints ${formatBytes(row.filestore_bytes)} · code ${formatBytes(row.code_bytes)}`}
                   size={row.bytes}
                 />
               ))}

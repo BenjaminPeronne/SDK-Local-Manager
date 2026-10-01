@@ -13,11 +13,13 @@ export function dependencySummary(report: DependencyReport) {
   const parts = [];
   if (report.not_loaded.length) {
     parts.push(
-      `${report.not_loaded.length} module${report.not_loaded.length > 1 ? "s" : ""} non chargé${report.not_loaded.length > 1 ? "s" : ""} par Odoo`,
+      `${report.not_loaded.length} module${report.not_loaded.length > 1 ? "s" : ""} bloqué${report.not_loaded.length > 1 ? "s" : ""}`,
     );
   }
   if (report.missing.length) {
-    parts.push(`${report.missing.length} absent${report.missing.length > 1 ? "s" : ""} du code`);
+    parts.push(
+      `${report.missing.length} module${report.missing.length > 1 ? "s" : ""} manquant${report.missing.length > 1 ? "s" : ""}`,
+    );
   }
   return parts.join(" · ");
 }
@@ -69,10 +71,10 @@ export function DependenciesDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Dépendances de {database || "la base"}</DialogTitle>
+          <DialogTitle>Modules manquants de {database || "la base"}</DialogTitle>
           <DialogDescription>
-            Modules installés dans la base dont le code manque au projet, et modules qu’Odoo ne charge pas à cause
-            d’eux.
+            Certains modules utilisés par cette base ne sont pas dans le projet. Ajoute-les depuis leur dépôt Git pour
+            que tout fonctionne.
           </DialogDescription>
         </DialogHeader>
 
@@ -81,27 +83,29 @@ export function DependenciesDialog({
             {loading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Analyse des modules de la base…
+                Vérification des modules de la base…
               </>
             ) : (
-              error || "Aucune analyse disponible."
+              error || "Impossible de vérifier les modules pour le moment."
             )}
           </div>
         ) : report.ok ? (
           <div className="flex items-center gap-3 rounded-md border border-emerald-200 bg-emerald-50/80 p-4 text-sm text-emerald-900 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-100">
             <CheckCircle2 className="h-5 w-5 shrink-0" />
-            Toutes les dépendances sont présentes : Odoo charge chaque module installé.
+            Rien ne manque : tous les modules de cette base sont présents dans le projet.
           </div>
         ) : (
           <div className="grid max-h-[60vh] gap-5 overflow-y-auto pr-1">
             <div className="flex flex-wrap gap-2">
               {report.not_loaded.length > 0 && (
                 <Badge variant="danger">
-                  {report.not_loaded.length} non chargé{report.not_loaded.length > 1 ? "s" : ""} par Odoo
+                  {report.not_loaded.length} module{report.not_loaded.length > 1 ? "s" : ""} bloqué
+                  {report.not_loaded.length > 1 ? "s" : ""}
                 </Badge>
               )}
               <Badge variant="warning">
-                {report.missing.length} absent{report.missing.length > 1 ? "s" : ""} du code
+                {report.missing.length} module{report.missing.length > 1 ? "s" : ""} manquant
+                {report.missing.length > 1 ? "s" : ""}
               </Badge>
             </div>
 
@@ -109,11 +113,11 @@ export function DependenciesDialog({
               <section className="grid gap-2">
                 <h3 className="flex items-center gap-2 text-sm font-semibold">
                   <TriangleAlert className="h-4 w-4 text-destructive" />
-                  Non chargés par Odoo
+                  Modules bloqués
                 </h3>
                 <p className="text-xs text-muted-foreground">
-                  Leur code est présent, mais Odoo l’ignore faute de dépendances. Leurs vues restent en base : elles
-                  provoquent des erreurs dans le navigateur (« field is undefined »).
+                  Ils sont bien dans le projet, mais Odoo ne peut pas les utiliser tant que les modules ci-dessous
+                  manquent. Certains écrans d’Odoo affichent alors des erreurs.
                 </p>
                 <ul className="divide-y rounded-md border">
                   {report.not_loaded.map((module) => (
@@ -121,11 +125,11 @@ export function DependenciesDialog({
                       <span className={cn("break-all text-sm font-medium", REFINED_IDENTIFIER)}>{module.name}</span>
                       <span className="grid gap-1 text-xs text-muted-foreground">
                         <span className="flex flex-wrap items-center gap-1.5">
-                          Manque <ModuleChips names={module.root_causes} tone="danger" />
+                          Il manque <ModuleChips names={module.root_causes} tone="danger" />
                         </span>
                         {module.blocked_by.some((name) => !module.root_causes.includes(name)) && (
                           <span className="flex flex-wrap items-center gap-1.5">
-                            via <ModuleChips names={module.blocked_by} tone="neutral" />
+                            à cause de <ModuleChips names={module.blocked_by} tone="neutral" />
                           </span>
                         )}
                       </span>
@@ -139,7 +143,7 @@ export function DependenciesDialog({
               <section className="grid gap-2">
                 <h3 className="flex items-center gap-2 text-sm font-semibold">
                   <PackageX className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                  Absents du code du projet
+                  Modules à ajouter au projet
                 </h3>
                 <ul className="divide-y rounded-md border">
                   {report.missing.map((module) => (
@@ -149,16 +153,16 @@ export function DependenciesDialog({
                     >
                       <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                         <span className={cn("break-all text-sm font-medium", REFINED_IDENTIFIER)}>{module.name}</span>
-                        {module.reason !== "code absent" && <Badge variant="outline">{module.reason}</Badge>}
+                        {module.reason !== "code absent" && <Badge variant="outline">désactivé dans le code</Badge>}
                         {module.excluded && <Badge variant="outline">exclu localement</Badge>}
                       </span>
                       <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                         {module.required_by.length ? (
                           <>
-                            Requis par <ModuleChips names={module.required_by} tone="neutral" />
+                            Nécessaire pour <ModuleChips names={module.required_by} tone="neutral" />
                           </>
                         ) : (
-                          "Aucun module présent n’en dépend."
+                          "Aucun autre module n’en a besoin."
                         )}
                       </span>
                     </li>

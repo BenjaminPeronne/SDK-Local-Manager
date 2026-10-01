@@ -35,8 +35,8 @@ export function DuplicateDatabaseDialog({
           <DialogTitle>Dupliquer {database || "la base"}</DialogTitle>
           <DialogDescription>
             {project ? `Projet : ${project.name}. ` : ""}
-            Odoo copie la base PostgreSQL et son filestore, comme le bouton « Duplicate » du gestionnaire de bases. Les
-            connexions ouvertes sur la base d’origine sont fermées pendant la copie.
+            Crée une copie complète de la base, avec ses fichiers joints. Les personnes connectées à la base d’origine
+            seront déconnectées pendant la copie.
           </DialogDescription>
         </DialogHeader>
         <DuplicateDatabaseForm
@@ -102,10 +102,9 @@ function DuplicateDatabaseForm({
           onCheckedChange={(checked) => setNeutralize(checked === true)}
         />
         <span>
-          <span className="block font-medium">Neutraliser la copie</span>
+          <span className="block font-medium">En faire une base de test</span>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Recommandé : désactive notamment les envois d’e-mails et les actions externes sur la nouvelle base. La base
-            d’origine n’est pas modifiée.
+            Recommandé : la copie n’enverra pas d’e-mails à de vrais clients. La base d’origine ne change pas.
           </span>
         </span>
       </label>

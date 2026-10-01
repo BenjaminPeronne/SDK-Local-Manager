@@ -101,7 +101,7 @@ export function ProjectHeader({
       pushToast(
         "success",
         debug
-          ? "La base Odoo a été ouverte en mode debug dans le navigateur."
+          ? "La base Odoo a été ouverte en mode développeur dans le navigateur."
           : "La base Odoo a été ouverte dans le navigateur.",
       );
     } catch (err) {
@@ -221,7 +221,7 @@ export function ProjectHeader({
                     className="-ml-px w-8 shrink-0 rounded-l-none px-0"
                     variant="outline"
                     disabled={!selectedProjectReady}
-                    title="Mode debug et e-mails"
+                    title="Mode développeur et e-mails"
                     aria-label="Autres façons d’ouvrir Odoo"
                   >
                     <ChevronDown className="h-4 w-4" />
@@ -234,17 +234,17 @@ export function ProjectHeader({
                     onSelect={() => requestOpenOdoo("1")}
                   >
                     <Bug className="h-4 w-4" />
-                    En mode debug
+                    En mode développeur
                   </DropdownMenu.Item>
                   <DropdownMenu.Item
                     disabled={!selectedProjectOnline || openingOdoo}
                     onSelect={() => requestOpenOdoo("assets")}
                   >
                     <FileCode className="h-4 w-4" />
-                    En mode debug avec assets
+                    En mode développeur (avec ressources)
                   </DropdownMenu.Item>
                   <DropdownMenu.Separator />
-                  <DropdownMenu.Label>E-mails des bases neutralisées</DropdownMenu.Label>
+                  <DropdownMenu.Label>E-mails des bases de test</DropdownMenu.Label>
                   {mailpit?.running ? (
                     <DropdownMenu.Item onSelect={requestOpenMailpit}>
                       <Mail className="h-4 w-4" />

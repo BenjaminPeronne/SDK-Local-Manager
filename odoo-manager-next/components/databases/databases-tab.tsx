@@ -110,13 +110,13 @@ export function DatabasesTab({
       title={`${dependencyProblem.db} : ${dependencySummary(dependencyProblem)}`}
       actions={
         <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => setDependenciesOpen(true)}>
-          Voir les dépendances
+          Voir le détail
         </Button>
       }
     >
       {dependencyProblem.not_loaded.length
-        ? "Des modules présents ne sont pas chargés : leurs écrans peuvent planter dans le navigateur."
-        : "Des modules installés dans la base n’ont pas de code dans le projet."}
+        ? "Certains écrans d’Odoo peuvent afficher des erreurs. Ajoute les modules manquants au projet."
+        : "Des modules utilisés par cette base ne sont pas dans le projet."}
     </Notice>
   );
 
@@ -218,7 +218,7 @@ export function DatabasesTab({
                       <DropdownMenu.Label>Outils</DropdownMenu.Label>
                       <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "dependencies")}>
                         <PackageX className="h-4 w-4" />
-                        Dépendances manquantes
+                        Modules manquants
                       </DropdownMenu.Item>
                       <DropdownMenu.Item
                         disabled={!selectedProjectReady}
@@ -435,7 +435,7 @@ export function DatabasesTab({
                   onClick={() => setDependenciesOpen(true)}
                 >
                   <PackageX className="h-4 w-4" />
-                  Dépendances manquantes
+                  Modules manquants
                 </Button>
                 <Button
                   className="w-full text-destructive hover:text-destructive"

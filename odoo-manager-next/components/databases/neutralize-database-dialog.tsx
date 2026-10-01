@@ -31,10 +31,9 @@ export function NeutralizeDatabaseDialog({
         <DialogHeader>
           <DialogTitle>Neutraliser {selectedDb || "la base"}</DialogTitle>
           <DialogDescription>
-            Odoo sera arrêté brièvement. Tous les crons métier, dont le contrôle d’abonnement, ainsi que les serveurs de
-            messagerie entrants et sortants seront désactivés. Sur les versions récentes, Odoo efface aussi les
-            identifiants SMTP. Les e-mails sont ensuite envoyés vers Mailpit, qui les affiche sans les transmettre,
-            s’il est démarré. Cette opération n’est pas réversible automatiquement.
+            Transforme la base en base de test : elle n’enverra plus d’e-mails à personne et ne lancera plus de tâches
+            automatiques. Les e-mails restent visibles dans Mailpit. Odoo redémarre quelques instants. Ce changement ne
+            peut pas être annulé.
           </DialogDescription>
         </DialogHeader>
         <SimplifiedNeutralizationNotice odooVersion={selectedProject?.odoo_version} />
