@@ -1446,6 +1446,7 @@ export default function Home() {
         <AppSidebar
           availableUpdate={availableUpdate}
           dismissUpdate={dismissUpdate}
+          hasRunningJobs={hasRunningJobs}
           jobs={jobs}
           openCreateProjectDialog={openCreateProjectDialog}
           openSettingsDialog={openSettingsDialog}

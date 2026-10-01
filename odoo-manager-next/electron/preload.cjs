@@ -45,5 +45,14 @@ contextBridge.exposeInMainWorld(
     gitlabDisconnect: () => ipcRenderer.invoke("sdk:gitlab-disconnect"),
     gitlabProjects: (search) => ipcRenderer.invoke("sdk:gitlab-projects", search),
     gitlabRefs: (projectId, search) => ipcRenderer.invoke("sdk:gitlab-refs", projectId, search),
+    updateSupport: () => ipcRenderer.invoke("sdk:update-support"),
+    downloadUpdate: (tag) => ipcRenderer.invoke("sdk:update-download", tag),
+    installUpdate: () => ipcRenderer.invoke("sdk:update-install"),
+    // Avancement du téléchargement. Seule la charge utile passe au rendu, jamais l'événement IPC.
+    onUpdateProgress: (callback) => {
+      const listener = (_event, progress) => callback(progress);
+      ipcRenderer.on("sdk:update-progress", listener);
+      return () => ipcRenderer.removeListener("sdk:update-progress", listener);
+    },
   }),
 );

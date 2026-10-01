@@ -26,6 +26,7 @@ const {
 } = require("./runtime.cjs");
 const { CredentialStore } = require("./credentials.cjs");
 const { GitLabClient } = require("./gitlab.cjs");
+const { AppUpdater } = require("./updater.cjs");
 const {
   LINUX_WORKSPACE,
   WslEnvironment,
@@ -55,6 +56,7 @@ if (smokePath) app.setPath("userData", path.join(process.env.ODOO_MANAGER_CONFIG
 let window;
 let backend;
 let wsl;
+let updater;
 // Motif lisible quand l'environnement Linux a échoué et que le backend Windows a pris le relais.
 let degradedBackend = "";
 let quitting = false;
@@ -248,6 +250,18 @@ function installHandlers() {
   handle("gitlab-disconnect", () => gitlab.disconnect());
   handle("gitlab-projects", (search) => gitlab.searchProjects(search));
   handle("gitlab-refs", (id, search) => gitlab.listRefs(id, search));
+  // Mise à jour en un clic : l'interface ne fournit que le tag annoncé, tout le reste se décide ici.
+  handle("update-support", () => updater.support());
+  handle("update-download", (tag) => updater.download(tag));
+  handle("update-install", () =>
+    updater.install({
+      beforeExit: () => backend.stop(),
+      exit: () => {
+        quitting = true;
+        app.exit(0);
+      },
+    }),
+  );
   handle("notifications-supported", () => Notification.isSupported());
   handle("notify", (payload) => {
     if (
@@ -315,6 +329,20 @@ async function start() {
   // L'adresse suffit pour bâtir la fenêtre ; le backend démarre en parallèle. L'interface a son
   // écran de chargement et réessaie seule, donc rien n'attend ici la disponibilité du backend.
   await backend.reserve();
+  updater = new AppUpdater({
+    currentVersion: app.getVersion(),
+    packaged: app.isPackaged,
+    // Dossier propre à l'utilisateur : /tmp, partagé sous Linux, laisserait un autre compte du
+    // poste remplacer l'installateur entre sa vérification et son installation.
+    workDir: path.join(app.getPath("userData"), "updates"),
+    logPath: path.join(logDir, "update.log"),
+    fetch: (url, init) => net.fetch(url, init),
+    openPath: (file) => shell.openPath(file),
+    onProgress: (progress) => window?.webContents.send("sdk:update-progress", progress),
+    log: (message) => backend.log(message),
+  });
+  // Téléchargements d'une mise à jour précédente, installée ou abandonnée.
+  updater.cleanup();
   const ready = backend.start().catch((error) => {
     backend.log(error.stack || error.message);
     // Keep the existing frontend's diagnostics and recovery screen available.

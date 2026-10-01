@@ -34,11 +34,13 @@ def release_update(current_version, ls_remote_output):
     """Ce que l'interface affiche : la dernière version publiée et si elle est plus récente."""
     latest = latest_release(ls_remote_output)
     if latest is None:
-        return {"current": current_version, "latest": "", "update_available": False, "url": RELEASES_PAGE}
+        return {"current": current_version, "latest": "", "tag": "", "update_available": False, "url": RELEASES_PAGE}
     tag, version = latest
     return {
         "current": current_version,
         "latest": version,
+        # L'application de bureau télécharge les installateurs publiés sous ce tag.
+        "tag": tag,
         "update_available": version_key(version) > version_key(current_version),
         "url": f"{RELEASES_PAGE}/{tag}",
     }

@@ -75,6 +75,8 @@ export type MailpitStatus = {
 export type AppUpdate = {
   current: string;
   latest: string;
+  /** Tag GitLab de la version (app-v0.14.0-build1) : l'application de bureau y télécharge l'installateur. */
+  tag: string;
   update_available: boolean;
   url: string;
   checked: boolean;

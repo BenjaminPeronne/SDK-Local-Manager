@@ -2677,7 +2677,14 @@ def app_update_payload():
     if code == 0:
         value = {**release_update(APP_VERSION, output), "checked": True}
     else:
-        value = {"current": APP_VERSION, "latest": "", "update_available": False, "url": "", "checked": False}
+        value = {
+            "current": APP_VERSION,
+            "latest": "",
+            "tag": "",
+            "update_available": False,
+            "url": "",
+            "checked": False,
+        }
     with APP_UPDATE_LOCK:
         APP_UPDATE.update(checked_at=time.monotonic(), value=value)
     return value

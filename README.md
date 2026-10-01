@@ -56,7 +56,8 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 - Gestion des modules absents d'une copie locale, sans désinstaller ni supprimer de données.
 
 **Mises à jour**
-- Annonce d'une nouvelle version publiée sur GitLab, lue avec la clé SSH du poste, avec un lien vers la Release.
+- Annonce d'une nouvelle version publiée sur GitLab, lue avec la clé SSH du poste.
+- Mise à jour en un clic dans l'application de bureau : téléchargement avec progression, vérification de la taille et de l'empreinte SHA-512, puis redémarrage sur la nouvelle version (sous macOS, l'application se remplace elle-même ; sous Windows, l'installateur tourne en silencieux ; sous Linux, l'AppImage est remplacée et un paquet `.deb` est confié à l'installateur du système). Le redémarrage attend la fin des actions en cours. Si le téléchargement automatique n'est pas possible, le lien vers la Release reste proposé.
 
 **Actions et suivi**
 - Les actions d'un même projet sont mises en file au lieu de s'exécuter en parallèle.
@@ -422,6 +423,8 @@ GITLAB_TOKEN=$(security find-generic-password -a "$USER" -s sdk-local-manager-gi
 
 Le script envoie les quatre installateurs (`.deb`, `.AppImage`, `.dmg`, `.exe`) dans le registre de paquets du projet, crée la Release et n'y attache que ces fichiers ; le backend Linux et l'image WSL, qui ne servent qu'à la compilation, sont ignorés. Le tag n'a pas besoin d'être poussé sur GitLab : la Release le crée à partir du commit local, qui doit déjà y être. Relancer le script sur une Release existante remet ses pièces jointes en conformité. `GITLAB_TOKEN` doit avoir le droit `api`.
 
+Le script dépose aussi `update-manifest.json` (taille et empreinte SHA-512 de chaque installateur), qu'utilise la mise à jour en un clic. L'application télécharge sans identifiants : le registre de paquets du projet doit donc être lisible par tous (**Paramètres › Général › Visibilité, fonctionnalités du projet, permissions › Allow anyone to pull from package registry**). Le code reste privé ; seuls les installateurs deviennent téléchargeables. Tant que ce réglage est désactivé, ou pour une version publiée sans manifeste, l'application propose seulement le lien vers la Release.
+
 ### Build des trois plateformes avec GitLab CI
 
 > Le pipeline ne se déclenche plus sur un tag `app-v*` : lance-le à la main (*Build › Pipelines › Exécuter le pipeline*). `scripts/build_all_platforms_gitlab.sh`, qui compte sur le tag pour démarrer le build, n'est donc plus utilisable tel quel.
@@ -449,6 +452,8 @@ Les paquets macOS sont signés ad hoc mais pas notarisés : après téléchargem
 ```bash
 sh scripts/macos_allow_private_build.sh
 ```
+
+Seule la première installation demande cette étape : une mise à jour faite depuis l'application n'est pas mise en quarantaine.
 
 Une distribution sans alerte demandera un certificat Apple Developer ID et la notarisation du DMG ; les certificats seront injectés par les secrets de la CI, jamais commités.
 

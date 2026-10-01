@@ -55,6 +55,36 @@ Sous Windows, le backend Linux est copié dans la distribution WSL « SDK-Manage
 lancé à l'intérieur. S'il ne démarre pas, l'application bascule sur le backend
 Windows, l'écrit dans `backend.log` et l'indique dans l'interface.
 
+## Mise à jour en un clic
+
+`electron/updater.cjs` télécharge et installe la version annoncée par le backend
+(`/api/app-update`, tag lu avec la clé SSH). L'interface ne transmet que le tag :
+le processus principal refuse un tag mal formé ou une version qui n'est pas plus
+récente, puis lit `update-manifest.json` dans le registre de paquets GitLab du tag.
+L'installateur de la plateforme et de l'architecture est téléchargé en flux, et
+refusé si sa taille ou son empreinte SHA-512 diffère du manifeste.
+
+L'application n'étant pas signée, le mécanisme d'Electron (Squirrel) est inutilisable
+sous macOS : il exige une signature Developer ID. À la place :
+
+- **macOS** : l'image disque est montée sans fenêtre, l'application copiée puis
+  contrôlée (identifiant, version, intégrité de la signature locale avec `codesign`).
+  Un script attend la fermeture de l'application, échange les dossiers `.app`, remet
+  l'ancienne version en place en cas d'échec, puis relance. Si le dossier de
+  l'application n'est pas modifiable, l'image disque est ouverte et l'utilisateur
+  glisse l'application lui-même ;
+- **Windows** : l'installateur NSIS est lancé en silencieux (`--updated /S
+  --force-run`) une fois l'application fermée et le backend arrêté ;
+- **Linux** : l'AppImage est remplacée par renommage dans son dossier, puis relancée ;
+  un paquet `.deb` est ouvert dans l'installateur du système.
+
+Le script de remplacement démarre avant l'arrêt du backend : s'il ne démarre pas,
+rien n'est arrêté. Son journal est `update.log`, à côté de `backend.log`. Les
+téléchargements vont dans le dossier `updates/` des données de l'application, propre à
+l'utilisateur (un dossier temporaire partagé, comme `/tmp` sous Linux, laisserait un
+autre compte remplacer l'installateur après sa vérification). Il est vidé au lancement
+suivant, et le téléchargement refusé si le disque manque de place.
+
 ## Configuration
 
 Le fichier de configuration reste celui d'Odoo Manager :

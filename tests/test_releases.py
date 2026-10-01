@@ -31,6 +31,7 @@ class ReleaseUpdateTests(unittest.TestCase):
         self.assertTrue(update["update_available"])
         self.assertEqual("0.10.0", update["latest"])
         self.assertEqual(f"{RELEASES_PAGE}/app-v0.10.0-build2", update["url"])
+        self.assertEqual("app-v0.10.0-build2", update["tag"])
 
     def test_the_current_version_is_not_an_update(self):
         self.assertFalse(release_update("0.10.0", LS_REMOTE)["update_available"])
@@ -43,6 +44,7 @@ class ReleaseUpdateTests(unittest.TestCase):
 
         self.assertFalse(update["update_available"])
         self.assertEqual("", update["latest"])
+        self.assertEqual("", update["tag"])
 
 
 if __name__ == "__main__":

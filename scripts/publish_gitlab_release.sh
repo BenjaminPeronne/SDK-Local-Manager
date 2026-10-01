@@ -14,6 +14,7 @@ TAG=""
 SOURCE_DIR=""
 DESCRIPTION="Installateurs macOS/Windows/Linux compilés via GitHub Actions."
 HEADER_FILE=""
+MANIFEST_FILE=""
 
 usage() {
   cat <<'EOF'
@@ -34,6 +35,13 @@ Pré-requis:
   - remote « gitlab » configuré (autre nom : GITLAB_REMOTE=nom)
   - GITLAB_TOKEN, jeton d'accès personnel GitLab avec le droit api (écriture,
     pas seulement read_api : la création de Release et l'upload de paquets l'exigent)
+
+Mise à jour automatique :
+  Le script dépose aussi update-manifest.json (taille et empreinte de chaque
+  installateur). L'application ne télécharge les installateurs que si le registre
+  de paquets est lisible sans connexion : sur GitLab, Paramètres › Général ›
+  Visibilité, fonctionnalités du projet, permissions › « Allow anyone to pull
+  from package registry ». Sinon, elle se contente d'ouvrir la page de la Release.
 EOF
 }
 
@@ -53,6 +61,9 @@ require_cmd() {
 cleanup() {
   if [ -n "$HEADER_FILE" ]; then
     rm -f "$HEADER_FILE"
+  fi
+  if [ -n "$MANIFEST_FILE" ]; then
+    rm -f "$MANIFEST_FILE"
   fi
 }
 trap cleanup EXIT INT TERM
@@ -135,6 +146,36 @@ for file in $files; do
   curl -fsS --retry 3 -H "@$HEADER_FILE" --upload-file "$file" \
     "$API/packages/generic/$PACKAGE_NAME/$TAG/$name" >/dev/null
 done
+
+# Manifeste de la mise à jour automatique : taille et empreinte SHA-512 de chaque installateur.
+# L'application refuse tout fichier téléchargé qui ne correspond pas. Publié après les
+# installateurs, il ne désigne jamais un fichier absent du registre.
+log "Manifeste de mise à jour"
+MANIFEST_FILE=$(mktemp)
+# shellcheck disable=SC2086
+python3 - "$TAG" "$MANIFEST_FILE" $files <<'PY'
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+
+tag, output, *paths = sys.argv[1:]
+match = re.match(r"^app-v(\d+\.\d+\.\d+)(?:-build\d+)?$", tag)
+if not match:
+    sys.exit(f"Erreur: tag {tag} hors du format app-v<version>-build<N>")
+files = []
+for path in map(Path, paths):
+    digest = hashlib.sha512()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    files.append({"name": path.name, "size": path.stat().st_size, "sha512": digest.hexdigest()})
+    print(f"{path.name}  {files[-1]['size']} octets")
+Path(output).write_text(json.dumps({"version": match.group(1), "tag": tag, "files": files}, indent=2) + "\n")
+PY
+curl -fsS --retry 3 -H "@$HEADER_FILE" --upload-file "$MANIFEST_FILE" \
+  "$API/packages/generic/$PACKAGE_NAME/$TAG/update-manifest.json" >/dev/null
 
 log "Publication de la Release $TAG"
 

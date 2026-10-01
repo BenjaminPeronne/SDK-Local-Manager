@@ -31,6 +31,27 @@ export interface DesktopBridge {
   wslOpenExplorer?(project: string): Promise<void>;
   /** S'abonne à l'avancement de la préparation ; la fonction rendue se désabonne. */
   onWslProgress?(callback: (step: WslPrepareStep) => void): () => void;
+  // Mise à jour en un clic.
+  updateSupport?(): Promise<UpdateSupport>;
+  downloadUpdate?(tag: string): Promise<UpdateSupport & { version: string }>;
+  installUpdate?(): Promise<{ mode: UpdateMode }>;
+  onUpdateProgress?(callback: (progress: UpdateProgress) => void): () => void;
+}
+
+/**
+ * `restart` : l'application se remplace et redémarre. `installer` : elle ouvre l'installateur,
+ * l'utilisateur termine (`hint` dit comment). `none` : seul le lien vers la Release reste.
+ */
+export type UpdateMode = "restart" | "installer" | "none";
+
+export interface UpdateSupport {
+  mode: UpdateMode;
+  hint: string;
+}
+
+export interface UpdateProgress {
+  received: number;
+  total: number;
 }
 
 /** Étape en cours de la préparation du poste, telle que l'écran l'affiche. */
