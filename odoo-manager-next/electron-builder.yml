@@ -21,6 +21,15 @@ extraResources:
   - from: electron/binaries/backend-linux
     to: backend-linux
 asar: true
+# Interrupteurs figés dans l'exécutable : un autre programme du poste ne peut plus le lancer
+# comme un simple Node (ELECTRON_RUN_AS_NODE, NODE_OPTIONS, --inspect) pour hériter de son
+# accès au trousseau, ni lui faire charger un code modifié hors de l'archive vérifiée.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
 npmRebuild: false
 afterPack: electron/after-pack.cjs
 mac:

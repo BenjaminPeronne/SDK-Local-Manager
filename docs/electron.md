@@ -29,6 +29,12 @@ Les liens HTTP(S) s'ouvrent dans le navigateur système ; les schémas de fichie
 de commandes sont refusés. L'écriture dans le presse-papiers est permise, les autres
 permissions Web sont refusées. Les notifications passent par l'API native.
 
+Les fuses Electron (`electronFuses` dans `electron-builder.yml`) sont figées dans
+l'exécutable : il ne peut plus être lancé comme un simple Node (`ELECTRON_RUN_AS_NODE`,
+`NODE_OPTIONS`, `--inspect`), et il ne charge que l'archive `app.asar` dont l'intégrité
+est vérifiée. Un autre programme du poste ne peut donc pas s'en servir pour lire le
+trousseau à sa place.
+
 Les secrets (identifiants RIKA, jeton GitLab) sont chiffrés par le trousseau du
 système et ne sont jamais écrits en clair dans `config.json`. Un jeton GitLab
 enregistré qui ne peut plus être déchiffré est signalé : le compte est à reconnecter.
