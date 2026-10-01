@@ -117,6 +117,7 @@ export function fallbackManagerSettings(
     sticky_header: current?.sticky_header ?? false,
     interface_icon: current?.interface_icon === "local" ? "local" : "manager",
     interface_layout: current?.interface_layout === "classic" ? "classic" : "refined",
+    seasonal_decorations: current?.seasonal_decorations ?? true,
     onboarding_completed: current?.onboarding_completed ?? false,
     legacy_workspace: current?.legacy_workspace || "",
     migration_banner_dismissed: current?.migration_banner_dismissed ?? false,

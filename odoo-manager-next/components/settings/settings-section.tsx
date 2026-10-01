@@ -23,6 +23,7 @@ export const SETTINGS_SAVED_KEYS = [
   "sticky_header",
   "interface_icon",
   "interface_layout",
+  "seasonal_decorations",
   "migration_banner_dismissed",
   "beta_interface_banner_dismissed",
 ] as const;

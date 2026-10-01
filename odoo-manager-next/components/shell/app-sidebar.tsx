@@ -5,11 +5,13 @@ import { Circle, Download, FolderPlus, Info, Loader2, Search, Settings, X } from
 import type { StaticImageData } from "next/image";
 import { statusVariant } from "@/lib/format";
 import { isJobActive, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
+import type { Season } from "@/lib/seasonal";
 import type { AppUpdate, ExternalLogView, Job, ManagerSettings, Overview, Project, SystemStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ChristmasHat } from "@/components/seasonal/christmas";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 type AppSidebarProps = {
@@ -21,6 +23,7 @@ type AppSidebarProps = {
   openUrl: (url?: string) => Promise<void>;
   overview: Overview | null;
   pendingProjectArrivals: Job[];
+  season: Season | null;
   selectedAppIcon: StaticImageData;
   selectedProject: Project | undefined;
   selectedProjectName: string;
@@ -43,6 +46,7 @@ export function AppSidebar({
   openUrl,
   overview,
   pendingProjectArrivals,
+  season,
   selectedAppIcon,
   selectedProject,
   selectedProjectName,
@@ -85,15 +89,18 @@ export function AppSidebar({
         <div className="sdk-brand border-b p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2.5">
-              <img
-                src={selectedAppIcon.src}
-                alt=""
-                aria-hidden="true"
-                className={cn(
-                  "sdk-logo h-10 w-10 shrink-0 object-contain",
-                  settings?.interface_icon === "local" ? "rounded-full" : "rounded-[9px]",
-                )}
-              />
+              <span className="relative shrink-0">
+                <img
+                  src={selectedAppIcon.src}
+                  alt=""
+                  aria-hidden="true"
+                  className={cn(
+                    "sdk-logo h-10 w-10 object-contain",
+                    settings?.interface_icon === "local" ? "rounded-full" : "rounded-[9px]",
+                  )}
+                />
+                {season === "christmas" && <ChristmasHat className="-right-2.5 -top-3 w-7" />}
+              </span>
               <div className="min-w-0">
                 <p className="sdk-eyebrow">Sudokeys</p>
                 <h1 className="sdk-brand-name text-sm font-extrabold leading-tight">SDK Local Manager</h1>

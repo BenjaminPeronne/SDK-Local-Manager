@@ -53,6 +53,7 @@ class SettingsTests(unittest.TestCase):
                     "sticky_header": True,
                     "interface_icon": "local",
                     "interface_layout": "refined",
+                    "seasonal_decorations": False,
                     "onboarding_completed": True,
                     "migration_banner_dismissed": True,
                     "beta_interface_banner_dismissed": True,
@@ -68,6 +69,7 @@ class SettingsTests(unittest.TestCase):
             self.assertTrue(loaded.sticky_header)
             self.assertEqual(loaded.interface_icon, "local")
             self.assertEqual(loaded.interface_layout, "refined")
+            self.assertFalse(loaded.seasonal_decorations)
             self.assertTrue(loaded.onboarding_completed)
             # Le bandeau masqué doit survivre au redémarrage : c'est tout son intérêt.
             self.assertTrue(loaded.migration_banner_dismissed)
@@ -107,6 +109,12 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(
             ManagerSettings.from_dict({"interface_layout": "REFINED"}, "/tmp/workspace").interface_layout,
             "refined",
+        )
+
+    def test_seasonal_decorations_are_on_unless_turned_off(self):
+        self.assertTrue(ManagerSettings.from_dict({}, "/tmp/workspace").seasonal_decorations)
+        self.assertFalse(
+            ManagerSettings.from_dict({"seasonal_decorations": False}, "/tmp/workspace").seasonal_decorations
         )
 
     def test_invalid_mode_uses_native(self):

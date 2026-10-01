@@ -6150,6 +6150,7 @@ INTERFACE_ONLY_SETTINGS = frozenset(
         "beta_interface_banner_dismissed",
         "interface_layout",
         "sticky_header",
+        "seasonal_decorations",
     }
 )
 

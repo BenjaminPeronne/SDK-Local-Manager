@@ -84,6 +84,8 @@ class ManagerSettings:
     interface_icon: str = "manager"
     # « refined » : onglets dans l'en-tête et panneau arrondi ; « classic » : onglets sous l'en-tête.
     interface_layout: str = "refined"
+    # Petites décorations pendant les fêtes (Noël) : activées tant qu'on ne les coupe pas.
+    seasonal_decorations: bool = True
     onboarding_completed: bool = False
     # Ancien dossier de projets Windows, vu depuis la distribution (/mnt/c/...).
     # Renseigné au passage sous WSL : il sert à proposer la migration des projets.
@@ -136,6 +138,7 @@ class ManagerSettings:
             sticky_header=bool(payload.get("sticky_header", False)),
             interface_icon=interface_icon,
             interface_layout=interface_layout,
+            seasonal_decorations=bool(payload.get("seasonal_decorations", True)),
             onboarding_completed=bool(payload.get("onboarding_completed", False)),
             legacy_workspace=normalize_legacy_workspace(payload.get("legacy_workspace", "")),
             migration_banner_dismissed=bool(payload.get("migration_banner_dismissed", False)),

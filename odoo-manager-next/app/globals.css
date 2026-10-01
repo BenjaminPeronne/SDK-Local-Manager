@@ -419,3 +419,64 @@ textarea {
 .dark .floating-selection-bar {
   background: linear-gradient(hsl(var(--primary) / 0.16), hsl(var(--primary) / 0.16)), hsl(var(--muted));
 }
+
+/* Décorations de Noël (data-season sur .sdk-shell) : guirlande sous la marque, flocons sur l'accueil. */
+.sdk-shell[data-season="christmas"] .sdk-brand {
+  position: relative;
+}
+.sdk-shell[data-season="christmas"] .sdk-brand::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: -3px;
+  height: 6px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, #e53935 2px, transparent 2.5px) 0 0 / 36px 6px repeat-x,
+    radial-gradient(circle, #2e9d4f 2px, transparent 2.5px) 12px 0 / 36px 6px repeat-x,
+    radial-gradient(circle, #f2b632 2px, transparent 2.5px) 24px 0 / 36px 6px repeat-x;
+  animation: sdk-garland-twinkle 2.4s ease-in-out infinite alternate;
+}
+@keyframes sdk-garland-twinkle {
+  from {
+    opacity: 0.65;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.sdk-christmas-hat {
+  filter: drop-shadow(0 1px 1px hsl(0 0% 0% / 0.2));
+}
+
+.sdk-snowfall {
+  container-type: size;
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+.sdk-snowflake {
+  position: absolute;
+  top: -12px;
+  width: var(--flake-size);
+  height: var(--flake-size);
+  border-radius: 9999px;
+  background: hsl(208 45% 72% / 0.7);
+  animation: sdk-snowflake-fall var(--flake-duration) linear var(--flake-delay) infinite;
+}
+.dark .sdk-snowflake {
+  background: hsl(0 0% 100% / 0.65);
+}
+@keyframes sdk-snowflake-fall {
+  to {
+    transform: translate3d(var(--flake-drift), calc(100cqh + 24px), 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sdk-shell[data-season="christmas"] .sdk-brand::after {
+    animation: none;
+  }
+  .sdk-snowfall {
+    display: none;
+  }
+}

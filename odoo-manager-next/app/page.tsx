@@ -99,6 +99,7 @@ import { AboutDialog } from "@/components/shell/about-dialog";
 import { AppSidebar } from "@/components/shell/app-sidebar";
 import { LoadingScreen } from "@/components/shell/loading-screen";
 import { WelcomeScreen } from "@/components/welcome/welcome-screen";
+import { useSeason } from "@/hooks/use-season";
 import { WslSetupDialog } from "@/components/wsl-setup";
 import appIcon from "./icon.png";
 import localIcon from "./local-icon.png";
@@ -345,6 +346,7 @@ export default function Home() {
   // Interface affinée : onglets dans l'en-tête et panneau arrondi. C'est l'interface par défaut.
   const refinedInterface = settings?.interface_layout !== "classic";
   const stickyHeader = settings?.sticky_header ?? false;
+  const season = useSeason(settings?.seasonal_decorations !== false);
   // Sur grand écran, le panneau arrondi défile seul : barre latérale et en-tête restent en place.
   const wideScreen = useMediaQuery("(min-width: 1024px)");
   const [projectPanel, setProjectPanel] = useState<HTMLElement | null>(null);
@@ -1425,6 +1427,7 @@ export default function Home() {
     <main
       className={cn("sdk-shell min-h-screen overflow-x-clip", refinedInterface && "lg:h-screen lg:overflow-hidden")}
       data-layout={refinedInterface ? "refined" : "classic"}
+      data-season={season ?? undefined}
     >
       <div className="flex min-h-screen min-w-0 flex-col lg:flex-row">
         <AppSidebar
@@ -1436,6 +1439,7 @@ export default function Home() {
           openUrl={openUrl}
           overview={overview}
           pendingProjectArrivals={pendingProjectArrivals}
+          season={season}
           selectedAppIcon={selectedAppIcon}
           selectedProject={selectedProject}
           selectedProjectName={selectedProjectName}
@@ -1567,6 +1571,7 @@ export default function Home() {
               {showWelcome ? (
                 <WelcomeScreen
                   icon={selectedAppIcon}
+                  season={season}
                   hasProjects={Boolean(overview?.projects.length)}
                   docker={{
                     ready: Boolean(systemStatus?.docker.running),

@@ -2,9 +2,11 @@
 
 import type { ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, ExternalLink, FolderPlus, Mail, RefreshCcw, Settings } from "lucide-react";
+import type { Season } from "@/lib/seasonal";
 import type { MailpitStatus } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ChristmasHat, Snowfall } from "@/components/seasonal/christmas";
 import { cn } from "@/lib/utils";
 
 /**
@@ -15,6 +17,7 @@ import { cn } from "@/lib/utils";
  */
 export function WelcomeScreen({
   icon,
+  season,
   hasProjects,
   docker,
   traefik,
@@ -26,6 +29,7 @@ export function WelcomeScreen({
   onRefresh,
 }: {
   icon: { src: string };
+  season: Season | null;
   hasProjects: boolean;
   docker: { ready: boolean; message: string };
   traefik: { ready: boolean; message: string } | null;
@@ -37,14 +41,21 @@ export function WelcomeScreen({
   onRefresh: () => void;
 }) {
   return (
-    <div className="mx-auto flex max-w-[1500px] flex-col items-center px-4 py-12 text-center sm:py-16">
-      <img
-        src={icon.src}
-        alt=""
-        aria-hidden="true"
-        className="h-16 w-16 rounded-2xl object-cover shadow-sm sm:h-[72px] sm:w-[72px]"
-      />
+    <div className="relative isolate mx-auto flex max-w-[1500px] flex-col items-center px-4 py-12 text-center sm:py-16">
+      {season === "christmas" && <Snowfall />}
+      <span className="relative">
+        <img
+          src={icon.src}
+          alt=""
+          aria-hidden="true"
+          className="h-16 w-16 rounded-2xl object-cover shadow-sm sm:h-[72px] sm:w-[72px]"
+        />
+        {season === "christmas" && <ChristmasHat className="-right-5 -top-6 w-12 sm:w-14" />}
+      </span>
       <h2 className="mt-5 text-2xl font-semibold sm:text-3xl">SDK Local Manager</h2>
+      {season === "christmas" && (
+        <p className="mt-1 text-sm font-medium text-red-700 dark:text-red-400">Joyeux Noël et belles fêtes ! 🎄</p>
+      )}
       <p className="mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
         {hasProjects
           ? "Sélectionne un projet dans la barre de gauche pour ouvrir ses bases, ses modules et son activité."

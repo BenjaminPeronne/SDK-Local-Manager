@@ -588,6 +588,24 @@ export function SettingsDialog({
                           </span>
                         </span>
                       </label>
+
+                      <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-hover">
+                        <Checkbox
+                          className="mt-0.5"
+                          checked={settingsDraft.seasonal_decorations ?? true}
+                          onCheckedChange={(checked) =>
+                            setSettingsDraft({ ...settingsDraft, seasonal_decorations: checked === true })
+                          }
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-medium">Décorations de saison</span>
+                          <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
+                            Petites touches festives pendant les fêtes : à Noël, un bonnet sur le logo, une guirlande
+                            dans la barre de gauche et quelques flocons sur l’écran d’accueil. Tes projets ne sont pas
+                            concernés.
+                          </span>
+                        </span>
+                      </label>
                     </div>
                   </SettingsSection>
                 )}
