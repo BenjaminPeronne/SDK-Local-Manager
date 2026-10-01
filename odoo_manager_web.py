@@ -140,6 +140,7 @@ from odoo_manager_core.repositories import (
     repository_tree_modules,
     sparse_checkout_pattern,
 )
+from odoo_manager_core.ssh_hosts import ensure_pinned_host_keys
 from odoo_manager_core.system import (
     active_engine_client,
     docker_command,
@@ -586,18 +587,16 @@ def settings_snapshot():
     return payload
 
 
-BROWSER_ORIGINS = frozenset(
-    {
-        "http://127.0.0.1:3000",
-        "http://localhost:3000",
-        "app://sdk",
-    }
-)
+# L'interface de développement (next dev, port 3000) n'existe pas dans l'application livrée :
+# le backend empaqueté refuse cette origine, qu'un autre serveur local pourrait occuper.
+DEV_BROWSER_ORIGINS = frozenset({"http://127.0.0.1:3000", "http://localhost:3000"})
+BROWSER_ORIGINS = frozenset({"app://sdk"})
 LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 def allowed_browser_origins():
-    return BROWSER_ORIGINS | {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
+    origins = BROWSER_ORIGINS | {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
+    return origins if getattr(sys, "frozen", False) else origins | DEV_BROWSER_ORIGINS
 
 
 def request_hostname(host_header):
@@ -623,7 +622,20 @@ def untrusted_request_reason(headers):
     return ""
 
 
-def api_token_error(headers, token=None):
+# Le proxy de `next dev` ne sait pas ajouter d'en-tête sans mettre les téléversements en
+# mémoire : il passe le jeton dans l'adresse réécrite, côté serveur, jamais vue du navigateur.
+# Le backend livré dans l'application ignore ce paramètre.
+DEV_TOKEN_QUERY_PARAMETER = "sdk_token"
+
+
+def dev_query_token(path):
+    if getattr(sys, "frozen", False):
+        return ""
+    values = urllib.parse.parse_qs(urllib.parse.urlparse(path or "").query).get(DEV_TOKEN_QUERY_PARAMETER)
+    return values[0] if values else ""
+
+
+def api_token_error(headers, token=None, query_token=""):
     """Refuse une requête sans le jeton de l'application.
 
     Host et Origin arrêtent les pages web, pas un autre processus du poste : un module Odoo
@@ -636,6 +648,7 @@ def api_token_error(headers, token=None):
     authorization = headers.get("Authorization") or ""
     if not provided and authorization[:7].lower() == "bearer ":
         provided = authorization[7:].strip()
+    provided = provided or query_token
     if hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
         return ""
     return "Jeton de l'API locale manquant ou invalide."
@@ -2196,7 +2209,11 @@ def module_removal_info(project, path, layout=None):
 def installed_modules(project, db_name, check_container=True):
     if not db_name or (check_container and container_status(f"postgresql-{project}") != "running"):
         return {}
-    query = "select name,state,coalesce(latest_version,'') from ir_module_module order by name;"
+    # Le titre (shortdesc) sert à la recherche : texte jusqu'à Odoo 15, JSON traduit ensuite.
+    query = (
+        "select name,state,coalesce(latest_version,''),"
+        "replace(coalesce(shortdesc::text,''),E'\\n',' ') from ir_module_module order by name;"
+    )
     code, output = run_capture(
         docker_command(
             SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-d", db_name, "-Atc", query
@@ -2207,10 +2224,28 @@ def installed_modules(project, db_name, check_container=True):
     if code != 0:
         return states
     for line in output.splitlines():
-        parts = line.split("|")
+        parts = line.split("|", 3)
         if len(parts) >= 2:
-            states[parts[0]] = {"state": parts[1], "installed_version": parts[2] if len(parts) > 2 else ""}
+            states[parts[0]] = {
+                "state": parts[1],
+                "installed_version": parts[2] if len(parts) > 2 else "",
+                "title": module_title_from_shortdesc(parts[3]) if len(parts) > 3 else "",
+            }
     return states
+
+
+def module_title_from_shortdesc(raw):
+    """Titre lisible d'un module : « Ventes » plutôt que sale_management, en français si traduit."""
+    raw = raw.strip()
+    if not raw.startswith("{"):
+        return raw
+    try:
+        translations = json.loads(raw)
+    except ValueError:
+        return raw
+    if not isinstance(translations, dict):
+        return raw
+    return str(translations.get("fr_FR") or translations.get("en_US") or next(iter(translations.values()), ""))
 
 
 def modules_for(project, db_name=None):
@@ -2237,6 +2272,7 @@ def modules_for(project, db_name=None):
         state = states.get(module["name"], {})
         module["state"] = state.get("state", "disponible")
         module["installed_version"] = state.get("installed_version", "")
+        module["title"] = state.get("title") or module["name"]
         module.update(module_removal_info(project, Path(module["path"]), layout))
         modules.append(module)
     return modules
@@ -3365,8 +3401,11 @@ def send_form_no_redirect(connection, target, host_header, body):
             # l'extraire, seul l'en-tête HTML de la page remontait.
             odoo_error = extract_odoo_page_error(content)
             if odoo_error:
-                raise RuntimeError(f"Odoo a refusé la demande (HTTP {response.status}) : {odoo_error}")
-            raise RuntimeError(f"Odoo a retourne HTTP {response.status}: {content[:600]}")
+                raise RuntimeError(f"Odoo a refusé la demande (code {response.status}) : {odoo_error}")
+            # Le HTML brut de la page n'aide personne : seul son texte, abrégé, est gardé.
+            page_text = " ".join(re.sub(r"<[^>]+>", " ", content).split())[:300]
+            detail = f" : {page_text}" if page_text else "."
+            raise RuntimeError(f"Odoo a refusé la demande (code {response.status}){detail}")
         return response.status, response.read(131072).decode("utf-8", errors="replace")
     except (OSError, http.client.HTTPException) as exc:
         raise RuntimeError(f"Odoo ne répond pas sur {host_header} : {exc}") from exc
@@ -3513,7 +3552,7 @@ def restore_database_job(job, project, backup_path, filename, db_name, master_pw
             odoo_error = extract_odoo_page_error(content)
             if odoo_error:
                 raise OdooError(odoo_error)
-            raise RuntimeError(f"Odoo a refusé la restauration avec le statut HTTP {status}.")
+            raise RuntimeError(f"Odoo a refusé la restauration (code {status}). Le détail est dans les logs d'Odoo.")
 
         for waited in range(0, 122, 2):
             if db_name in set(list_databases_for(project)):
@@ -5797,7 +5836,7 @@ class Handler(BaseHTTPRequestHandler):
     def reject_untrusted_request(self, require_token=True):
         status, reason = 403, untrusted_request_reason(self.headers)
         if not reason and require_token:
-            status, reason = 401, api_token_error(self.headers)
+            status, reason = 401, api_token_error(self.headers, query_token=dev_query_token(self.path))
         if not reason:
             return False
         body = json.dumps({"error": reason}, ensure_ascii=False).encode("utf-8")
@@ -6747,6 +6786,8 @@ def main():
     print(f"Interface Odoo locale: {url}")
     print(f"Workspace: {WORKSPACE}")
     load_job_history(SETTINGS_STORE.path.with_name("jobs.json"))
+    # Avant tout clone : GitLab devient un hôte connu, un faux serveur est refusé.
+    ensure_pinned_host_keys()
     ensure_event_watch_thread_started()
     try:
         server.serve_forever()

@@ -147,6 +147,20 @@ class LocalApiRequestGuardTests(unittest.TestCase):
             self.assertEqual(200, self.get_status("/api/version", {"X-SDK-Manager-Token": "s3cret-token"}))
             self.assertEqual(200, self.get_status("/api/version", {"Authorization": "Bearer s3cret-token"}))
 
+    def test_next_dev_proxy_token_in_the_address_is_accepted_only_outside_the_packaged_app(self):
+        with patch.object(web, "API_TOKEN", "s3cret-token"):
+            self.assertEqual(200, self.get_status("/api/version?sdk_token=s3cret-token"))
+            self.assertEqual(401, self.get_status("/api/version?sdk_token=wrong"))
+            with patch.object(web.sys, "frozen", True, create=True):
+                self.assertEqual(401, self.get_status("/api/version?sdk_token=s3cret-token"))
+
+    def test_packaged_backend_refuses_the_development_interface_origin(self):
+        headers = {"Host": "127.0.0.1:18765", "Origin": "http://localhost:3000"}
+        self.assertEqual("", web.untrusted_request_reason(headers))
+        with patch.object(web.sys, "frozen", True, create=True):
+            self.assertTrue(web.untrusted_request_reason(headers))
+            self.assertEqual("", web.untrusted_request_reason({**headers, "Origin": "app://sdk"}))
+
     def test_cors_preflight_needs_no_token_but_a_foreign_origin_is_still_refused(self):
         with patch.object(web, "API_TOKEN", "s3cret-token"):
             self.assertEqual(204, self.get_status("/api/jobs", {"Origin": "app://sdk"}, method="OPTIONS"))
@@ -405,6 +419,24 @@ class DatabaseNameValidationTests(unittest.TestCase):
         database_option = command.index("-d")
         self.assertEqual(command[database_option + 1], "sodial_recette#1")
 
+    @patch("odoo_manager_web.run_capture")
+    @patch("odoo_manager_web.container_status", return_value="running")
+    def test_module_titles_come_from_the_database_in_french_when_translated(self, _status, run_capture):
+        run_capture.return_value = (
+            0,
+            'sale|installed|18.0.1.2|{"en_US": "Sales", "fr_FR": "Ventes"}\n'
+            'crm|uninstalled||{"en_US": "CRM"}\n'
+            "account|installed|15.0.1.2|Invoicing | Billing\n"
+            "base|installed|15.0.1.3\n",
+        )
+
+        states = web.installed_modules("demo", "demo")
+
+        self.assertEqual("Ventes", states["sale"]["title"])
+        self.assertEqual("CRM", states["crm"]["title"])
+        self.assertEqual("Invoicing | Billing", states["account"]["title"])
+        self.assertEqual("", states["base"]["title"])
+
     def test_extracts_database_manager_error_from_html(self):
         content = """
             <section>
@@ -503,7 +535,7 @@ class DatabaseRestoreTests(unittest.TestCase):
         response.read.return_value = b"Internal Server Error"
         connection.getresponse.return_value = response
         connection_type.return_value = connection
-        with self.assertRaisesRegex(RuntimeError, "HTTP 500: Internal Server Error"):
+        with self.assertRaisesRegex(RuntimeError, r"refusé la demande \(code 500\) : Internal Server Error"):
             web.post_form_no_redirect("http://dev.demo.localhost/web/database/drop", {})
 
         # Odoo 20 : refus en HTTP 422, le message dans l'alerte d'une longue page HTML.
@@ -514,7 +546,7 @@ class DatabaseRestoreTests(unittest.TestCase):
         ).encode()
         connection.getresponse.return_value = response
         with self.assertRaisesRegex(
-            RuntimeError, r"^Odoo a refusé la demande \(HTTP 422\) : Could not create database\. Access Denied$"
+            RuntimeError, r"^Odoo a refusé la demande \(code 422\) : Could not create database\. Access Denied$"
         ):
             web.post_form_no_redirect("http://dev.demo.localhost/web/database/create", {})
 

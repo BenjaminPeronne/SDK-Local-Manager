@@ -16,8 +16,11 @@ export function useModuleFilters(modules: ModuleInfo[], projectName: string | un
   const deferredSearch = useDeferredValue(search);
   const filtered = useMemo(() => {
     const query = deferredSearch.trim().toLowerCase();
+    // Le titre affiché (« Sales », « Ventes ») compte autant que le nom technique (sale_management).
+    const matchesQuery = (module: ModuleInfo) =>
+      !query || module.name.toLowerCase().includes(query) || Boolean(module.title?.toLowerCase().includes(query));
     return modules
-      .filter((module) => !query || module.name.toLowerCase().includes(query))
+      .filter(matchesQuery)
       .filter(
         (module) =>
           status === "all" || module.state === status || (status === "uninstalled" && module.state === "disponible"),

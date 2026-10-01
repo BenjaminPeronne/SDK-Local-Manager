@@ -135,7 +135,7 @@ export function ModulesTab({
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
           className="pl-9"
-          placeholder="Rechercher par nom de module"
+          placeholder="Rechercher un module (nom ou titre)"
           value={moduleFilters.search}
           onChange={(event) => moduleFilters.setSearch(event.target.value)}
         />

@@ -72,7 +72,8 @@ export function WslSetupDialog({
       if (state.step === "install-wsl" || state.step === "outdated-wsl") {
         const result = await bridge.wslInstallWsl!();
         setRebootRequired(Boolean(result?.rebootRequired));
-        if (!result?.ok && !result?.rebootRequired) setError(result?.message || "L'activation de WSL a échoué.");
+        if (!result?.ok && !result?.rebootRequired)
+          setError(result?.message || "Windows n'a pas pu activer sa fonction Linux.");
       } else {
         const updated = await bridge.wslPrepare!();
         setStatus(updated);
@@ -97,7 +98,7 @@ export function WslSetupDialog({
         <div className="divide-y overflow-hidden rounded-md border">
           <SetupRow
             ready={Boolean(status?.wslInstalled)}
-            title="WSL"
+            title="Linux dans Windows"
             detail={
               status?.wslInstalled ? `Version ${status.wslVersion}` : "Sera activé par Windows, avec une autorisation."
             }
@@ -116,7 +117,8 @@ export function WslSetupDialog({
         {rebootRequired && (
           <p className="flex items-start gap-2 text-sm text-amber-600 dark:text-amber-400">
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-            Windows doit redémarrer pour terminer l’activation de WSL. La préparation reprendra au prochain lancement.
+            Windows doit redémarrer pour terminer l’activation de sa fonction Linux. La préparation reprendra au
+            prochain lancement.
           </p>
         )}
         {error && (

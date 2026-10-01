@@ -12,6 +12,18 @@ BACKEND_PID_FILE="$SCRIPT_DIR/.odoo_manager_web.pid"
 NEXT_PID_FILE="$SCRIPT_DIR/.odoo_manager_next.pid"
 TMUX_SESSION="${ODOO_NEXT_TMUX_SESSION:-odoo-manager-next}"
 BACKEND_STARTED=0
+TOKEN_FILE="$SCRIPT_DIR/.odoo_manager_dev_token"
+
+# Sans jeton, l'API répondrait à tout programme du poste, y compris un module Odoo dans un
+# conteneur. Le jeton est conservé d'un lancement à l'autre : un backend resté démarré
+# reste joignable.
+if [ -z "${ODOO_MANAGER_API_TOKEN:-}" ]; then
+  if [ ! -s "$TOKEN_FILE" ]; then
+    (umask 077 && python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > "$TOKEN_FILE")
+  fi
+  ODOO_MANAGER_API_TOKEN="$(cat "$TOKEN_FILE")"
+fi
+export ODOO_MANAGER_API_TOKEN
 
 open_url() {
   if command -v open >/dev/null 2>&1; then
@@ -24,7 +36,7 @@ open_url() {
 }
 
 backend_ready() {
-  curl -fsS "$BACKEND_URL/api/overview" >/dev/null 2>&1
+  curl -fsS -H "X-SDK-Manager-Token: $ODOO_MANAGER_API_TOKEN" "$BACKEND_URL/api/overview" >/dev/null 2>&1
 }
 
 start_backend() {

@@ -50,18 +50,20 @@ export function wslSetupState(status: WslStatus | null, applicationVersion: stri
   if (!status.wslInstalled) {
     return {
       step: "install-wsl",
-      title: "Activer WSL",
-      detail: "Windows doit installer WSL. Une autorisation est demandée, puis un redémarrage peut être nécessaire.",
-      actionLabel: "Activer WSL",
+      // WSL est nommé une fois, entre parenthèses : c'est le nom que montre la demande d'autorisation de Windows.
+      title: "Activer Linux dans Windows",
+      detail:
+        "Windows doit activer sa fonction Linux (WSL). Une autorisation est demandée, puis un redémarrage peut être nécessaire.",
+      actionLabel: "Activer",
       needsElevation: true,
     };
   }
   if (!status.supportsFileImport) {
     return {
       step: "outdated-wsl",
-      title: "Mettre à jour WSL",
-      detail: `WSL ${status.wslVersion} est trop ancien pour installer l'environnement. Mets-le à jour, puis reviens ici.`,
-      actionLabel: "Mettre à jour WSL",
+      title: "Mettre à jour Linux dans Windows",
+      detail: `La fonction Linux de Windows (WSL ${status.wslVersion}) est trop ancienne pour installer l'environnement. Mets-la à jour, puis reviens ici.`,
+      actionLabel: "Mettre à jour",
       needsElevation: true,
     };
   }
