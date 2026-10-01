@@ -54,8 +54,7 @@ RUN useradd --create-home --shell /bin/bash --uid 1000 sdk \
 COPY wsl.conf /etc/wsl.conf
 COPY daemon.json /etc/docker/daemon.json
 COPY provision.sh /opt/sdk-manager/provision.sh
-# Clés d'hôte vérifiées, si le dépôt en fournit : sinon le premier clone les accepte
-# une fois (StrictHostKeyChecking=accept-new), comme le fait déjà le gestionnaire.
+# Clés d'hôte vérifiées du GitLab Sudokeys : un faux serveur est refusé dès le premier clone.
 COPY known_hosts /etc/ssh/ssh_known_hosts
 
 RUN chmod 0755 /opt/sdk-manager/provision.sh \

@@ -1,14 +1,8 @@
 # Clés d'hôte SSH vérifiées, distribuées avec l'environnement.
 #
-# Ce fichier est volontairement vide : personne n'a encore vérifié l'empreinte de
-# gitlab.sudokeys.com hors bande. Tant qu'il l'est, le premier clone accepte la clé
-# présentée puis la mémorise (StrictHostKeyChecking=accept-new), exactement comme
-# aujourd'hui sous Windows et macOS.
-#
-# Pour la figer, relever l'empreinte depuis GitLab (Admin > paramètres, ou une
-# machine de confiance déjà appairée), comparer les deux, puis ajouter la ligne :
-#
-#   [gitlab.sudokeys.com]:10022 ssh-ed25519 AAAA...
-#
-# La CI reconstruit alors l'image avec cette clé, et une attaque de l'homme du
-# milieu au premier clone devient impossible.
+# Mêmes clés que odoo_manager_core/ssh_hosts.py (un test vérifie qu'elles restent
+# identiques). Relevées le 2026-10-01 et comparées à celles d'un poste déjà appairé.
+# Un faux serveur GitLab présentant une autre clé est refusé dès le premier clone.
+[gitlab.sudokeys.com]:10022 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFygfAICQxQ0QH1ARKo7hfWXtI5hRgWh/FpG2tc5Aw+m
+[gitlab.sudokeys.com]:10022 ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBLsAdl2DwVv+d6cJIXfAjgLm4bxbd9Di0nhJ1ZM8GqAwxoxnx3zMcVWTYsoLvOQrYh6anQ2dojxdkXz67NO0Pto=
+[gitlab.sudokeys.com]:10022 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDYsC+A5dQL71YHu3oavBPuLeNyQoZ3duu6iSZfRdk3w2HOxLaD6LDhP1mhk130YRw1DV6xwzMmmEVgbiRZBHvbVKAjCu8+n5Tk0/SGEfFTzUQCVo+69NcmG15Ql/6dbLTF+2B+PxJ2Y02OddmxwafXr3PACOmq8sdKTbnObmqBE4L7Q84OihAX/m2C0i5BDIr6SA2jjvgaS+rlkBoZ02gNz9ZG03Y1aPmKZnaUL5a8MW7LbkRkoLGOfGvT4xyu+bHadI2yI5MRBkoWdnGzEQwoBLPH9qgrcngpsv6P8v1qfF2SdIEMJdKF2T9DgO+OuvunNGpifsolqABxc6UArs99

@@ -12,7 +12,7 @@ L'utilisateur n'ouvre jamais de terminal : l'application importe l'image, la dé
 | `wsl.conf` | `systemd=true`, utilisateur par défaut, `appendWindowsPath=false`, disques Windows montés sous `/mnt` |
 | `daemon.json` | Configuration de Docker, avec rotation des journaux de conteneurs |
 | `provision.sh` | Préparation et mises à niveau, rejouable, exécuté comme `root` quand la version change |
-| `known_hosts` | Clés d'hôte SSH vérifiées, vide par défaut (voir plus bas) |
+| `known_hosts` | Clés d'hôte SSH vérifiées du GitLab Sudokeys (voir plus bas) |
 
 L'image ne contient pas le backend : l'application y copie son propre exécutable Linux dans `/opt/sdk-manager/` à chaque mise à jour.
 
@@ -38,9 +38,9 @@ wsl --unregister SDK-Manager
 
 ## Clés d'hôte GitLab
 
-`known_hosts` est vide tant que l'empreinte de `gitlab.sudokeys.com:10022` n'a pas été vérifiée hors bande. Le premier clone accepte alors la clé présentée et la mémorise, comme aujourd'hui sous Windows et macOS.
+`known_hosts` contient les clés de `gitlab.sudokeys.com:10022`, les mêmes que `odoo_manager_core/ssh_hosts.py` (un test vérifie qu'elles restent identiques). Le backend les inscrit aussi dans `~/.ssh/known_hosts` sur macOS, Linux et Windows. Un serveur qui présenterait une autre clé est refusé dès le premier clone.
 
-Pour la figer : relever l'empreinte depuis GitLab ou une machine déjà appairée, la comparer, l'ajouter au fichier, puis reconstruire l'image. Une attaque de l'homme du milieu au premier clone devient impossible.
+Si GitLab change de clés : relever les nouvelles empreintes, les comparer à celles affichées par GitLab, mettre à jour les deux fichiers, puis reconstruire l'image.
 
 ## Migrer un projet déjà présent sur `C:\`
 
