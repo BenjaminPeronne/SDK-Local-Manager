@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChristmasHat } from "@/components/seasonal/christmas";
+import { WitchHat } from "@/components/seasonal/halloween";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 type AppSidebarProps = {
@@ -100,6 +101,7 @@ export function AppSidebar({
                   )}
                 />
                 {season === "christmas" && <ChristmasHat className="-right-2.5 -top-3 w-7" />}
+                {season === "halloween" && <WitchHat className="-right-2.5 -top-3 w-7" />}
               </span>
               <div className="min-w-0">
                 <p className="sdk-eyebrow">Sudokeys</p>

@@ -7,7 +7,7 @@ export function ChristmasHat({ className }: { className?: string }) {
     <svg
       viewBox="0 0 32 26"
       aria-hidden="true"
-      className={cn("sdk-christmas-hat pointer-events-none absolute rotate-[18deg]", className)}
+      className={cn("sdk-season-hat pointer-events-none absolute rotate-[18deg]", className)}
     >
       <path d="M5 20 Q9 5 21 3 Q27 2.5 28.5 9 Q24.5 7 21.5 9.5 Q25 14 26 20 Z" fill="#d72f2f" />
       <path d="M21.5 9.5 Q24.5 7 28.5 9 Q27 2.5 21 3 Q24 5 21.5 9.5 Z" fill="#a91f22" />

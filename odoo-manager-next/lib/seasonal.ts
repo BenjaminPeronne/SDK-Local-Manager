@@ -1,20 +1,24 @@
 /** Fête qui décore l'interface. Les suivantes s'ajoutent ici et dans `seasonAt`. */
-export type Season = "christmas" | "new-year";
+export type Season = "halloween" | "christmas" | "new-year";
 
-const SEASONS: readonly string[] = ["christmas", "new-year"] satisfies readonly Season[];
+const SEASONS: readonly string[] = ["halloween", "christmas", "new-year"] satisfies readonly Season[];
 
-/** Fête en cours à cette date, en heure locale : Noël du 1er au 30 décembre, Nouvel An du 31 au 2 janvier. */
+/**
+ * Fête en cours à cette date, en heure locale : Halloween du 25 au 31 octobre, Noël du 1er au
+ * 30 décembre, Nouvel An du 31 décembre au 2 janvier.
+ */
 export function seasonAt(date: Date): Season | null {
   const month = date.getMonth();
   const day = date.getDate();
+  if (month === 9 && day >= 25) return "halloween";
   if (month === 11) return day <= 30 ? "christmas" : "new-year";
   if (month === 0 && day <= 2) return "new-year";
   return null;
 }
 
 /**
- * Saison imposée par l'adresse, pour tester ou faire des captures hors période : `?season=christmas`
- * ou `?season=new-year` l'affiche, toute autre valeur (`?season=none`) l'éteint. `undefined` : rien
+ * Saison imposée par l'adresse, pour tester ou faire des captures hors période : `?season=halloween`,
+ * `?season=christmas` ou `?season=new-year` l'affiche, toute autre valeur (`?season=none`) l'éteint. `undefined` : rien
  * d'imposé. `scripts/preview_seasons.py` ouvre chaque cas.
  */
 export function seasonOverride(search: string): Season | null | undefined {

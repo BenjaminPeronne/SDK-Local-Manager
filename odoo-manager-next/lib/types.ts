@@ -159,7 +159,7 @@ export type ManagerSettings = {
   sticky_header: boolean;
   interface_icon: InterfaceIcon;
   interface_layout: "classic" | "refined";
-  /** Petites décorations pendant les fêtes (Noël, Nouvel An). */
+  /** Petites décorations pendant les fêtes (Halloween, Noël, Nouvel An). */
   seasonal_decorations: boolean;
   onboarding_completed: boolean;
   /** Ancien dossier de projets Windows choisi à la main ; vide : détection automatique. */

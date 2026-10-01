@@ -2,6 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { confettiPreviewRequested, localDayKey, newYearGreeting, seasonAt, seasonOverride } from "./seasonal.ts";
 
+test("halloween decorations run from the twenty-fifth to the thirty-first of October", () => {
+  assert.equal(seasonAt(new Date(2026, 9, 25, 0, 0)), "halloween");
+  assert.equal(seasonAt(new Date(2026, 9, 31, 23, 59)), "halloween");
+  assert.equal(seasonAt(new Date(2026, 9, 24, 23, 59)), null);
+  assert.equal(seasonAt(new Date(2026, 10, 1, 0, 0)), null);
+});
+
 test("christmas decorations run from the first to the thirtieth of December", () => {
   assert.equal(seasonAt(new Date(2026, 11, 1, 0, 0)), "christmas");
   assert.equal(seasonAt(new Date(2026, 11, 25, 12, 0)), "christmas");
@@ -23,6 +30,7 @@ test("no decoration outside the season", () => {
 test("the address can force or turn off a season", () => {
   assert.equal(seasonOverride(""), undefined);
   assert.equal(seasonOverride("?project=demo"), undefined);
+  assert.equal(seasonOverride("?season=halloween"), "halloween");
   assert.equal(seasonOverride("?season=christmas"), "christmas");
   assert.equal(seasonOverride("?season=new-year"), "new-year");
   assert.equal(seasonOverride("?season=none"), null);

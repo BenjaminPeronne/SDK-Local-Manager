@@ -4,7 +4,7 @@
 L'interface doit déjà tourner (``npm --prefix odoo-manager-next run dev``). Le script ouvre un
 onglet par cas, ou seulement celui demandé :
 
-    python3 scripts/preview_seasons.py               # les 4 cas
+    python3 scripts/preview_seasons.py               # tous les cas
     python3 scripts/preview_seasons.py confettis     # un seul cas
     python3 scripts/preview_seasons.py --url http://localhost:3001
 """
@@ -24,7 +24,12 @@ DEFAULT_URL = "http://localhost:3000"
 CASES = {
     "hors-saison": (
         "?season=none",
-        "Interface habituelle : ni bonnet, ni guirlande, ni flocons.",
+        "Interface habituelle : ni chapeau, ni guirlande, ni animation.",
+    ),
+    "halloween": (
+        "?season=halloween",
+        "Chapeau de sorcière sur les logos, guirlande orange et violette, chauves-souris et « Joyeux Halloween »"
+        " sur l'accueil.",
     ),
     "noel": (
         "?season=christmas",

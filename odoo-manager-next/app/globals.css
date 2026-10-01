@@ -421,7 +421,13 @@ textarea {
 }
 
 /* Décorations de saison (data-season sur .sdk-shell) : guirlande sous la marque, aux couleurs de la fête,
-   et flocons sur l'accueil à Noël. Les confettis du Nouvel An sont dessinés à part, dans un canevas. */
+   chauves-souris sur l'accueil à Halloween, flocons à Noël. Les confettis du Nouvel An sont dessinés à
+   part, dans un canevas. */
+.sdk-shell[data-season="halloween"] {
+  --garland-1: #f4791f;
+  --garland-2: #7e4bb0;
+  --garland-3: #8bc34a;
+}
 .sdk-shell[data-season="christmas"] {
   --garland-1: #e53935;
   --garland-2: #2e9d4f;
@@ -457,7 +463,7 @@ textarea {
   }
 }
 
-.sdk-christmas-hat {
+.sdk-season-hat {
   filter: drop-shadow(0 1px 1px hsl(0 0% 0% / 0.2));
 }
 
@@ -483,11 +489,51 @@ textarea {
   }
 }
 
+.sdk-bats {
+  container-type: size;
+}
+.sdk-bat {
+  position: absolute;
+  left: calc(-1 * var(--bat-size));
+  width: var(--bat-size);
+  color: hsl(var(--foreground) / 0.45);
+  animation: sdk-bat-fly var(--bat-duration) linear var(--bat-delay) infinite var(--bat-direction);
+}
+.sdk-bat-wings {
+  display: block;
+  width: 100%;
+  transform-origin: center 40%;
+  animation: sdk-bat-flap 0.28s ease-in-out infinite alternate;
+}
+@keyframes sdk-bat-fly {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  25% {
+    transform: translate3d(25cqw, -14px, 0);
+  }
+  50% {
+    transform: translate3d(50cqw, 6px, 0);
+  }
+  75% {
+    transform: translate3d(75cqw, -10px, 0);
+  }
+  100% {
+    transform: translate3d(calc(100cqw + 2 * var(--bat-size)), 0, 0);
+  }
+}
+@keyframes sdk-bat-flap {
+  to {
+    transform: scaleY(0.45);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sdk-shell[data-season] .sdk-brand::after {
     animation: none;
   }
-  .sdk-snowfall {
+  .sdk-snowfall,
+  .sdk-bats {
     display: none;
   }
 }
