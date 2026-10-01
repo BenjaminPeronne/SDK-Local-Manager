@@ -112,6 +112,46 @@ body,
   background: radial-gradient(ellipse at 0% 0%, hsl(var(--primary) / 0.12), transparent 75%), hsl(var(--card));
 }
 
+/* Interface affinée : la barre latérale se fond dans le fond de l'application, et la zone de
+   travail devient un panneau arrondi qui défile seul (grand écran). */
+.sdk-shell[data-layout="refined"] {
+  background: hsl(var(--background));
+}
+.sdk-shell[data-layout="refined"] aside,
+.sdk-shell[data-layout="refined"] .sdk-brand {
+  background: transparent;
+}
+@media (min-width: 1024px) {
+  .sdk-shell[data-layout="refined"] aside {
+    border-right-color: transparent;
+  }
+  .sdk-shell[data-layout="refined"] .sdk-panel {
+    background: hsl(var(--card));
+    box-shadow:
+      0 1px 2px hsl(0 0% 0% / 0.04),
+      0 4px 16px hsl(0 0% 0% / 0.05);
+  }
+}
+
+/* Onglets de l'en-tête affiné : soulignés, sans cadre, alignés sur la bordure de l'en-tête. */
+.app-tabs-list.app-tabs-underline {
+  min-height: 0;
+  gap: 0.25rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+.app-tabs-underline [role="tab"] {
+  min-height: 2.75rem;
+  border-radius: 0;
+  background: transparent !important;
+  padding-inline: 0.75rem;
+}
+.app-tabs-underline [role="tab"]:hover {
+  color: hsl(var(--foreground));
+}
+
 .font-mono {
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 }

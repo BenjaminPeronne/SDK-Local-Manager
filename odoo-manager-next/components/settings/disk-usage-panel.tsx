@@ -305,7 +305,7 @@ export function DiskUsagePanel({
 
           <Group
             icon={<Box className="h-4 w-4 text-muted-foreground" />}
-            title="Téléchargements inutilisés"
+            title="Images Docker inutilisées"
             description="Éléments téléchargés dont plus aucun projet n’a besoin. Ceux de tes projets, même arrêtés, sont toujours gardés."
             total={imagesTotal + report.docker.build_cache_bytes}
             actions={
@@ -357,7 +357,7 @@ export function DiskUsagePanel({
           <Group
             icon={<HardDrive className="h-4 w-4 text-muted-foreground" />}
             title="Projets"
-            description="La place prise par chaque projet : ses bases de données, ses fichiers joints et son code."
+            description="Taille de chaque projet : bases PostgreSQL, filestores et code."
             total={projectsTotal}
           >
             <ul className="divide-y rounded-md border">
@@ -365,7 +365,7 @@ export function DiskUsagePanel({
                 <Row
                   key={row.name}
                   title={row.name}
-                  detail={`Bases ${formatBytes(row.databases_bytes)} · fichiers joints ${formatBytes(row.filestore_bytes)} · code ${formatBytes(row.code_bytes)}`}
+                  detail={`Bases ${formatBytes(row.databases_bytes)} · filestores ${formatBytes(row.filestore_bytes)} · code ${formatBytes(row.code_bytes)}`}
                   size={row.bytes}
                 />
               ))}

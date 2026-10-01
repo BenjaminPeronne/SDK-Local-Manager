@@ -201,7 +201,7 @@ export function CreateProjectDialog({
         <DialogHeader>
           <DialogTitle>Créer un projet Odoo local</DialogTitle>
           <DialogDescription>
-            Le gestionnaire prépare Odoo Enterprise, Docker et les liens d’addons sans ouvrir de terminal.
+            Le gestionnaire prépare Odoo Enterprise, Docker et les modules sans ouvrir de terminal.
           </DialogDescription>
         </DialogHeader>
 

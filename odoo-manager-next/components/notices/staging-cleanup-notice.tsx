@@ -15,7 +15,7 @@ export function StagingCleanupNotice({ loading, requestStagingCleanup, count }: 
     <Notice
       tone="neutral"
       icon={Trash2}
-      title="Créations de projet interrompues"
+      title="Créations de projet inachevées"
       actions={
         <Button
           className="w-full sm:w-auto"
@@ -29,8 +29,8 @@ export function StagingCleanupNotice({ loading, requestStagingCleanup, count }: 
         </Button>
       }
     >
-      {count} dossier(s) de préparation occupent de l’espace disque sans servir à aucun projet. Les supprimer ne touche
-      à aucun projet ni à aucune base.
+      {count} dossier(s) laissés par des créations de projet interrompues prennent de la place pour rien. Tu peux les
+      supprimer sans risque pour tes projets et tes bases.
     </Notice>
   );
 }

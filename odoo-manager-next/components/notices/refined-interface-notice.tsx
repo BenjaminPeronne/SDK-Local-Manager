@@ -17,7 +17,7 @@ export function RefinedInterfaceNotice({
     <Notice
       tone="accent"
       icon={Sparkles}
-      title="Essaie la nouvelle interface (bêta)"
+      title="Essaie la nouvelle interface"
       onDismiss={() => void dismissRefinedInterfaceProposal()}
       dismissLabel="Ne plus proposer"
       actions={
@@ -27,7 +27,7 @@ export function RefinedInterfaceNotice({
         </Button>
       }
     >
-      Présentation affinée et en-tête fixe : le nom du projet et ses actions restent visibles pendant le défilement.
+      Les onglets et les actions du projet sont réunis dans l’en-tête, et la zone de travail devient un panneau arrondi.
       Retour à l’interface classique possible à tout moment dans Paramètres, section Apparence.
     </Notice>
   );

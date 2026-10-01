@@ -25,9 +25,7 @@ export function AddonLinksNotice({
       tone="warning"
       icon={AlertTriangle}
       title={
-        addonLinks.interrupted
-          ? "Conversion des liens d’addons interrompue"
-          : "Liens d’addons créés par une ancienne version"
+        addonLinks.interrupted ? "Réparation des modules interrompue" : "Ce projet est ralenti par une ancienne version"
       }
       actions={
         <>
@@ -38,7 +36,7 @@ export function AddonLinksNotice({
             onClick={convertWslAddonLinks}
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-            {addonLinks.interrupted ? "Reprendre la conversion" : "Convertir les liens"}
+            {addonLinks.interrupted ? "Reprendre la réparation" : "Réparer"}
           </Button>
           <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => void refreshAddonLinks()}>
             Vérifier à nouveau
@@ -47,15 +45,15 @@ export function AddonLinksNotice({
       }
     >
       {addonLinks.interrupted
-        ? "Relance la conversion pour la terminer : certains modules peuvent être absents tant qu’elle n’est pas achevée."
-        : `${addonLinks.wsl_links} lien(s) de ce projet ont été créés par WSL. Windows ne peut pas les lire, ce qui ralentit fortement la liste des modules. La conversion les remplace par des liens Windows identiques, lus par Windows et par Docker.`}
+        ? "Relance la réparation pour la terminer : en attendant, certains modules peuvent manquer."
+        : `${addonLinks.wsl_links} raccourci(s) vers des modules ont été créés par une ancienne version de l’application. Windows les lit mal, ce qui rend la liste des modules très lente. La réparation les recrée correctement, sans rien changer d’autre.`}
       {!addonLinks.native_symlinks && (
         <div className="mt-1 text-xs opacity-80">
           Active d’abord le mode développeur Windows : Paramètres &gt; Système &gt; Espace développeurs.
         </div>
       )}
       {addonLinks.native_symlinks && selectedProjectOnline && (
-        <div className="mt-1 text-xs opacity-80">Arrête le projet avant la conversion.</div>
+        <div className="mt-1 text-xs opacity-80">Arrête le projet avant la réparation.</div>
       )}
     </Notice>
   );

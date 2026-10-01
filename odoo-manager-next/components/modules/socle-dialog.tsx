@@ -134,7 +134,7 @@ export function SocleDialog({
           <DialogTitle>Installer un socle Odoo</DialogTitle>
           <DialogDescription>
             Sélectionne les applications à installer dans {selectedDb || "la base choisie"}. Les dépendances et les
-            modules qu’Odoo installe automatiquement sont calculés à partir des manifestes du projet.
+            modules qu’Odoo installe automatiquement sont calculés à partir des modules du projet.
           </DialogDescription>
         </DialogHeader>
         <div className="relative">
@@ -151,7 +151,7 @@ export function SocleDialog({
           {!socleCatalog && loadingSocleCatalog && (
             <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Lecture des manifestes du projet…
+              Lecture des modules du projet…
             </div>
           )}
           {socleCatalog && !socleCatalog.states_available && (

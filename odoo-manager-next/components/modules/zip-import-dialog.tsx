@@ -112,7 +112,7 @@ export function ZipImportDialog({
       } else if (result.ignored_symlinks) {
         pushToast(
           "info",
-          `${result.modules.length} module(s) détecté(s). ${result.ignored_symlinks} lien(s) de packaging ignoré(s).`,
+          `${result.modules.length} module(s) détecté(s). ${result.ignored_symlinks} raccourci(s) de l’archive ignoré(s).`,
         );
       }
     } catch (err) {
@@ -146,7 +146,7 @@ export function ZipImportDialog({
         <DialogHeader>
           <DialogTitle>Importer un ZIP de modules</DialogTitle>
           <DialogDescription>
-            Analyse l’archive, choisis les modules à copier dans addons-store, puis confirme l’import.
+            Analyse l’archive, choisis les modules à ajouter au projet, puis confirme l’import.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">

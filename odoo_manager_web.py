@@ -845,7 +845,7 @@ def traefik_status(docker=None):
 
     if running and external:
         state = "running"
-        message = f"Instance Traefik existante utilisée : conteneur {instance.name}{port_hint or ' (port HTTP 80)'}."
+        message = f"Traefik déjà installé sur ce poste ({instance.name}), utilisé tel quel{port_hint}."
     elif running:
         state = "running"
         message = f"Traefik est opérationnel{port_hint}."
@@ -865,7 +865,7 @@ def traefik_status(docker=None):
         message = "Traefik n'est pas installé dans le dossier attendu."
     elif not valid:
         state = "invalid"
-        message = "Le dossier Traefik existe mais aucun fichier compose n'a été trouvé."
+        message = "Le dossier de Traefik est incomplet : réinstalle Traefik."
     else:
         state = "stopped"
         message = "Traefik est installé mais pas démarré."
@@ -896,11 +896,11 @@ def mailpit_status(docker, traefik):
     state = container_status(MAILPIT_CONTAINER) if docker["running"] else "absent"
     running = state == "running"
     if running:
-        message = "Les e-mails de tes bases de test arrivent ici, sans partir chez personne."
+        message = "Les e-mails de tes bases neutralisées arrivent ici, sans partir chez personne."
     elif not traefik["running"]:
         message = "Démarre d'abord Traefik pour pouvoir installer Mailpit."
     elif state == "absent":
-        message = "Installe-le pour voir les e-mails envoyés par tes bases de test."
+        message = "Installe-le pour voir les e-mails envoyés par tes bases neutralisées."
     else:
         message = "Mailpit est arrêté : démarre-le pour voir les e-mails."
     return {

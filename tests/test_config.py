@@ -93,10 +93,15 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.interface_icon, "manager")
 
-    def test_interface_layout_defaults_to_classic_for_unknown_value(self):
-        self.assertEqual(ManagerSettings.from_dict({}, "/tmp/workspace").interface_layout, "classic")
+    def test_interface_layout_defaults_to_refined_for_missing_or_unknown_value(self):
+        self.assertEqual(ManagerSettings.from_dict({}, "/tmp/workspace").interface_layout, "refined")
         self.assertEqual(
             ManagerSettings.from_dict({"interface_layout": "unknown"}, "/tmp/workspace").interface_layout,
+            "refined",
+        )
+        # Un choix explicite de l'interface classique est conservé.
+        self.assertEqual(
+            ManagerSettings.from_dict({"interface_layout": "classic"}, "/tmp/workspace").interface_layout,
             "classic",
         )
         self.assertEqual(

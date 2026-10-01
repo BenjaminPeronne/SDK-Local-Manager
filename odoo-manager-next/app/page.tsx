@@ -6,6 +6,7 @@ import { useApiAvailability } from "@/hooks/use-api-availability";
 import { useAppUpdate } from "@/hooks/use-app-update";
 import { useDatabaseDependencies } from "@/hooks/use-database-dependencies";
 import { useHiddenBelowStickyHeader } from "@/hooks/use-hidden-below-sticky-header";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { useJobs } from "@/hooks/use-jobs";
 import { useLiveUpdates } from "@/hooks/use-live-updates";
 import { useManagerState } from "@/hooks/use-manager-state";
@@ -341,14 +342,20 @@ export default function Home() {
     [selectedSshKeyName, sshKeys],
   );
   const moduleFilters = useModuleFilters(modules, selectedProject?.name, selectedDb);
-  const refinedInterface = settings?.interface_layout === "refined";
+  // Interface affinée : onglets dans l'en-tête et panneau arrondi. C'est l'interface par défaut.
+  const refinedInterface = settings?.interface_layout !== "classic";
   const stickyHeader = settings?.sticky_header ?? false;
+  // Sur grand écran, le panneau arrondi défile seul : barre latérale et en-tête restent en place.
+  const wideScreen = useMediaQuery("(min-width: 1024px)");
+  const [projectPanel, setProjectPanel] = useState<HTMLElement | null>(null);
+  const panelScrollRoot = refinedInterface && wideScreen ? projectPanel : null;
   const { projectHeaderRef, projectHeaderHeight, projectTabsRef, projectTabsHeight, projectHeaderCompact } =
-    useStickyProjectHeader(stickyHeader, projectViewOpen, selectedProject?.name);
+    useStickyProjectHeader(stickyHeader, projectViewOpen, selectedProject?.name, panelScrollRoot);
   const [setModuleSelectionBanner, moduleSelectionBannerHidden] = useHiddenBelowStickyHeader(
     stickyHeader,
     projectHeaderHeight,
     projectTabsHeight,
+    panelScrollRoot,
   );
 
   const moduleByName = useMemo(() => new Map(modules.map((module) => [module.name, module])), [modules]);
@@ -1362,8 +1369,63 @@ export default function Home() {
     </div>
   );
 
+  const projectTabsList = (
+    <TabsList
+      className={cn(
+        "grid w-full overflow-hidden transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none lg:w-fit",
+        refinedInterface && "app-tabs-underline",
+      )}
+      style={{
+        gridTemplateColumns: ["bases", "modules", "logs", "actions"]
+          .map((tab) => (projectTabVisible[tab] ? "minmax(0,1fr)" : "minmax(0,0fr)"))
+          .join(" "),
+      }}
+    >
+      <TabsTrigger
+        value="bases"
+        disabled={!projectTabVisible.bases}
+        className={cn(
+          "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+          !projectTabVisible.bases && "pointer-events-none -translate-x-1 opacity-0",
+        )}
+      >
+        <Database className="mr-1.5 h-4 w-4" />
+        Bases
+      </TabsTrigger>
+      <TabsTrigger
+        value="modules"
+        disabled={!projectTabVisible.modules}
+        className={cn(
+          "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+          !projectTabVisible.modules && "pointer-events-none -translate-x-1 opacity-0",
+        )}
+      >
+        <Boxes className="mr-1.5 h-4 w-4" />
+        Modules
+      </TabsTrigger>
+      <TabsTrigger
+        value="logs"
+        disabled={!projectTabVisible.logs}
+        className={cn(
+          "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+          !projectTabVisible.logs && "pointer-events-none -translate-x-1 opacity-0",
+        )}
+      >
+        <Logs className="mr-1.5 h-4 w-4" />
+        Activité
+      </TabsTrigger>
+      <TabsTrigger value="actions">
+        <Settings className="mr-1.5 h-4 w-4" />
+        Réglages
+      </TabsTrigger>
+    </TabsList>
+  );
+
   return (
-    <main className="sdk-shell min-h-screen overflow-x-clip">
+    <main
+      className={cn("sdk-shell min-h-screen overflow-x-clip", refinedInterface && "lg:h-screen lg:overflow-hidden")}
+      data-layout={refinedInterface ? "refined" : "classic"}
+    >
       <div className="flex min-h-screen min-w-0 flex-col lg:flex-row">
         <AppSidebar
           availableUpdate={availableUpdate}
@@ -1388,293 +1450,249 @@ export default function Home() {
         />
 
         {/* overflow-x-clip borne le bandeau pleine largeur des onglets sans casser les éléments collés. */}
-        <section className="min-w-0 flex-1 overflow-x-clip">
-          {/* Sans projet ouvert, l'en-tête et les onglets laissent la place à l'accueil. */}
-          {!showWelcome && (
-            <ProjectHeader
-              createJob={createJob}
-              jobs={jobs}
-              loading={loading}
-              mailpit={systemStatus?.mailpit}
-              openingOdoo={openingOdoo}
-              pendingSelectedProjectArrival={pendingSelectedProjectArrival}
-              projectHeaderCompact={projectHeaderCompact}
-              projectHeaderRef={projectHeaderRef}
-              pushToast={pushToast}
-              refreshAllViews={refreshAllViews}
-              refreshOverview={refreshOverview}
-              refreshSystemStatus={refreshSystemStatus}
-              schedule={schedule}
-              selectedDb={selectedDb}
-              selectedProject={selectedProject}
-              selectedProjectOnline={selectedProjectOnline}
-              selectedProjectReady={selectedProjectReady}
-              setOpeningOdoo={setOpeningOdoo}
-              stickyHeader={stickyHeader}
-            />
+        <section
+          ref={setProjectPanel}
+          className={cn(
+            "min-w-0 flex-1 overflow-x-clip",
+            refinedInterface &&
+              "sdk-panel lg:my-2 lg:mr-2 lg:h-[calc(100vh-1rem)] lg:overflow-y-auto lg:rounded-2xl lg:border",
           )}
-
-          <div className={cn("mx-auto max-w-[1500px] px-4 py-4", showFloatingModuleActions && "pb-32 xl:pb-24")}>
-            {apiUnavailable && (
-              <ApiUnavailableNotice
-                desktopRuntime={desktopRuntime}
-                loadSettings={loadSettings}
-                openUrl={openUrl}
+        >
+          {/* Les onglets vivent dans l'en-tête avec l'interface affinée : Tabs englobe donc tout le panneau. */}
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => {
+              if (value === "logs") enableLogAutoFollow();
+              setActiveTab(value);
+            }}
+          >
+            {/* Sans projet ouvert, l'en-tête et les onglets laissent la place à l'accueil. */}
+            {!showWelcome && (
+              <ProjectHeader
+                createJob={createJob}
+                jobs={jobs}
+                loading={loading}
+                mailpit={systemStatus?.mailpit}
+                openingOdoo={openingOdoo}
+                pendingSelectedProjectArrival={pendingSelectedProjectArrival}
+                projectHeaderCompact={projectHeaderCompact}
+                projectHeaderRef={projectHeaderRef}
+                pushToast={pushToast}
+                refreshAllViews={refreshAllViews}
                 refreshOverview={refreshOverview}
                 refreshSystemStatus={refreshSystemStatus}
-                requestDockerStart={requestDockerStart}
-              />
-            )}
-            {degradedBackendReason && (
-              <DegradedBackendNotice degradedBackendReason={degradedBackendReason} openUrl={openUrl} />
-            )}
-            {systemStatus && !systemStatus.docker.running && (
-              <DockerNotice
-                loading={loading}
-                openSettingsDialog={openSettingsDialog}
-                openUrl={openUrl}
-                requestDockerStart={requestDockerStart}
-                docker={systemStatus.docker}
-              />
-            )}
-            {systemStatus?.traefik && !systemStatus.traefik.running && (
-              <TraefikNotice
-                loading={loading}
-                openSettingsDialog={openSettingsDialog}
-                requestLegacyTraefikStop={requestLegacyTraefikStop}
-                requestTraefikInstall={requestTraefikInstall}
-                traefik={systemStatus.traefik}
-                dockerRunning={systemStatus.docker.running}
-              />
-            )}
-            {migrationBannerVisible && (
-              <MigrationNotice
-                dismissMigrationProposal={dismissMigrationProposal}
-                loading={loading}
-                migration={migration}
-                migrationCandidates={migrationCandidates}
-                requestProjectMigration={requestProjectMigration}
-                setMigrationBannerClosed={setMigrationBannerClosed}
-              />
-            )}
-            {(systemStatus?.abandoned_staging?.count ?? 0) > 0 && (
-              <StagingCleanupNotice
-                loading={loading}
-                requestStagingCleanup={requestStagingCleanup}
-                count={systemStatus!.abandoned_staging!.count}
-              />
-            )}
-            {selectedProject && addonLinks?.supported && (addonLinks.wsl_links > 0 || addonLinks.interrupted) && (
-              <AddonLinksNotice
-                addonLinks={addonLinks}
-                convertWslAddonLinks={convertWslAddonLinks}
-                loading={loading}
-                refreshAddonLinks={refreshAddonLinks}
+                schedule={schedule}
+                selectedDb={selectedDb}
+                selectedProject={selectedProject}
                 selectedProjectOnline={selectedProjectOnline}
+                selectedProjectReady={selectedProjectReady}
+                setOpeningOdoo={setOpeningOdoo}
+                stickyHeader={stickyHeader}
+                tabs={refinedInterface ? projectTabsList : undefined}
               />
             )}
-            {error && (
-              <Notice tone="danger" icon={AlertTriangle} title="L’action a échoué">
-                {error}
-              </Notice>
-            )}
-            {settings?.interface_layout === "classic" && !settings.beta_interface_banner_dismissed && (
-              <RefinedInterfaceNotice
-                dismissRefinedInterfaceProposal={dismissRefinedInterfaceProposal}
-                switchToRefinedInterface={switchToRefinedInterface}
-              />
-            )}
-            {runningJobs.length > 0 && <RunningJobsBanner onFollowJob={followJob} runningJobs={runningJobs} />}
 
-            {showWelcome ? (
-              <WelcomeScreen
-                icon={selectedAppIcon}
-                hasProjects={Boolean(overview?.projects.length)}
-                docker={{
-                  ready: Boolean(systemStatus?.docker.running),
-                  message: systemStatus?.docker.message || "Vérification en cours…",
-                }}
-                traefik={
-                  systemStatus?.traefik
-                    ? { ready: systemStatus.traefik.running, message: systemStatus.traefik.message }
-                    : null
-                }
-                mailpit={systemStatus?.mailpit}
-                onStartMailpit={() => void createJob("start_mailpit")}
-                onOpenMailpit={() => void openUrl(systemStatus?.mailpit?.url)}
-                onCreateProject={openCreateProjectDialog}
-                onOpenSettings={openSettingsDialog}
-                onRefresh={refreshAllViews}
-              />
-            ) : (
-              <Tabs
-                value={activeTab}
-                onValueChange={(value) => {
-                  if (value === "logs") enableLogAutoFollow();
-                  setActiveTab(value);
-                }}
-              >
-                <div
-                  ref={projectTabsRef}
-                  className={cn(
-                    // Fond transparent au repos : le bandeau apparaît en fondu, au rythme du défilement, sur toute la largeur de la zone.
-                    // Réservé à Modules : les autres onglets ont leur propre défilement et n'ont pas été conçus pour un en-tête collant.
-                    stickyHeader &&
-                      activeTab === "modules" &&
-                      "-my-2 py-2 lg:sticky lg:z-20 lg:before:pointer-events-none lg:before:absolute lg:before:inset-y-0 lg:before:-inset-x-[100vw] lg:before:-z-10 lg:before:border-b lg:before:bg-background/90 lg:before:opacity-[var(--tabs-backdrop,0)] lg:before:backdrop-blur lg:before:transition-opacity lg:before:duration-300 lg:before:ease-out motion-reduce:lg:before:transition-none",
-                  )}
-                  style={stickyHeader && activeTab === "modules" ? { top: projectHeaderHeight } : undefined}
-                >
-                  <TabsList
-                    className="grid w-full overflow-hidden transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none lg:w-fit"
-                    style={{
-                      gridTemplateColumns: ["bases", "modules", "logs", "actions"]
-                        .map((tab) => (projectTabVisible[tab] ? "minmax(0,1fr)" : "minmax(0,0fr)"))
-                        .join(" "),
-                    }}
-                  >
-                    <TabsTrigger
-                      value="bases"
-                      disabled={!projectTabVisible.bases}
-                      className={cn(
-                        "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-                        !projectTabVisible.bases && "pointer-events-none -translate-x-1 opacity-0",
-                      )}
-                    >
-                      <Database className="mr-1.5 h-4 w-4" />
-                      Bases
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="modules"
-                      disabled={!projectTabVisible.modules}
-                      className={cn(
-                        "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-                        !projectTabVisible.modules && "pointer-events-none -translate-x-1 opacity-0",
-                      )}
-                    >
-                      <Boxes className="mr-1.5 h-4 w-4" />
-                      Modules
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="logs"
-                      disabled={!projectTabVisible.logs}
-                      className={cn(
-                        "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-                        !projectTabVisible.logs && "pointer-events-none -translate-x-1 opacity-0",
-                      )}
-                    >
-                      <Logs className="mr-1.5 h-4 w-4" />
-                      {refinedInterface ? "Activité" : "Logs"}
-                    </TabsTrigger>
-                    <TabsTrigger value="actions">
-                      <Settings className="mr-1.5 h-4 w-4" />
-                      {refinedInterface ? "Réglages" : "Actions"}
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
-
-                {selectedProjectOnline && (
-                  <DatabasesTab
-                    canUseDb={canUseDb}
-                    chooseDatabase={chooseDatabase}
-                    dependencyReport={databaseDependencies.report}
-                    executeDatabaseAction={executeDatabaseAction}
-                    loading={loading}
-                    odooDatabases={odooDatabases}
-                    openAllTranslationsReset={openAllTranslationsReset}
-                    openingPostgresql={openingPostgresql}
-                    openPostgresqlConsole={openPostgresqlConsole}
-                    openUrl={openUrl}
-                    postgresDetailsOpen={postgresDetailsOpen}
-                    refinedInterface={refinedInterface}
-                    regenerateOdooAssets={regenerateOdooAssets}
-                    selectedDb={selectedDb}
-                    selectedProject={selectedProject}
-                    selectedProjectReady={selectedProjectReady}
-                    setAdminPasswordOpen={setAdminPasswordOpen}
-                    setCreateDbOpen={setCreateDbOpen}
-                    setDependenciesOpen={setDependenciesOpen}
-                    setDropDbOpen={setDropDbOpen}
-                    setDuplicateDbOpen={setDuplicateDbOpen}
-                    setNeutralizeDbOpen={setNeutralizeDbOpen}
-                    setPendingDatabaseAction={setPendingDatabaseAction}
-                    setPostgresDetailsOpen={setPostgresDetailsOpen}
-                    setRestoreDbOpen={setRestoreDbOpen}
-                  />
-                )}
-
-                {selectedProjectOnline && (
-                  <ModulesTab
-                    canUseDb={canUseDb}
-                    checkingUpdatePrerequisites={checkingUpdatePrerequisites}
-                    chooseDatabase={chooseDatabase}
-                    createJob={createJob}
-                    loading={loading}
-                    loadingModules={loadingModules}
-                    moduleFilters={moduleFilters}
-                    modules={modules}
-                    moduleSelectionBlock={moduleSelectionBlock}
-                    odooDatabases={odooDatabases}
-                    openRepositoryImport={openRepositoryImport}
-                    openSocleDialog={openSocleDialog}
-                    openZipImport={openZipImport}
-                    overview={overview}
-                    projectHeaderHeight={projectHeaderHeight}
-                    projectTabsHeight={projectTabsHeight}
-                    refinedInterface={refinedInterface}
-                    refreshModules={refreshModules}
-                    requestDeleteCode={requestDeleteCode}
-                    requestTranslationReset={requestTranslationReset}
-                    requestUninstall={requestUninstall}
-                    requestUpdateAllOdooModules={requestUpdateAllOdooModules}
-                    selectedDb={selectedDb}
-                    selectedModules={selectedModules}
-                    selectedProject={selectedProject}
-                    selectedProjectReady={selectedProjectReady}
-                    setSelectedModules={setSelectedModules}
-                    settings={settings}
-                    stickyHeader={stickyHeader}
-                  />
-                )}
-
-                <ActivityTab
-                  enableLogAutoFollow={enableLogAutoFollow}
-                  logDescriptionExpanded={logDescriptionExpanded}
-                  logOutputRef={logOutputRef}
-                  onLogOutputScroll={handleLogOutputScroll}
-                  onShowLogs={showLogs}
-                  outputContent={outputContent}
-                  projectJobs={projectJobs}
-                  pushToast={pushToast}
-                  rawOutputVisible={rawOutputVisible}
-                  refinedInterface={refinedInterface}
-                  refreshJobs={refreshJobs}
-                  scopedExternalLogView={scopedExternalLogView}
-                  selectedJob={selectedJob}
-                  selectedJobId={selectedJobId}
-                  selectedProject={selectedProject}
-                  selectedProjectReady={selectedProjectReady}
-                  selectJob={selectJob}
-                  setExternalLogView={setExternalLogView}
-                  setJobToCancelId={setJobToCancelId}
-                  setLogDescriptionExpanded={setLogDescriptionExpanded}
-                  setRawOutputVisible={setRawOutputVisible}
-                  setSelectedJobId={setSelectedJobId}
-                  stopLiveLogStream={stopLiveLogStream}
-                />
-
-                <ProjectSettingsTab
-                  createJob={createJob}
+            <div className={cn("mx-auto max-w-[1500px] px-4 py-4", showFloatingModuleActions && "pb-32 xl:pb-24")}>
+              {apiUnavailable && (
+                <ApiUnavailableNotice
+                  desktopRuntime={desktopRuntime}
+                  loadSettings={loadSettings}
                   openUrl={openUrl}
-                  refinedInterface={refinedInterface}
-                  selectedProject={selectedProject}
-                  selectedProjectReady={selectedProjectReady}
-                  setDeleteDialogOpen={setDeleteDialogOpen}
-                  settings={settings}
+                  refreshOverview={refreshOverview}
+                  refreshSystemStatus={refreshSystemStatus}
+                  requestDockerStart={requestDockerStart}
                 />
-              </Tabs>
-            )}
-          </div>
+              )}
+              {degradedBackendReason && (
+                <DegradedBackendNotice degradedBackendReason={degradedBackendReason} openUrl={openUrl} />
+              )}
+              {systemStatus && !systemStatus.docker.running && (
+                <DockerNotice
+                  loading={loading}
+                  openSettingsDialog={openSettingsDialog}
+                  openUrl={openUrl}
+                  requestDockerStart={requestDockerStart}
+                  docker={systemStatus.docker}
+                />
+              )}
+              {systemStatus?.traefik && !systemStatus.traefik.running && (
+                <TraefikNotice
+                  loading={loading}
+                  openSettingsDialog={openSettingsDialog}
+                  requestLegacyTraefikStop={requestLegacyTraefikStop}
+                  requestTraefikInstall={requestTraefikInstall}
+                  traefik={systemStatus.traefik}
+                  dockerRunning={systemStatus.docker.running}
+                />
+              )}
+              {migrationBannerVisible && (
+                <MigrationNotice
+                  dismissMigrationProposal={dismissMigrationProposal}
+                  loading={loading}
+                  migration={migration}
+                  migrationCandidates={migrationCandidates}
+                  requestProjectMigration={requestProjectMigration}
+                  setMigrationBannerClosed={setMigrationBannerClosed}
+                />
+              )}
+              {(systemStatus?.abandoned_staging?.count ?? 0) > 0 && (
+                <StagingCleanupNotice
+                  loading={loading}
+                  requestStagingCleanup={requestStagingCleanup}
+                  count={systemStatus!.abandoned_staging!.count}
+                />
+              )}
+              {selectedProject && addonLinks?.supported && (addonLinks.wsl_links > 0 || addonLinks.interrupted) && (
+                <AddonLinksNotice
+                  addonLinks={addonLinks}
+                  convertWslAddonLinks={convertWslAddonLinks}
+                  loading={loading}
+                  refreshAddonLinks={refreshAddonLinks}
+                  selectedProjectOnline={selectedProjectOnline}
+                />
+              )}
+              {error && (
+                <Notice tone="danger" icon={AlertTriangle} title="L’action a échoué">
+                  {error}
+                </Notice>
+              )}
+              {settings?.interface_layout === "classic" && !settings.beta_interface_banner_dismissed && (
+                <RefinedInterfaceNotice
+                  dismissRefinedInterfaceProposal={dismissRefinedInterfaceProposal}
+                  switchToRefinedInterface={switchToRefinedInterface}
+                />
+              )}
+              {runningJobs.length > 0 && <RunningJobsBanner onFollowJob={followJob} runningJobs={runningJobs} />}
+
+              {showWelcome ? (
+                <WelcomeScreen
+                  icon={selectedAppIcon}
+                  hasProjects={Boolean(overview?.projects.length)}
+                  docker={{
+                    ready: Boolean(systemStatus?.docker.running),
+                    message: systemStatus?.docker.message || "Vérification en cours…",
+                  }}
+                  traefik={
+                    systemStatus?.traefik
+                      ? { ready: systemStatus.traefik.running, message: systemStatus.traefik.message }
+                      : null
+                  }
+                  mailpit={systemStatus?.mailpit}
+                  onStartMailpit={() => void createJob("start_mailpit")}
+                  onOpenMailpit={() => void openUrl(systemStatus?.mailpit?.url)}
+                  onCreateProject={openCreateProjectDialog}
+                  onOpenSettings={openSettingsDialog}
+                  onRefresh={refreshAllViews}
+                />
+              ) : (
+                <>
+                  {!refinedInterface && (
+                    <div
+                      ref={projectTabsRef}
+                      className={cn(
+                        // Fond transparent au repos : le bandeau apparaît en fondu, au rythme du défilement, sur toute la largeur de la zone.
+                        // Réservé à Modules : les autres onglets ont leur propre défilement et n'ont pas été conçus pour un en-tête collant.
+                        stickyHeader &&
+                          activeTab === "modules" &&
+                          "-my-2 py-2 lg:sticky lg:z-20 lg:before:pointer-events-none lg:before:absolute lg:before:inset-y-0 lg:before:-inset-x-[100vw] lg:before:-z-10 lg:before:border-b lg:before:bg-background/90 lg:before:opacity-[var(--tabs-backdrop,0)] lg:before:backdrop-blur lg:before:transition-opacity lg:before:duration-300 lg:before:ease-out motion-reduce:lg:before:transition-none",
+                      )}
+                      style={stickyHeader && activeTab === "modules" ? { top: projectHeaderHeight } : undefined}
+                    >
+                      {projectTabsList}
+                    </div>
+                  )}
+
+                  {selectedProjectOnline && (
+                    <DatabasesTab
+                      chooseDatabase={chooseDatabase}
+                      dependencyReport={databaseDependencies.report}
+                      executeDatabaseAction={executeDatabaseAction}
+                      loading={loading}
+                      odooDatabases={odooDatabases}
+                      openingPostgresql={openingPostgresql}
+                      openUrl={openUrl}
+                      postgresDetailsOpen={postgresDetailsOpen}
+                      selectedDb={selectedDb}
+                      selectedProject={selectedProject}
+                      selectedProjectReady={selectedProjectReady}
+                      setCreateDbOpen={setCreateDbOpen}
+                      setDependenciesOpen={setDependenciesOpen}
+                      setPendingDatabaseAction={setPendingDatabaseAction}
+                      setPostgresDetailsOpen={setPostgresDetailsOpen}
+                      setRestoreDbOpen={setRestoreDbOpen}
+                    />
+                  )}
+
+                  {selectedProjectOnline && (
+                    <ModulesTab
+                      canUseDb={canUseDb}
+                      checkingUpdatePrerequisites={checkingUpdatePrerequisites}
+                      chooseDatabase={chooseDatabase}
+                      createJob={createJob}
+                      loading={loading}
+                      loadingModules={loadingModules}
+                      moduleFilters={moduleFilters}
+                      modules={modules}
+                      moduleSelectionBlock={moduleSelectionBlock}
+                      odooDatabases={odooDatabases}
+                      openRepositoryImport={openRepositoryImport}
+                      openSocleDialog={openSocleDialog}
+                      openZipImport={openZipImport}
+                      overview={overview}
+                      projectHeaderHeight={projectHeaderHeight}
+                      projectTabsHeight={projectTabsHeight}
+                      refreshModules={refreshModules}
+                      requestDeleteCode={requestDeleteCode}
+                      requestTranslationReset={requestTranslationReset}
+                      requestUninstall={requestUninstall}
+                      requestUpdateAllOdooModules={requestUpdateAllOdooModules}
+                      selectedDb={selectedDb}
+                      selectedModules={selectedModules}
+                      selectedProject={selectedProject}
+                      selectedProjectReady={selectedProjectReady}
+                      setSelectedModules={setSelectedModules}
+                      settings={settings}
+                      stickyHeader={stickyHeader}
+                    />
+                  )}
+
+                  <ActivityTab
+                    enableLogAutoFollow={enableLogAutoFollow}
+                    logDescriptionExpanded={logDescriptionExpanded}
+                    logOutputRef={logOutputRef}
+                    onLogOutputScroll={handleLogOutputScroll}
+                    onShowLogs={showLogs}
+                    outputContent={outputContent}
+                    projectJobs={projectJobs}
+                    pushToast={pushToast}
+                    rawOutputVisible={rawOutputVisible}
+                    refreshJobs={refreshJobs}
+                    scopedExternalLogView={scopedExternalLogView}
+                    selectedJob={selectedJob}
+                    selectedJobId={selectedJobId}
+                    selectedProject={selectedProject}
+                    selectedProjectReady={selectedProjectReady}
+                    selectJob={selectJob}
+                    setExternalLogView={setExternalLogView}
+                    setJobToCancelId={setJobToCancelId}
+                    setLogDescriptionExpanded={setLogDescriptionExpanded}
+                    setRawOutputVisible={setRawOutputVisible}
+                    setSelectedJobId={setSelectedJobId}
+                    stopLiveLogStream={stopLiveLogStream}
+                  />
+
+                  <ProjectSettingsTab
+                    createJob={createJob}
+                    openUrl={openUrl}
+                    selectedProject={selectedProject}
+                    selectedProjectReady={selectedProjectReady}
+                    setDeleteDialogOpen={setDeleteDialogOpen}
+                    settings={settings}
+                  />
+                </>
+              )}
+            </div>
+          </Tabs>
         </section>
       </div>
 

@@ -35,7 +35,7 @@ export function TraefikNotice({
               className="w-full sm:w-auto"
               size="sm"
               disabled={loading}
-              title="Les projets restés sous Docker Desktop ne seront plus accessibles par leur adresse tant qu’il est arrêté."
+              title="Les projets restés sur l’ancienne installation ne s’ouvriront plus par leur adresse tant qu’il est arrêté."
               onClick={requestLegacyTraefikStop}
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
@@ -60,7 +60,7 @@ export function TraefikNotice({
       }
     >
       {traefik.message}
-      {traefik.requires_docker ? " Docker doit être installé et démarré avant cette étape." : ""}
+      {traefik.requires_docker ? " Lance d’abord Docker." : ""}
       <div className="mt-1 break-all text-xs opacity-80">Dossier attendu : {traefik.path}</div>
     </Notice>
   );

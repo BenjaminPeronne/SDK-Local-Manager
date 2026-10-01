@@ -102,7 +102,7 @@ function DuplicateDatabaseForm({
           onCheckedChange={(checked) => setNeutralize(checked === true)}
         />
         <span>
-          <span className="block font-medium">En faire une base de test</span>
+          <span className="block font-medium">Neutraliser la copie</span>
           <span className="mt-0.5 block text-xs text-muted-foreground">
             Recommandé : la copie n’enverra pas d’e-mails à de vrais clients. La base d’origine ne change pas.
           </span>

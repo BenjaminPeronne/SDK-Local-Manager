@@ -29,7 +29,7 @@ export function ApiUnavailableNotice({
     <Notice
       tone="danger"
       icon={AlertTriangle}
-      title="Service local indisponible"
+      title="L’application ne répond pas"
       actions={
         <>
           <Button
@@ -71,8 +71,8 @@ export function ApiUnavailableNotice({
         </>
       }
     >
-      L’application n’arrive pas à joindre son API locale. Attends quelques secondes puis actualise. Si Docker n’est pas
-      encore installé, installe Docker Desktop avant de lancer les projets Odoo.
+      Le service de l’application ne répond pas encore. Attends quelques secondes puis clique sur Réessayer. Si Docker
+      n’est pas installé, installe Docker Desktop avant de lancer un projet.
       <div className="mt-3 rounded-md border border-red-200 bg-white/70 p-3 text-red-950 dark:border-red-800 dark:bg-red-950/55 dark:text-red-50">
         <div className="font-medium">{fallbackDockerGuide.title}</div>
         <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-5">

@@ -82,7 +82,8 @@ class ManagerSettings:
     show_technical_details: bool = False
     sticky_header: bool = False
     interface_icon: str = "manager"
-    interface_layout: str = "classic"
+    # « refined » : onglets dans l'en-tête et panneau arrondi ; « classic » : onglets sous l'en-tête.
+    interface_layout: str = "refined"
     onboarding_completed: bool = False
     # Ancien dossier de projets Windows, vu depuis la distribution (/mnt/c/...).
     # Renseigné au passage sous WSL : il sert à proposer la migration des projets.
@@ -115,9 +116,9 @@ class ManagerSettings:
         interface_icon = str(payload.get("interface_icon", "manager")).strip().lower()
         if interface_icon not in INTERFACE_ICONS:
             interface_icon = "manager"
-        interface_layout = str(payload.get("interface_layout", "classic")).strip().lower()
+        interface_layout = str(payload.get("interface_layout", "refined")).strip().lower()
         if interface_layout not in INTERFACE_LAYOUTS:
-            interface_layout = "classic"
+            interface_layout = "refined"
 
         workspace = str(payload.get("workspace") or default_workspace).strip()
         return cls(

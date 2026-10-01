@@ -39,8 +39,8 @@ export function DegradedBackendNotice({ degradedBackendReason, openUrl }: Degrad
         </>
       }
     >
-      {degradedBackendReason} Les projets restent utilisables depuis Windows, mais Odoo y démarre en une minute environ,
-      contre quelques secondes dans l’environnement Linux.
+      {degradedBackendReason} Tes projets fonctionnent quand même, mais Odoo met environ une minute à démarrer au lieu
+      de quelques secondes.
     </Notice>
   );
 }

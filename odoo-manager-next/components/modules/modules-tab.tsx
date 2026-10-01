@@ -31,7 +31,6 @@ import type { Job, ManagerSettings, ModuleInfo, Overview, Project } from "@/lib/
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -63,7 +62,6 @@ type ModulesTabProps = {
   overview: Overview | null;
   projectHeaderHeight: number;
   projectTabsHeight: number;
-  refinedInterface: boolean;
   refreshModules: () => Promise<void>;
   requestDeleteCode: (moduleNames: string[]) => void;
   requestTranslationReset: (moduleNames: string[]) => void;
@@ -95,7 +93,6 @@ export function ModulesTab({
   overview,
   projectHeaderHeight,
   projectTabsHeight,
-  refinedInterface,
   refreshModules,
   requestDeleteCode,
   requestTranslationReset,
@@ -110,9 +107,6 @@ export function ModulesTab({
   stickyHeader,
 }: ModulesTabProps) {
   const showModuleLocations = settings?.show_technical_details ?? false;
-  const moduleTableGridColumns = showModuleLocations
-    ? "xl:grid-cols-[minmax(210px,1.35fr)_100px_110px_150px_minmax(220px,1.15fr)_200px]"
-    : "xl:grid-cols-[minmax(210px,1.35fr)_100px_110px_150px_200px]";
   const toggleModuleSelection = useCallback((name: string, checked: boolean) => {
     setSelectedModules((current) => {
       const next = new Set(current);
@@ -234,295 +228,50 @@ export function ModulesTab({
 
   return (
     <TabsContent value="modules">
-      {refinedInterface ? (
-        <div className="space-y-4">
-          <RefinedSectionHeader
-            title="Modules"
-            count={moduleFilters.filtered.length}
-            description="Les actions s’appliquent à la base de travail sélectionnée."
-            actions={
-              <>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => void refreshModules()}
-                  disabled={loadingModules}
-                  aria-label="Actualiser la liste des modules"
-                  title="Actualiser la liste des modules"
-                >
-                  <RefreshCcw className={cn("h-4 w-4", loadingModules && "animate-spin")} />
-                </Button>
-                {/* Les imports de code sont regroupés : ils mènent tous à « ajouter des modules au projet ».
-                    Menus non modaux : le verrou de défilement de Radix détache l'en-tête et la barre latérale collés. */}
-                <DropdownMenu.Root modal={false}>
-                  <DropdownMenu.Trigger>
-                    <Button variant="outline" disabled={!selectedProjectReady}>
-                      <PlusCircle className="h-4 w-4" />
-                      Ajouter des modules
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    </Button>
-                  </DropdownMenu.Trigger>
-                  <DropdownMenu.Content align="end" className="min-w-64">
-                    <DropdownMenu.Item disabled={loading} onSelect={openRepositoryImport}>
-                      <CloudDownload className="h-4 w-4" />
-                      Depuis un dépôt Git (SSH)
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item onSelect={openZipImport}>
-                      <FileArchive className="h-4 w-4" />
-                      Depuis un pauvre zip
-                    </DropdownMenu.Item>
-                  </DropdownMenu.Content>
-                </DropdownMenu.Root>
-                <Button variant="outline" onClick={openSocleDialog} disabled={!selectedProjectReady || loading}>
-                  <Boxes className="h-4 w-4" />
-                  Installer un socle
-                </Button>
-                <Button
-                  disabled={!selectedProjectReady || loading || checkingUpdatePrerequisites}
-                  onClick={requestUpdateAllOdooModules}
-                >
-                  {checkingUpdatePrerequisites ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCcw className="h-4 w-4" />
-                  )}
-                  MAJ complète Odoo
-                </Button>
-              </>
-            }
-          />
-          {moduleFiltersBlock}
-          {moduleSelectionBlock}
-          {/* overflow-clip arrondit les coins sans créer de conteneur de défilement, contrairement à
-              overflow-hidden qui empêcherait l'en-tête de rester collé. L'en-tête reste donc un bandeau droit :
-              des coins arrondis collés en haut laisseraient voir les lignes qui défilent derrière. */}
-          <RefinedPanel className="overflow-clip">
-            <div
-              className="z-10 hidden border-b bg-card xl:sticky xl:block"
-              style={{ top: stickyHeader ? projectHeaderHeight + projectTabsHeight : 0 }}
-            >
-              <div
-                className={cn("grid items-center gap-3 bg-muted/60 px-3 py-2", REFINED_LABEL, REFINED_MODULE_COLUMNS)}
-              >
-                <div>Module</div>
-                <div>État</div>
-                <div>Version</div>
-                <div>Origine</div>
-                <div className="text-right">Actions</div>
-              </div>
-            </div>
-            <div className="min-w-0">
-              {moduleFilters.visible.length
-                ? moduleFilters.visible.map((module) => {
-                    const sourcePath = module.source_path || module.path;
-                    const linkPath = module.link_path || (module.path_kind?.startsWith("lien") ? module.path : "");
-                    const displaySourcePath = compactWorkspacePath(sourcePath, overview?.workspace);
-                    const displayLinkPath = compactWorkspacePath(linkPath, overview?.workspace);
-                    const samePaths = Boolean(linkPath && sourcePath && linkPath === sourcePath);
-                    const origin = normalizedModuleOrigin(module.origin, sourcePath);
-                    const moduleTitle = module.title || module.name;
-                    const showTechnicalName = moduleTitle !== module.name;
-                    const moduleSelected = selectedModules.has(module.name);
-                    return (
-                      <div
-                        key={module.name}
-                        className={cn(
-                          "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 xl:items-center",
-                          REFINED_MODULE_COLUMNS,
-                          moduleSelected ? "bg-selected" : "hover:bg-hover",
-                        )}
-                        onClick={(event) => toggleModuleFromRow(event, module.name)}
-                      >
-                        <label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
-                          <Checkbox
-                            className="mt-1"
-                            aria-label={`Sélectionner ${module.name}`}
-                            checked={moduleSelected}
-                            onCheckedChange={(checked) => toggleModuleSelection(module.name, checked === true)}
-                          />
-                          <span className="min-w-0">
-                            <span
-                              className={cn(
-                                "block",
-                                showTechnicalName
-                                  ? cn("break-words", REFINED_ROW_TITLE)
-                                  : cn("break-all", REFINED_IDENTIFIER),
-                              )}
-                            >
-                              {moduleTitle}
-                            </span>
-                            {showTechnicalName && (
-                              <span className="mt-0.5 block break-all font-mono text-xs text-muted-foreground">
-                                {module.name}
-                              </span>
-                            )}
-                            {showModuleLocations && (
-                              <span className="mt-1.5 block space-y-0.5 text-xs">
-                                {module.path_kind && (
-                                  <span className="block text-muted-foreground">{module.path_kind}</span>
-                                )}
-                                <span
-                                  className="block truncate font-mono text-teal-700 dark:text-teal-300"
-                                  title={sourcePath}
-                                >
-                                  {displaySourcePath || "-"}
-                                </span>
-                                {displayLinkPath && !samePaths && (
-                                  <span
-                                    className="block truncate font-mono text-blue-700 dark:text-blue-300"
-                                    title={linkPath}
-                                  >
-                                    {displayLinkPath}
-                                  </span>
-                                )}
-                              </span>
-                            )}
-                          </span>
-                        </label>
-                        <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                          <span className="text-xs font-medium text-muted-foreground xl:hidden">État</span>
-                          <ModuleStateBadge state={module.state} />
-                        </div>
-                        <div className="flex min-w-0 items-start justify-between gap-3 xl:block">
-                          <span className="text-xs font-medium text-muted-foreground xl:hidden">Version</span>
-                          <span className="min-w-0 break-all font-mono text-xs tabular-nums">
-                            {module.installed_version || module.version || "-"}
-                          </span>
-                        </div>
-                        <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                          <span className="text-xs font-medium text-muted-foreground xl:hidden">Origine</span>
-                          <Badge className="shrink-0" variant="outline">
-                            {moduleOriginLabel(origin)}
-                          </Badge>
-                        </div>
-                        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                          {module.state === "installed" ? (
-                            <Button
-                              className="w-full"
-                              size="sm"
-                              variant="accent"
-                              disabled={!canUseDb}
-                              onClick={() =>
-                                createJob("update_module", {
-                                  project: selectedProject?.name,
-                                  db: selectedDb,
-                                  modules: module.name,
-                                })
-                              }
-                            >
-                              <RefreshCcw className="h-4 w-4" />
-                              Mettre à jour
-                            </Button>
-                          ) : (
-                            <Button
-                              className="w-full"
-                              size="sm"
-                              variant="success"
-                              disabled={!canUseDb}
-                              onClick={() =>
-                                createJob("install_module", {
-                                  project: selectedProject?.name,
-                                  db: selectedDb,
-                                  modules: module.name,
-                                })
-                              }
-                            >
-                              <PlusCircle className="h-4 w-4" />
-                              Installer
-                            </Button>
-                          )}
-                          <DropdownMenu.Root modal={false}>
-                            <DropdownMenu.Trigger>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-9 w-9 shrink-0"
-                                title={`Autres actions pour ${module.name}`}
-                                aria-label={`Autres actions pour ${module.name}`}
-                              >
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenu.Trigger>
-                            <DropdownMenu.Content align="end" className="min-w-52">
-                              <DropdownMenu.Label>Actions sur {module.name}</DropdownMenu.Label>
-                              {module.state === "installed" && (
-                                <DropdownMenu.Item
-                                  disabled={!canUseDb}
-                                  onSelect={() => requestTranslationReset([module.name])}
-                                >
-                                  <Languages className="h-4 w-4" />
-                                  Réinitialiser les traductions
-                                </DropdownMenu.Item>
-                              )}
-                              {module.state === "installed" && (
-                                <DropdownMenu.Item
-                                  color="red"
-                                  disabled={!canUseDb}
-                                  onSelect={() => requestUninstall([module.name])}
-                                >
-                                  <PackageX className="h-4 w-4" />
-                                  Désinstaller de la base
-                                </DropdownMenu.Item>
-                              )}
-                              {module.removal_mode !== "link_only" && (
-                                <DropdownMenu.Item
-                                  color="red"
-                                  disabled={!module.removable}
-                                  onSelect={() => requestDeleteCode([module.name])}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                  Supprimer du projet
-                                </DropdownMenu.Item>
-                              )}
-                              {module.state !== "installed" && module.removal_mode === "link_only" && (
-                                <DropdownMenu.Item disabled>Module protégé</DropdownMenu.Item>
-                              )}
-                            </DropdownMenu.Content>
-                          </DropdownMenu.Root>
-                        </div>
-                      </div>
-                    );
-                  })
-                : moduleEmptyState}
-            </div>
-            {modulePaginationBlock}
-          </RefinedPanel>
-        </div>
-      ) : (
-        <Card>
-          <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <CardTitle>Modules</CardTitle>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => void refreshModules()}
-                  disabled={loadingModules}
-                  aria-label="Actualiser la liste des modules"
-                  title="Actualiser la liste des modules"
-                >
-                  <RefreshCcw className={cn("h-4 w-4", loadingModules && "animate-spin")} />
-                </Button>
-              </div>
-              <CardDescription>
-                Recherche, sélection et mise à jour des modules de la base Odoo choisie.
-              </CardDescription>
-            </div>
-            <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+      <div className="space-y-4">
+        <RefinedSectionHeader
+          title="Modules"
+          count={moduleFilters.filtered.length}
+          description="Les actions s’appliquent à la base de travail sélectionnée."
+          actions={
+            <>
               <Button
-                className="w-full"
-                variant="outline"
-                onClick={openSocleDialog}
-                disabled={!selectedProjectReady || loading}
+                type="button"
+                size="icon"
+                variant="ghost"
+                onClick={() => void refreshModules()}
+                disabled={loadingModules}
+                aria-label="Actualiser la liste des modules"
+                title="Actualiser la liste des modules"
               >
+                <RefreshCcw className={cn("h-4 w-4", loadingModules && "animate-spin")} />
+              </Button>
+              {/* Les imports de code sont regroupés : ils mènent tous à « ajouter des modules au projet ».
+                    Menus non modaux : le verrou de défilement de Radix détache l'en-tête et la barre latérale collés. */}
+              <DropdownMenu.Root modal={false}>
+                <DropdownMenu.Trigger>
+                  <Button variant="outline" disabled={!selectedProjectReady}>
+                    <PlusCircle className="h-4 w-4" />
+                    Ajouter des modules
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end" className="min-w-64">
+                  <DropdownMenu.Item disabled={loading} onSelect={openRepositoryImport}>
+                    <CloudDownload className="h-4 w-4" />
+                    Depuis un dépôt Git (SSH)
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item onSelect={openZipImport}>
+                    <FileArchive className="h-4 w-4" />
+                    Depuis un pauvre zip
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Root>
+              <Button variant="outline" onClick={openSocleDialog} disabled={!selectedProjectReady || loading}>
                 <Boxes className="h-4 w-4" />
                 Installer un socle
               </Button>
               <Button
-                className="w-full"
                 disabled={!selectedProjectReady || loading || checkingUpdatePrerequisites}
                 onClick={requestUpdateAllOdooModules}
               >
@@ -533,219 +282,204 @@ export function ModulesTab({
                 )}
                 MAJ complète Odoo
               </Button>
-              <Button
-                className="w-full"
-                variant="outline"
-                onClick={openRepositoryImport}
-                disabled={!selectedProjectReady || loading}
-              >
-                <CloudDownload className="h-4 w-4" />
-                Dépôt SSH · Ajout / MAJ
-              </Button>
-              <Button className="w-full" variant="outline" onClick={openZipImport} disabled={!selectedProjectReady}>
-                <FileArchive className="h-4 w-4" />
-                Ajouter un pauvre zip
-              </Button>
+            </>
+          }
+        />
+        {moduleFiltersBlock}
+        {moduleSelectionBlock}
+        {/* overflow-clip arrondit les coins sans créer de conteneur de défilement, contrairement à
+              overflow-hidden qui empêcherait l'en-tête de rester collé. L'en-tête reste donc un bandeau droit :
+              des coins arrondis collés en haut laisseraient voir les lignes qui défilent derrière. */}
+        <RefinedPanel className="overflow-clip">
+          <div
+            className="z-10 hidden border-b bg-card xl:sticky xl:block"
+            style={{ top: stickyHeader ? projectHeaderHeight + projectTabsHeight : 0 }}
+          >
+            <div className={cn("grid items-center gap-3 bg-muted/60 px-3 py-2", REFINED_LABEL, REFINED_MODULE_COLUMNS)}>
+              <div>Module</div>
+              <div>État</div>
+              <div>Version</div>
+              <div>Origine</div>
+              <div className="text-right">Actions</div>
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="mb-4">{moduleFiltersBlock}</div>
-            <div className="mb-3 space-y-3">{moduleSelectionBlock}</div>
-            <div className="overflow-hidden rounded-md border">
-              <div
-                className={cn(
-                  "hidden border-b bg-muted px-3 py-2 text-xs font-medium uppercase text-muted-foreground xl:grid xl:items-center xl:gap-3",
-                  moduleTableGridColumns,
-                )}
-              >
-                <div>Module</div>
-                <div>État</div>
-                <div>Version</div>
-                <div>Origine</div>
-                {showModuleLocations && <div>Emplacements</div>}
-                <div className="text-right">Actions</div>
-              </div>
-              <div className="max-h-[min(62vh,720px)] min-w-0 overflow-y-auto">
-                {moduleFilters.visible.length
-                  ? moduleFilters.visible.map((module) => {
-                      const sourcePath = module.source_path || module.path;
-                      const linkPath = module.link_path || (module.path_kind?.startsWith("lien") ? module.path : "");
-                      const displaySourcePath = compactWorkspacePath(sourcePath, overview?.workspace);
-                      const displayLinkPath = compactWorkspacePath(linkPath, overview?.workspace);
-                      const samePaths = Boolean(linkPath && sourcePath && linkPath === sourcePath);
-                      const origin = normalizedModuleOrigin(module.origin, sourcePath);
-                      return (
-                        <div
-                          key={module.name}
-                          className={cn(
-                            "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 hover:bg-hover xl:items-center",
-                            moduleTableGridColumns,
-                            selectedModules.has(module.name) && "bg-selected",
-                          )}
-                          onClick={(event) => toggleModuleFromRow(event, module.name)}
-                        >
-                          <label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
-                            <Checkbox
-                              className="mt-1"
-                              aria-label={`Sélectionner ${module.name}`}
-                              checked={selectedModules.has(module.name)}
-                              onCheckedChange={(checked) => toggleModuleSelection(module.name, checked === true)}
-                            />
-                            <span className="min-w-0">
-                              <div className="break-words font-medium">{module.name}</div>
-                              <div className="mt-0.5 break-words text-xs text-muted-foreground">
-                                {module.title || module.name}
-                              </div>
-                            </span>
-                          </label>
-                          <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                            <span className="text-xs font-medium text-muted-foreground xl:hidden">État</span>
-                            <ModuleStateBadge state={module.state} />
-                          </div>
-                          <div className="flex min-w-0 items-start justify-between gap-3 text-sm xl:block">
-                            <span className="text-xs font-medium text-muted-foreground xl:hidden">Version</span>
-                            <span className="min-w-0 break-words">
-                              {module.installed_version || module.version || "-"}
-                            </span>
-                          </div>
-                          <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                            <span className="text-xs font-medium text-muted-foreground xl:hidden">Origine</span>
-                            <Badge className="shrink-0" variant="outline">
-                              {moduleOriginLabel(origin)}
-                            </Badge>
-                          </div>
-                          {showModuleLocations && (
-                            <div className="min-w-0">
-                              <div className="mb-1 text-xs font-medium text-muted-foreground xl:hidden">
-                                Emplacements
-                              </div>
-                              <div className="space-y-1">
-                                {module.path_kind && (
-                                  <Badge
-                                    className="w-fit max-w-full truncate"
-                                    variant="outline"
-                                    title={module.path_kind}
-                                  >
-                                    {module.path_kind}
-                                  </Badge>
-                                )}
-                                <div className="min-w-0 text-xs">
-                                  <span className="font-medium text-teal-700 dark:text-teal-300">Source</span>
-                                  <div
-                                    className="truncate font-mono text-teal-800 dark:text-teal-200"
-                                    title={sourcePath}
-                                  >
-                                    {displaySourcePath || "-"}
-                                  </div>
-                                </div>
-                                {displayLinkPath && !samePaths && (
-                                  <div className="min-w-0 text-xs">
-                                    <span className="font-medium text-blue-700 dark:text-blue-300">Lien Odoo</span>
-                                    <div
-                                      className="truncate font-mono text-blue-800 dark:text-blue-200"
-                                      title={linkPath}
-                                    >
-                                      {displayLinkPath}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_40px] gap-2">
-                            {module.state === "installed" ? (
-                              <Button
-                                className="w-full"
-                                size="sm"
-                                variant="accent"
-                                disabled={!canUseDb}
-                                onClick={() =>
-                                  createJob("update_module", {
-                                    project: selectedProject?.name,
-                                    db: selectedDb,
-                                    modules: module.name,
-                                  })
-                                }
-                              >
-                                <RefreshCcw className="h-4 w-4" />
-                                Mettre à jour
-                              </Button>
-                            ) : (
-                              <Button
-                                className="w-full"
-                                size="sm"
-                                variant="success"
-                                disabled={!canUseDb}
-                                onClick={() =>
-                                  createJob("install_module", {
-                                    project: selectedProject?.name,
-                                    db: selectedDb,
-                                    modules: module.name,
-                                  })
-                                }
-                              >
-                                <PlusCircle className="h-4 w-4" />
-                                Installer
-                              </Button>
+          </div>
+          <div className="min-w-0">
+            {moduleFilters.visible.length
+              ? moduleFilters.visible.map((module) => {
+                  const sourcePath = module.source_path || module.path;
+                  const linkPath = module.link_path || (module.path_kind?.startsWith("lien") ? module.path : "");
+                  const displaySourcePath = compactWorkspacePath(sourcePath, overview?.workspace);
+                  const displayLinkPath = compactWorkspacePath(linkPath, overview?.workspace);
+                  const samePaths = Boolean(linkPath && sourcePath && linkPath === sourcePath);
+                  const origin = normalizedModuleOrigin(module.origin, sourcePath);
+                  const moduleTitle = module.title || module.name;
+                  const showTechnicalName = moduleTitle !== module.name;
+                  const moduleSelected = selectedModules.has(module.name);
+                  return (
+                    <div
+                      key={module.name}
+                      className={cn(
+                        "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 xl:items-center",
+                        REFINED_MODULE_COLUMNS,
+                        moduleSelected ? "bg-selected" : "hover:bg-hover",
+                      )}
+                      onClick={(event) => toggleModuleFromRow(event, module.name)}
+                    >
+                      <label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
+                        <Checkbox
+                          className="mt-1"
+                          aria-label={`Sélectionner ${module.name}`}
+                          checked={moduleSelected}
+                          onCheckedChange={(checked) => toggleModuleSelection(module.name, checked === true)}
+                        />
+                        <span className="min-w-0">
+                          <span
+                            className={cn(
+                              "block",
+                              showTechnicalName
+                                ? cn("break-words", REFINED_ROW_TITLE)
+                                : cn("break-all", REFINED_IDENTIFIER),
                             )}
-                            <DropdownMenu.Root modal={false}>
-                              <DropdownMenu.Trigger>
-                                <Button
-                                  size="icon"
-                                  variant="outline"
-                                  title={`Autres actions pour ${module.name}`}
-                                  aria-label={`Autres actions pour ${module.name}`}
+                          >
+                            {moduleTitle}
+                          </span>
+                          {showTechnicalName && (
+                            <span className="mt-0.5 block break-all font-mono text-xs text-muted-foreground">
+                              {module.name}
+                            </span>
+                          )}
+                          {showModuleLocations && (
+                            <span className="mt-1.5 block space-y-0.5 text-xs">
+                              {module.path_kind && (
+                                <span className="block text-muted-foreground">{module.path_kind}</span>
+                              )}
+                              <span
+                                className="block truncate font-mono text-teal-700 dark:text-teal-300"
+                                title={sourcePath}
+                              >
+                                {displaySourcePath || "-"}
+                              </span>
+                              {displayLinkPath && !samePaths && (
+                                <span
+                                  className="block truncate font-mono text-blue-700 dark:text-blue-300"
+                                  title={linkPath}
                                 >
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenu.Trigger>
-                              <DropdownMenu.Content align="end" className="min-w-52">
-                                <DropdownMenu.Label>Actions sur {module.name}</DropdownMenu.Label>
-                                {module.state === "installed" && (
-                                  <DropdownMenu.Item
-                                    disabled={!canUseDb}
-                                    onSelect={() => requestTranslationReset([module.name])}
-                                  >
-                                    <Languages className="h-4 w-4" />
-                                    Réinitialiser les traductions
-                                  </DropdownMenu.Item>
-                                )}
-                                {module.state === "installed" && (
-                                  <DropdownMenu.Item
-                                    color="red"
-                                    disabled={!canUseDb}
-                                    onSelect={() => requestUninstall([module.name])}
-                                  >
-                                    <PackageX className="h-4 w-4" />
-                                    Désinstaller de la base
-                                  </DropdownMenu.Item>
-                                )}
-                                {module.removal_mode !== "link_only" && (
-                                  <DropdownMenu.Item
-                                    color="red"
-                                    disabled={!module.removable}
-                                    onSelect={() => requestDeleteCode([module.name])}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                    Supprimer du projet
-                                  </DropdownMenu.Item>
-                                )}
-                                {module.state !== "installed" && module.removal_mode === "link_only" && (
-                                  <DropdownMenu.Item disabled>Module protégé</DropdownMenu.Item>
-                                )}
-                              </DropdownMenu.Content>
-                            </DropdownMenu.Root>
-                          </div>
-                        </div>
-                      );
-                    })
-                  : moduleEmptyState}
-              </div>
-              {modulePaginationBlock}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                                  {displayLinkPath}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                      <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
+                        <span className="text-xs font-medium text-muted-foreground xl:hidden">État</span>
+                        <ModuleStateBadge state={module.state} />
+                      </div>
+                      <div className="flex min-w-0 items-start justify-between gap-3 xl:block">
+                        <span className="text-xs font-medium text-muted-foreground xl:hidden">Version</span>
+                        <span className="min-w-0 break-all font-mono text-xs tabular-nums">
+                          {module.installed_version || module.version || "-"}
+                        </span>
+                      </div>
+                      <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
+                        <span className="text-xs font-medium text-muted-foreground xl:hidden">Origine</span>
+                        <Badge className="shrink-0" variant="outline">
+                          {moduleOriginLabel(origin)}
+                        </Badge>
+                      </div>
+                      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                        {module.state === "installed" ? (
+                          <Button
+                            className="w-full"
+                            size="sm"
+                            variant="accent"
+                            disabled={!canUseDb}
+                            onClick={() =>
+                              createJob("update_module", {
+                                project: selectedProject?.name,
+                                db: selectedDb,
+                                modules: module.name,
+                              })
+                            }
+                          >
+                            <RefreshCcw className="h-4 w-4" />
+                            Mettre à jour
+                          </Button>
+                        ) : (
+                          <Button
+                            className="w-full"
+                            size="sm"
+                            variant="success"
+                            disabled={!canUseDb}
+                            onClick={() =>
+                              createJob("install_module", {
+                                project: selectedProject?.name,
+                                db: selectedDb,
+                                modules: module.name,
+                              })
+                            }
+                          >
+                            <PlusCircle className="h-4 w-4" />
+                            Installer
+                          </Button>
+                        )}
+                        <DropdownMenu.Root modal={false}>
+                          <DropdownMenu.Trigger>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-9 w-9 shrink-0"
+                              title={`Autres actions pour ${module.name}`}
+                              aria-label={`Autres actions pour ${module.name}`}
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenu.Trigger>
+                          <DropdownMenu.Content align="end" className="min-w-52">
+                            <DropdownMenu.Label>Actions sur {module.name}</DropdownMenu.Label>
+                            {module.state === "installed" && (
+                              <DropdownMenu.Item
+                                disabled={!canUseDb}
+                                onSelect={() => requestTranslationReset([module.name])}
+                              >
+                                <Languages className="h-4 w-4" />
+                                Réinitialiser les traductions
+                              </DropdownMenu.Item>
+                            )}
+                            {module.state === "installed" && (
+                              <DropdownMenu.Item
+                                color="red"
+                                disabled={!canUseDb}
+                                onSelect={() => requestUninstall([module.name])}
+                              >
+                                <PackageX className="h-4 w-4" />
+                                Désinstaller de la base
+                              </DropdownMenu.Item>
+                            )}
+                            {module.removal_mode !== "link_only" && (
+                              <DropdownMenu.Item
+                                color="red"
+                                disabled={!module.removable}
+                                onSelect={() => requestDeleteCode([module.name])}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Supprimer du projet
+                              </DropdownMenu.Item>
+                            )}
+                            {module.state !== "installed" && module.removal_mode === "link_only" && (
+                              <DropdownMenu.Item disabled>Module protégé</DropdownMenu.Item>
+                            )}
+                          </DropdownMenu.Content>
+                        </DropdownMenu.Root>
+                      </div>
+                    </div>
+                  );
+                })
+              : moduleEmptyState}
+          </div>
+          {modulePaginationBlock}
+        </RefinedPanel>
+      </div>
     </TabsContent>
   );
 }

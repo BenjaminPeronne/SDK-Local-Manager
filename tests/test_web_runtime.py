@@ -1420,7 +1420,8 @@ class TraefikDetectionStatusTests(unittest.TestCase):
         self.assertTrue(status["running"])
         self.assertTrue(status["external"])
         self.assertEqual(8000, status["http_port"])
-        self.assertIn("conteneur edge (port HTTP 8000)", status["message"])
+        self.assertIn("(edge)", status["message"])
+        self.assertIn("(port HTTP 8000)", status["message"])
         self.assertEqual("http://dev.DEMO.localhost:8000/", url)
 
     def test_incompatible_existing_traefik_is_a_conflict_not_a_ready_proxy(self):

@@ -337,9 +337,8 @@ export function SettingsDialog({
                     <div className="rounded-md border bg-muted/40 p-3">
                       <div className="text-sm font-medium">Exécution automatique</div>
                       <p className="mt-1 text-xs font-normal leading-relaxed text-muted-foreground">
-                        Le gestionnaire choisit automatiquement les outils adaptés au système. Sous Windows, Docker, Git
-                        et les chemins sont exécutés dans l’environnement compatible avec le workspace. Les chemins
-                        Windows sont traduits automatiquement lorsque Docker ou Git passe par WSL.
+                        Le gestionnaire choisit automatiquement les outils adaptés à ton système. Sous Windows, il fait
+                        le lien entre Windows et l’environnement Linux sans aucun réglage de ta part.
                       </p>
                     </div>
 
@@ -467,21 +466,21 @@ export function SettingsDialog({
                         <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Interface">
                           {(
                             [
-                              ["classic", "Classique", "Interface actuelle, inchangée."],
+                              ["classic", "Classique", "Onglets sous l’en-tête du projet, sur toute la largeur."],
                               [
                                 "refined",
-                                "Affinée (bêta)",
-                                "Nouvelle organisation des écrans Bases, Modules, Activité et Réglages.",
+                                "Affinée",
+                                "Onglets et actions dans l’en-tête, zone de travail en panneau arrondi.",
                               ],
                             ] as const
                           ).map(([value, title, description]) => (
                             <InteractiveCard
                               key={value}
                               role="radio"
-                              aria-checked={(settingsDraft.interface_layout ?? "classic") === value}
+                              aria-checked={(settingsDraft.interface_layout ?? "refined") === value}
                               className={cn(
                                 "p-3 text-left",
-                                (settingsDraft.interface_layout ?? "classic") === value && "border-primary bg-selected",
+                                (settingsDraft.interface_layout ?? "refined") === value && "border-primary bg-selected",
                               )}
                               onClick={() => setSettingsDraft({ ...settingsDraft, interface_layout: value })}
                             >
@@ -811,8 +810,8 @@ export function SettingsDialog({
                           }
                         />
                         <span className="text-xs font-normal leading-relaxed text-muted-foreground">
-                          Port préféré de l’API locale. Un redémarrage est nécessaire après modification. S’il est
-                          occupé, notamment par Docker, le gestionnaire choisit automatiquement un port libre.
+                          Port préféré du service de l’application. Redémarre l’application après l’avoir changé. S’il
+                          est déjà pris, par Docker par exemple, un autre port libre est choisi automatiquement.
                         </span>
                       </label>
                     </SettingsGroup>
@@ -826,14 +825,12 @@ export function SettingsDialog({
                       </div>
                       <div className="grid gap-x-4 gap-y-2 text-xs sm:grid-cols-[100px_minmax(0,1fr)]">
                         <code>{settingsDraft.api_port_actual || settingsDraft.api_port}</code>
-                        <span>
-                          API locale du gestionnaire, sur <code>127.0.0.1</code> uniquement
-                        </span>
+                        <span>Service de l’application, joignable uniquement depuis ce poste</span>
                         <code>{systemStatus?.traefik?.http_port ?? 80}</code>
                         <span>
                           Traefik, accès HTTP aux projets
                           {systemStatus?.traefik?.external && systemStatus.traefik.container
-                            ? ` (instance existante : ${systemStatus.traefik.container})`
+                            ? ` (déjà installé : ${systemStatus.traefik.container})`
                             : ""}
                         </span>
                         <code>8069</code>
@@ -869,7 +866,7 @@ export function SettingsDialog({
                         <div className="min-w-0">
                           <div className="text-sm font-medium">Journal d’erreurs du gestionnaire</div>
                           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                            Les erreurs d’API, de jobs et d’interface sont conservées localement. Les mots de passe,
+                            Les erreurs de l’application et des actions sont gardées sur ce poste. Les mots de passe,
                             jetons et secrets détectés sont masqués.
                           </p>
                           {managerErrorLogPath && (
