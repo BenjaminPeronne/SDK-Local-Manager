@@ -463,7 +463,17 @@ textarea {
   }
 }
 
+/* Chapeaux de saison, en proportion du logo : quelle que soit sa taille, le bord (dessiné vers 83 %
+   de la hauteur du dessin) repose sur le haut du logo, aux deux tiers vers la droite, puis le chapeau
+   penche autour de ce bord. Tient aussi sur l'icône ronde, dont le haut est presque plat à cet endroit. */
 .sdk-season-hat {
+  position: absolute;
+  left: 34%;
+  top: -35%;
+  width: 62%;
+  pointer-events: none;
+  transform: rotate(12deg);
+  transform-origin: 50% 83%;
   filter: drop-shadow(0 1px 1px hsl(0 0% 0% / 0.2));
 }
 

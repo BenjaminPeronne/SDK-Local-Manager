@@ -1,14 +1,9 @@
 import type { CSSProperties } from "react";
-import { cn } from "@/lib/utils";
 
-/** Bonnet posé en biais sur le coin d'un logo ; le parent doit être positionné. */
-export function ChristmasHat({ className }: { className?: string }) {
+/** Bonnet posé sur le haut d'un logo (placement : `.sdk-season-hat`) ; le parent doit être positionné. */
+export function ChristmasHat() {
   return (
-    <svg
-      viewBox="0 0 32 26"
-      aria-hidden="true"
-      className={cn("sdk-season-hat pointer-events-none absolute rotate-[18deg]", className)}
-    >
+    <svg viewBox="0 0 32 26" aria-hidden="true" className="sdk-season-hat">
       <path d="M5 20 Q9 5 21 3 Q27 2.5 28.5 9 Q24.5 7 21.5 9.5 Q25 14 26 20 Z" fill="#d72f2f" />
       <path d="M21.5 9.5 Q24.5 7 28.5 9 Q27 2.5 21 3 Q24 5 21.5 9.5 Z" fill="#a91f22" />
       <rect x="2.5" y="18" width="26" height="6.5" rx="3.25" fill="#fff" stroke="#000" strokeOpacity="0.12" />

@@ -1,14 +1,9 @@
 import type { CSSProperties } from "react";
-import { cn } from "@/lib/utils";
 
-/** Chapeau de sorcière posé en biais sur le coin d'un logo ; le parent doit être positionné. */
-export function WitchHat({ className }: { className?: string }) {
+/** Chapeau de sorcière posé sur le haut d'un logo (placement : `.sdk-season-hat`) ; le parent doit être positionné. */
+export function WitchHat() {
   return (
-    <svg
-      viewBox="0 0 32 26"
-      aria-hidden="true"
-      className={cn("sdk-season-hat pointer-events-none absolute rotate-[14deg]", className)}
-    >
+    <svg viewBox="0 0 32 26" aria-hidden="true" className="sdk-season-hat">
       <ellipse cx="16" cy="21.5" rx="15" ry="3.5" fill="#3b2056" stroke="#fff" strokeOpacity="0.18" />
       <path d="M8 21 Q11 12 15 6 Q18 1 26 3 Q20 5 19.5 10 Q21 16 24 21 Z" fill="#5b3486" />
       <rect x="8.6" y="16.5" width="14.8" height="3.6" rx="0.8" fill="#f4791f" />

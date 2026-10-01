@@ -100,8 +100,8 @@ export function AppSidebar({
                     settings?.interface_icon === "local" ? "rounded-full" : "rounded-[9px]",
                   )}
                 />
-                {season === "christmas" && <ChristmasHat className="-right-2.5 -top-3 w-7" />}
-                {season === "halloween" && <WitchHat className="-right-2.5 -top-3 w-7" />}
+                {season === "christmas" && <ChristmasHat />}
+                {season === "halloween" && <WitchHat />}
               </span>
               <div className="min-w-0">
                 <p className="sdk-eyebrow">Sudokeys</p>
