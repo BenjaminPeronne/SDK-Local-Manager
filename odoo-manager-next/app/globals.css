@@ -476,6 +476,15 @@ textarea {
   transform-origin: 50% 83%;
   filter: drop-shadow(0 1px 1px hsl(0 0% 0% / 0.2));
 }
+/* Le bonnet s'enfile plutôt qu'il ne se pose : sa bande (vers 84 % de la hauteur du dessin) coiffe le
+   coin haut droit du logo, bien penchée, et la pointe retombe sur le côté. */
+.sdk-season-hat-christmas {
+  left: 44.6%;
+  top: -34.4%;
+  width: 72%;
+  transform: rotate(34deg);
+  transform-origin: 45% 84%;
+}
 
 .sdk-snowfall {
   container-type: size;
