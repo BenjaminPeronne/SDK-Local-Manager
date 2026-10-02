@@ -910,6 +910,11 @@ def traefik_status(docker=None):
 
 MAILPIT_CONTAINER = "mailpit"
 MAILPIT_IMAGE = "axllent/mailpit:v1.31"
+# Empreinte de l'index multi-architecture de v1.31 : une image republiée sous le même tag chez
+# l'éditeur est refusée au lieu d'être installée. Docker ne nomme pas une image téléchargée
+# par empreinte : elle reçoit ensuite le tag, que le reste de l'application reconnaît.
+MAILPIT_IMAGE_DIGEST = "sha256:ed9b00c609e77e99c79b93f1178255ebc271868920f2c69a8d166bd5634ed10d"
+MAILPIT_PINNED_IMAGE = f"axllent/mailpit@{MAILPIT_IMAGE_DIGEST}"
 MAILPIT_HOST = "mail.localhost"
 
 
@@ -3239,6 +3244,10 @@ def start_mailpit_job(job):
         return
     if state == "absent":
         job.add(f"Installation de Mailpit ({MAILPIT_IMAGE})...")
+        if run_stream(job, docker_command(SETTINGS, "pull", MAILPIT_PINNED_IMAGE)) != 0:
+            raise RuntimeError("Docker n'a pas pu télécharger Mailpit.")
+        if run_stream(job, docker_command(SETTINGS, "tag", MAILPIT_PINNED_IMAGE, MAILPIT_IMAGE)) != 0:
+            raise RuntimeError("Docker n'a pas pu préparer l'image de Mailpit.")
         command = docker_command(
             SETTINGS,
             "run",

@@ -57,6 +57,13 @@ class DistributionContentTests(unittest.TestCase):
     def test_pins_the_base_image(self):
         self.assertRegex(self.dockerfile, re.compile(r"^FROM debian:12-slim$", re.MULTILINE))
 
+    def test_the_docker_signing_key_is_checked_before_apt_trusts_it(self):
+        # Empreinte publiée sur docs.docker.com : une clé qui ne la porte pas arrête la construction.
+        self.assertIn("ARG DOCKER_GPG_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88", self.dockerfile)
+        check = self.dockerfile.index('"$fingerprint" != "$DOCKER_GPG_FINGERPRINT"')
+        self.assertLess(self.dockerfile.index("gpg --batch --with-colons --show-keys"), check)
+        self.assertLess(check, self.dockerfile.index("signed-by=/etc/apt/keyrings/docker.asc"))
+
     def test_systemd_starts_docker_in_the_distribution(self):
         self.assertIn("systemd = true", self.wsl_conf)
         self.assertIn("systemctl enable docker", self.dockerfile)

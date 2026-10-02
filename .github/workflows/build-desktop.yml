@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+# Actions épinglées par commit, pas par tag : un tag peut être déplacé vers un autre code, un
+# commit non. Pour mettre une action à jour, relever le commit de sa nouvelle version :
+#   gh api repos/actions/checkout/commits/v5 --jq .sha
+
 jobs:
   build:
     name: ${{ matrix.artifact }}
@@ -32,7 +36,7 @@ jobs:
             artifact: odoo-manager-windows-x64
             bundles: nsis
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         env:
@@ -49,12 +53,12 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
           retry sudo apt-get update
           retry sudo apt-get install -y --no-install-recommends libfuse2 libnss3 libgtk-3-0 libasound2 xvfb
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: odoo-manager-next/package-lock.json
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
       - name: Install frontend and Electron dependencies
@@ -64,7 +68,7 @@ jobs:
         run: python -m pip install pyinstaller
       - name: Download the Linux runtime embedded in the Windows installer
         if: runner.os == 'Windows'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sdk-manager-linux-runtime
           path: odoo-manager-next/electron/binaries
@@ -81,7 +85,7 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a python scripts/smoke_test_electron.py --bundle-directory odoo-manager-next/release
       - name: Upload installers
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ${{ matrix.artifact }}
           path: |
@@ -96,8 +100,8 @@ jobs:
     name: sdk-manager-linux-runtime
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
       - name: Check the distribution contents
@@ -129,7 +133,7 @@ jobs:
           test -x runtime/backend-linux/odoo-manager-backend
           test -d runtime/backend-linux/odoo-manager-backend-runtime
       - name: Upload the Linux runtime
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: sdk-manager-linux-runtime
           path: runtime/**

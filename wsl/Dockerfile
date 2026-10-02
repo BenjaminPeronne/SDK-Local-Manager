@@ -7,6 +7,10 @@ FROM debian:12-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG SDK_MANAGER_VERSION=0.0.0
+# Empreinte de la clé de signature des paquets Docker, publiée sur docs.docker.com. Une clé
+# téléchargée qui ne la porte pas arrête la construction : apt ne ferait sinon confiance
+# qu'à ce que le serveur a renvoyé.
+ARG DOCKER_GPG_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 
 # systemd démarre les services de la distribution (Docker) ; iptables est requis par
 # Docker sur Debian 12, en mode nft.
@@ -28,6 +32,10 @@ RUN apt-get update \
         unzip \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && export GNUPGHOME="$(mktemp -d)" \
+    && fingerprint="$(gpg --batch --with-colons --show-keys /etc/apt/keyrings/docker.asc | awk -F: '$1 == "fpr" { print $10; exit }')" \
+    && rm -rf "$GNUPGHOME" \
+    && if [ "$fingerprint" != "$DOCKER_GPG_FINGERPRINT" ]; then echo "Clé GPG de Docker inattendue : $fingerprint" >&2; exit 1; fi \
     && chmod a+r /etc/apt/keyrings/docker.asc \
     && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
         > /etc/apt/sources.list.d/docker.list \

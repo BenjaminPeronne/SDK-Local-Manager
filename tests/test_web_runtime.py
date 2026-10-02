@@ -1897,11 +1897,27 @@ class MailpitTests(unittest.TestCase):
     ):
         web.start_mailpit_job(self.LogJob())
 
-        command = run_stream.call_args.args[1]
+        pull, tag, command = (call.args[1] for call in run_stream.call_args_list)
+        # Téléchargée par son empreinte, nommée, puis lancée sous son nom.
+        self.assertEqual(["docker", "pull", f"axllent/mailpit@{web.MAILPIT_IMAGE_DIGEST}"], pull)
+        self.assertEqual(["docker", "tag", f"axllent/mailpit@{web.MAILPIT_IMAGE_DIGEST}", web.MAILPIT_IMAGE], tag)
         self.assertEqual(["docker", "run", "--detach", "--name", "mailpit"], command[:5])
         self.assertIn("traefik-local", command)
         self.assertIn("traefik.http.routers.mailpit.rule=Host(`mail.localhost`)", command)
         self.assertEqual(web.MAILPIT_IMAGE, command[-1])
+
+    @patch("odoo_manager_web.run_stream", return_value=1)
+    @patch("odoo_manager_web.container_status", return_value="absent")
+    @patch("odoo_manager_web.run_capture", return_value=(0, "[]"))
+    @patch("odoo_manager_web.docker_command", side_effect=lambda _settings, *args: ["docker", *args])
+    @patch("odoo_manager_web.docker_status", return_value={"running": True})
+    def test_an_image_that_does_not_match_the_pinned_digest_is_never_started(
+        self, _docker_status, _docker_command, _run_capture, _container_status, run_stream
+    ):
+        with self.assertRaisesRegex(RuntimeError, "télécharger Mailpit"):
+            web.start_mailpit_job(self.LogJob())
+        self.assertEqual(1, run_stream.call_count)
+        self.assertEqual("pull", run_stream.call_args.args[1][1])
 
     @patch("odoo_manager_web.run_stream", return_value=0)
     @patch("odoo_manager_web.container_status", return_value="exited")
