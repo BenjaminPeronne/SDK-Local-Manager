@@ -231,14 +231,14 @@ export function CreateProjectDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {sourceType === "rika" && (
-                    <SelectItem value={RIKA_AUTO_VERSION}>Détecter automatiquement</SelectItem>
+                  {sourceType === "rika" && <SelectItem value={RIKA_AUTO_VERSION}>Détecter automatiquement</SelectItem>}
+                  {(prerequisites?.supported_versions || ["15.0", "16.0", "17.0", "18.0", "19.0", "20.0"]).map(
+                    (item) => (
+                      <SelectItem key={item} value={item}>
+                        Odoo {item}
+                      </SelectItem>
+                    ),
                   )}
-                  {(prerequisites?.supported_versions || ["15.0", "16.0", "17.0", "18.0", "19.0", "20.0"]).map((item) => (
-                    <SelectItem key={item} value={item}>
-                      Odoo {item}
-                    </SelectItem>
-                  ))}
                 </SelectContent>
               </Select>
               <span className="min-h-4 text-xs font-normal text-muted-foreground">

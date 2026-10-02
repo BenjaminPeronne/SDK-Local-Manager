@@ -60,9 +60,8 @@ export function SshKeyDialog({
 }: SshKeyDialogProps) {
   const [generatingSshKey, setGeneratingSshKey] = useState(false);
   const providerName = provider === "github" ? "GitHub" : "GitLab";
-  const keysUrl = provider === "github"
-    ? creationPrerequisites?.github_ssh_keys_url
-    : creationPrerequisites?.gitlab_ssh_keys_url;
+  const keysUrl =
+    provider === "github" ? creationPrerequisites?.github_ssh_keys_url : creationPrerequisites?.gitlab_ssh_keys_url;
   async function requestSshKeyGeneration(replace = false) {
     setGeneratingSshKey(true);
     try {
@@ -184,8 +183,8 @@ export function SshKeyDialog({
               <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/45 dark:text-emerald-100">
                 <div className="font-medium">Nouvelle clé générée</div>
                 <p className="mt-1 text-xs leading-5">
-                  Copie-la puis ajoute-la dans {providerName}. Pense à retirer l’ancienne clé des services concernés ensuite. Ancienne clé
-                  conservée dans : <code className="break-all">{sshKeyBackup}</code>
+                  Copie-la puis ajoute-la dans {providerName}. Pense à retirer l’ancienne clé des services concernés
+                  ensuite. Ancienne clé conservée dans : <code className="break-all">{sshKeyBackup}</code>
                 </p>
               </div>
             )}
@@ -224,10 +223,7 @@ export function SshKeyDialog({
                 <Copy className="h-4 w-4" />
                 Copier la clé
               </Button>
-              <Button
-                onClick={() => openUrl(keysUrl)}
-                disabled={!keysUrl}
-              >
+              <Button onClick={() => openUrl(keysUrl)} disabled={!keysUrl}>
                 <ExternalLink className="h-4 w-4" />
                 Ouvrir {providerName}
               </Button>
