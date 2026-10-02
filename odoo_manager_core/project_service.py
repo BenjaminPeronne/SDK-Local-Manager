@@ -1107,7 +1107,7 @@ class ProjectService:
             log=log,
         )
 
-    def compose_up_project(self, project, path, log=None):
+    def compose_up_project(self, project, path, log=None, recreate_changed=False):
         # Une image absente du registre (branche du template publiée avant son image, par
         # exemple) ne se lit que dans la sortie de Compose : le code retour seul reste muet.
         missing_images = []
@@ -1124,6 +1124,11 @@ class ProjectService:
         if stale_mounts or stale_networks:
             self.log(log, "Anomalie Docker détectée avant démarrage.")
             code = self.recreate_stale_containers(path, stale_mounts, stale_networks, log=log)
+        elif recreate_changed:
+            # Après un pull : sans recréation, le conteneur existant gardait l'ancienne image.
+            # Compose ne recrée que les conteneurs dont l'image ou la configuration a changé.
+            self.log(log, "Démarrage des conteneurs ; ceux dont l'image a changé sont recréés...")
+            code = self.stream(self.docker("compose", "up", "-d"), cwd=path, log=log)
         else:
             self.log(log, "Démarrage des conteneurs existants sans recréation...")
             code = self.stream(self.docker("compose", "up", "-d", "--no-recreate"), cwd=path, log=log)
@@ -2470,13 +2475,24 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
         else:
             self.log(log, "Pas de dépôt Git dans ce projet.")
 
+        container = f"odoo-{project}"
+        odoo_was_serving = self.odoo_server_state(container) == "running"
+
         self.log(log, "Docker pull...")
         code = self.stream(self.docker("compose", "pull"), cwd=path, log=log)
         if code != 0:
             raise RuntimeError(f"Docker pull impossible pour {project}.")
 
         self.log(log, "Redémarrage compose...")
-        self.compose_up_project(project, path, log=log)
+        self.compose_up_project(project, path, log=log, recreate_changed=True)
+        # Un conteneur recréé sur la nouvelle image repart sans serveur Odoo : il est relancé
+        # s'il tournait avant la mise à jour.
+        if odoo_was_serving and self.odoo_server_state(container) != "running":
+            self.log(log, "Nouvelle image appliquée : relance du serveur Odoo...")
+            self.wait_for_container(container, log=log)
+            self.wait_for_odoo_container_initialization(container, log=log)
+            self.start_odoo_server(project, log=log)
+            self.wait_project_http(project, log=log)
         self.log(log, f"Mise à jour terminée: {project}")
 
     def update_all_projects(self, log=None):

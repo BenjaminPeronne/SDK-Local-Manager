@@ -1345,7 +1345,32 @@ class ProjectServiceTests(unittest.TestCase):
             any(Path(command[0]).stem.lower() == "git" and command[1:] == ["pull", "--ff-only"] for command in commands)
         )
         self.assertTrue(has_command_tail(commands, ["compose", "pull"]))
-        self.assertTrue(has_command_tail(commands, ["compose", "up", "-d", "--no-recreate"]))
+        # Après le pull, les conteneurs dont l'image a changé doivent être recréés pour l'utiliser.
+        self.assertTrue(has_command_tail(commands, ["compose", "up", "-d"]))
+        self.assertFalse(has_command_tail(commands, ["compose", "up", "-d", "--no-recreate"]))
+
+    def test_update_project_restarts_odoo_when_the_new_image_recreated_its_container(self):
+        # Avant : serveur Odoo actif ; après la recréation sur la nouvelle image : plus de serveur.
+        self.runner.odoo_states = ["running", "exited:1"]
+
+        with (
+            patch.object(self.service, "wait_for_container") as wait_container,
+            patch.object(self.service, "wait_for_odoo_container_initialization"),
+            patch.object(self.service, "start_odoo_server") as start_server,
+            patch.object(self.service, "wait_project_http"),
+        ):
+            self.service.update_project("DEMO", log=lambda _line: None)
+
+        wait_container.assert_called_once()
+        start_server.assert_called_once_with("DEMO", log=ANY)
+
+    def test_update_project_leaves_a_stopped_odoo_stopped(self):
+        self.runner.odoo_states = ["exited:0"]
+
+        with patch.object(self.service, "start_odoo_server") as start_server:
+            self.service.update_project("DEMO", log=lambda _line: None)
+
+        start_server.assert_not_called()
 
     def test_update_all_projects_uses_workspace_projects(self):
         other = self.root / "OTHER"
