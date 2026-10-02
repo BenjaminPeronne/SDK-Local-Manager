@@ -17,6 +17,7 @@ export const SETTINGS_SAVED_KEYS = [
   "workspace",
   "docker_executable",
   "traefik_directory",
+  "allowed_origins",
   "docker_poll_interval",
   "api_port",
   "show_technical_details",

@@ -1092,6 +1092,61 @@ class PortBusyTests(unittest.TestCase):
         self.assertFalse(web.local_port_listening(80, tables=("/nonexistent/tcp",)))
 
 
+class AllowedOriginsTests(unittest.TestCase):
+    """Interface ouverte dans un navigateur par une autre adresse, réglée dans Paramètres › Avancé."""
+
+    def headers(self, origin):
+        return {"Host": "127.0.0.1:18765", "Origin": origin}
+
+    def test_an_origin_set_in_the_settings_is_accepted_and_others_still_refused(self):
+        settings = ManagerSettings.from_dict({"allowed_origins": ["http://rika.localhost"]}, "/tmp/workspace")
+        with patch.object(web, "SETTINGS", settings):
+            self.assertEqual("", web.untrusted_request_reason(self.headers("http://rika.localhost")))
+            self.assertEqual(
+                "Origine non autorisée.", web.untrusted_request_reason(self.headers("http://dev.demo.localhost"))
+            )
+            handler = Mock()
+            handler.headers = {"Origin": "http://rika.localhost"}
+            web.add_cors_headers(handler)
+            handler.send_header.assert_any_call("Access-Control-Allow-Origin", "http://rika.localhost")
+            self.assertIn("http://rika.localhost", web.settings_snapshot()["active_browser_origins"])
+
+    def test_the_packaged_app_ignores_origins_set_in_the_settings(self):
+        settings = ManagerSettings.from_dict({"allowed_origins": ["http://rika.localhost"]}, "/tmp/workspace")
+        with patch.object(web, "SETTINGS", settings), patch.object(web.sys, "frozen", True, create=True):
+            self.assertTrue(web.untrusted_request_reason(self.headers("http://rika.localhost")))
+
+    def project_service(self, workspace):
+        return web.ProjectService(ManagerSettings.from_dict({}, str(workspace)), workspace)
+
+    def test_a_malformed_origin_is_reported_instead_of_dropped(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(web, "project_service", return_value=self.project_service(Path(temporary))):
+                self.assertEqual(
+                    web.validated_allowed_origins(["HTTP://Rika.localhost/", "http://rika.localhost"]),
+                    ["http://rika.localhost"],
+                )
+                with self.assertRaisesRegex(ValueError, "Adresse non reconnue"):
+                    web.validated_allowed_origins(["http://rika.localhost", "http://*.localhost"])
+                with self.assertRaisesRegex(ValueError, "illisible"):
+                    web.validated_allowed_origins("http://rika.localhost")
+
+    def test_the_address_of_an_odoo_project_is_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            (workspace / "RODIS_SDKLM20").mkdir()
+            (workspace / "RODIS_SDKLM20" / "docker-compose.yml").write_text(
+                "services:\n  odoo:\n    labels:\n"
+                '      - "traefik.http.routers.rodis.rule=Host(`erp.rodis.localhost`)"\n',
+                encoding="utf-8",
+            )
+            with patch.object(web, "project_service", return_value=self.project_service(workspace)):
+                for origin in ("http://dev.rodis_sdklm20.localhost", "http://erp.rodis.localhost:8080"):
+                    with self.subTest(origin=origin), self.assertRaisesRegex(ValueError, "projet Odoo RODIS_SDKLM20"):
+                        web.validated_allowed_origins([origin])
+                self.assertEqual(web.validated_allowed_origins(["http://rika.localhost"]), ["http://rika.localhost"])
+
+
 class MigrationSourceTests(unittest.TestCase):
     """L'application transmet l'ancien dossier Windows au backend lancé dans la distribution."""
 

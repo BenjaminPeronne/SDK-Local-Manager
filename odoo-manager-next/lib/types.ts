@@ -158,6 +158,10 @@ export type ManagerSettings = {
   wsl_distribution: string;
   docker_executable: string;
   traefik_directory: string;
+  /** Autres adresses d'où l'interface ouverte dans un navigateur peut lancer des actions (ex. http://rika.localhost). */
+  allowed_origins: string[];
+  /** Lecture seule : adresses que le service accepte en ce moment. */
+  active_browser_origins?: string[];
   docker_poll_interval: number;
   api_port: number;
   api_port_actual?: number;

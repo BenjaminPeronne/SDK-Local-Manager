@@ -45,6 +45,18 @@ export function isProjectGone(error: unknown) {
   return error instanceof ApiError && error.code === "project_not_found";
 }
 
+/** Adresse de l'interface toujours acceptée dans un navigateur : on y revient pour en autoriser une autre. */
+export const LOCAL_INTERFACE_URL = "http://127.0.0.1:3000";
+
+// Refus du service quand la page est ouverte par une adresse qu'il ne connaît pas (route Traefik, par exemple).
+function refusedOriginMessage(error: unknown) {
+  if (error !== "Origine non autorisée." || isDesktopRuntime()) return "";
+  return (
+    `Cette adresse (${window.location.origin}) ne peut pas lancer d’actions. ` +
+    `Ouvre ${LOCAL_INTERFACE_URL}, puis ajoute-la dans Paramètres › Avancé.`
+  );
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response | undefined;
   const retryDelays = isDesktopRuntime() ? DESKTOP_API_RETRY_DELAYS_MS : [0];
@@ -88,7 +100,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     // Sans message du serveur, on garde au moins la requête fautive : un « Bad Request » seul n'est pas diagnosticable.
     const method = (init?.method || "GET").toUpperCase();
     throw new ApiError(
-      payload.error || `${method} ${path} : ${response.status} ${response.statusText}`,
+      refusedOriginMessage(payload.error) ||
+        payload.error ||
+        `${method} ${path} : ${response.status} ${response.statusText}`,
       response.status,
       payload.code,
     );

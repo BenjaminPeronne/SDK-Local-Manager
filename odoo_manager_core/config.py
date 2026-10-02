@@ -50,6 +50,28 @@ def expand_home_reference(value, home=None):
     return str(Path(value).expanduser())
 
 
+# Adresse exacte d'une page web, telle que le navigateur l'envoie : schéma, hôte, port éventuel.
+BROWSER_ORIGIN_PATTERN = re.compile(r"^https?://[^/\s?#@*]+$")
+
+
+def normalize_browser_origin(value):
+    """« HTTP://Rika.localhost/ » → « http://rika.localhost » ; chaîne vide si ce n'est pas une adresse exacte.
+
+    Pas de joker : les projets Odoo tournent eux aussi sous *.localhost.
+    """
+    origin = str(value or "").strip().rstrip("/").lower()
+    return origin if BROWSER_ORIGIN_PATTERN.match(origin) else ""
+
+
+def normalize_allowed_origins(value):
+    origins = []
+    for item in value if isinstance(value, (list, tuple)) else ():
+        origin = normalize_browser_origin(item)
+        if origin and origin not in origins:
+            origins.append(origin)
+    return tuple(origins)
+
+
 def default_config_dir(system_name=None, environ=None, home=None):
     system_name = system_name or platform.system()
     environ = environ or os.environ
@@ -76,6 +98,9 @@ class ManagerSettings:
     docker_executable: str = "docker"
     brainkeys_executable: str = "brainkeys"
     traefik_directory: str = ""
+    # Autres adresses d'où l'interface ouverte dans un navigateur peut lancer des actions,
+    # par exemple une route Traefik vers l'interface (http://rika.localhost).
+    allowed_origins: tuple = ()
     terminal: str = "auto"
     docker_poll_interval: int = 10
     api_port: int = DEFAULT_API_PORT
@@ -131,6 +156,7 @@ class ManagerSettings:
             docker_executable=str(payload.get("docker_executable", "docker")).strip() or "docker",
             brainkeys_executable=str(payload.get("brainkeys_executable", "brainkeys")).strip() or "brainkeys",
             traefik_directory=expand_home_reference(payload.get("traefik_directory", "")),
+            allowed_origins=normalize_allowed_origins(payload.get("allowed_origins")),
             terminal=str(payload.get("terminal", "auto")).strip() or "auto",
             docker_poll_interval=poll_interval,
             api_port=api_port,

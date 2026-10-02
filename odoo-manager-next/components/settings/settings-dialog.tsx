@@ -38,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import appIcon from "@/app/icon.png";
 import localIcon from "@/app/local-icon.png";
 import { MigrationProposal } from "@/components/projects/migration-proposal";
+import { AllowedOriginsPanel } from "@/components/settings/allowed-origins-panel";
 import { DiskUsagePanel } from "@/components/settings/disk-usage-panel";
 import {
   SETTINGS_SAVED_KEYS,
@@ -249,8 +250,12 @@ export function SettingsDialog({
       pushToast("error", err instanceof Error ? err.message : "Impossible d’ouvrir le sélecteur de dossier.");
     }
   }
+  // Comparaison par valeur : une liste d'adresses retrouvée identique ne compte pas comme une modification.
   const settingsDirty = Boolean(
-    settingsDraft && SETTINGS_SAVED_KEYS.some((key) => settingsDraft[key] !== (settings ? settings[key] : undefined)),
+    settingsDraft &&
+    SETTINGS_SAVED_KEYS.some(
+      (key) => JSON.stringify(settingsDraft[key]) !== JSON.stringify(settings ? settings[key] : undefined),
+    ),
   );
 
   return (
@@ -833,6 +838,10 @@ export function SettingsDialog({
                         </span>
                       </label>
                     </SettingsGroup>
+                    {/* L'application de bureau a sa propre adresse : la liste ne sert qu'à l'interface ouverte dans un navigateur. */}
+                    {!desktopRuntime && (
+                      <AllowedOriginsPanel settingsDraft={settingsDraft} setSettingsDraft={setSettingsDraft} />
+                    )}
                     <div className="grid gap-3 rounded-md border bg-muted/40 p-3 text-sm">
                       <div>
                         <div className="font-medium">Ports utilisés ou contactés</div>

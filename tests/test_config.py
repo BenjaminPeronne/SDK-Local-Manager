@@ -156,6 +156,40 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.wsl_distribution, "")
 
 
+class AllowedOriginsSettingsTests(unittest.TestCase):
+    """Autres adresses de l'interface ouverte dans un navigateur (route Traefik, par exemple)."""
+
+    def test_origins_are_normalized_and_deduplicated_and_garbage_is_dropped(self):
+        settings = ManagerSettings.from_dict(
+            {
+                "allowed_origins": [
+                    "HTTP://Rika.localhost/",
+                    "http://rika.localhost",
+                    "https://sdk.localhost:8443",
+                    "http://*.localhost",
+                    "http://a.localhost/chemin",
+                    "javascript:alert(1)",
+                    "",
+                ]
+            },
+            "/tmp/workspace",
+        )
+        self.assertEqual(settings.allowed_origins, ("http://rika.localhost", "https://sdk.localhost:8443"))
+
+    def test_no_extra_origin_by_default_or_from_a_malformed_file(self):
+        self.assertEqual(ManagerSettings.from_dict({}, "/tmp/workspace").allowed_origins, ())
+        settings = ManagerSettings.from_dict({"allowed_origins": "http://rika.localhost"}, "/tmp/workspace")
+        self.assertEqual(settings.allowed_origins, ())
+
+    @mock.patch("odoo_manager_core.config.platform.system", return_value="Linux")
+    def test_origins_survive_a_save(self, _system):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = SettingsStore(root / "workspace", root / "config.json")
+            store.update({"allowed_origins": ["http://rika.localhost"]}, create_workspace=True)
+            self.assertEqual(store.load().allowed_origins, ("http://rika.localhost",))
+
+
 class LegacyWorkspaceTests(unittest.TestCase):
     """Dossier des anciens projets Windows, choisi à la main pour la migration."""
 

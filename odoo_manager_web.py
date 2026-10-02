@@ -49,6 +49,7 @@ from odoo_manager_core.command_output import (
     python_package_for_import,
     report_expression_duplicate_module,
 )
+from odoo_manager_core.config import normalize_browser_origin
 from odoo_manager_core.disk_usage import (
     compose_image_references,
     parse_docker_size,
@@ -592,6 +593,8 @@ def settings_snapshot():
             "workspace_exists": safe_path_is_dir(WORKSPACE),
             "platform": platform_id(),
             "api_port_actual": PORT,
+            # Adresses acceptées par ce backend : l'interface prévient si la page ouverte n'en fait pas partie.
+            "active_browser_origins": sorted(allowed_browser_origins()),
         }
     )
     return payload
@@ -606,7 +609,11 @@ LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
 
 def allowed_browser_origins():
     origins = BROWSER_ORIGINS | {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
-    return origins if getattr(sys, "frozen", False) else origins | DEV_BROWSER_ORIGINS
+    if getattr(sys, "frozen", False):
+        return origins
+    # Interface ouverte dans un navigateur par une autre adresse, par exemple une route Traefik
+    # (http://rika.localhost) : ces adresses se règlent dans Paramètres › Avancé.
+    return origins | DEV_BROWSER_ORIGINS | frozenset(SETTINGS.allowed_origins)
 
 
 def request_hostname(host_header):
@@ -6273,6 +6280,54 @@ INTERFACE_ONLY_SETTINGS = frozenset(
     }
 )
 
+PROJECT_HOST_RULE_RE = re.compile(r"Host\(\s*`([^`]+)`\s*\)")
+
+
+def odoo_project_origin_reason(origin):
+    """Refuse l'adresse d'un projet Odoo : une page servie par Odoo, et donc par n'importe quel
+    module installé, pourrait lancer des actions dans le gestionnaire.
+
+    Reconnaît dev.<projet>.localhost et ses variantes, et les adresses Traefik du compose du projet.
+    """
+    host = urllib.parse.urlsplit(origin).hostname or ""
+    labels = set(host.split("."))
+    service = project_service()
+    for project in service.list_projects():
+        hosts = set()
+        compose = service.compose_file(project)
+        if compose:
+            try:
+                content = compose.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                content = ""
+            hosts = {value.strip().lower() for value in PROJECT_HOST_RULE_RE.findall(content)}
+        if project.lower() in labels or host in hosts:
+            return (
+                f"{origin} est l'adresse du projet Odoo {project} : elle ne peut pas lancer d'actions "
+                "dans le gestionnaire. Retire-la des adresses de l'interface, dans Paramètres › Avancé."
+            )
+    return ""
+
+
+def validated_allowed_origins(value):
+    """Adresses réglées dans l'interface : une entrée refusée est signalée, jamais ignorée en silence."""
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("Liste d'adresses de l'interface illisible.")
+    origins = []
+    for raw in value:
+        origin = normalize_browser_origin(raw)
+        if not origin:
+            raise ValueError(
+                f"Adresse non reconnue : « {str(raw).strip()} ». Écris-la comme dans la barre d'adresse, "
+                "par exemple http://rika.localhost, sans chemin ni *."
+            )
+        reason = odoo_project_origin_reason(origin)
+        if reason:
+            raise ValueError(reason)
+        if origin not in origins:
+            origins.append(origin)
+    return origins
+
 
 def update_settings(request):
     payload = request.handler.read_json()
@@ -6285,6 +6340,8 @@ def update_settings(request):
             + ". Consulte le suivi des actions avant de modifier les paramètres."
         )
     create_workspace = bool(payload.pop("create_workspace", False))
+    if "allowed_origins" in payload:
+        payload["allowed_origins"] = validated_allowed_origins(payload["allowed_origins"])
     settings = SETTINGS_STORE.update(payload, create_workspace=create_workspace)
     apply_settings(settings)
     return {"settings": settings_snapshot()}

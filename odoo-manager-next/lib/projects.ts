@@ -110,6 +110,8 @@ export function fallbackManagerSettings(
     wsl_distribution: current?.wsl_distribution || "",
     docker_executable: current?.docker_executable || "docker",
     traefik_directory: current?.traefik_directory || systemStatus?.traefik?.path || "",
+    allowed_origins: current?.allowed_origins ?? [],
+    active_browser_origins: current?.active_browser_origins,
     docker_poll_interval: current?.docker_poll_interval || 10,
     api_port: current?.api_port || 18765,
     api_port_actual: current?.api_port_actual,
