@@ -195,6 +195,10 @@ class SocleModulesTests(ModuleLayoutTests):
         self.assertEqual(["account_accountant", "l10n_fr"], requested)
         self.assertFalse(any(name.startswith("l10n_") and name != "l10n_fr" for name in requested))
 
+    def test_french_invoicing_socle_installs_invoicing_not_accounting(self):
+        self.assertEqual(("account", "l10n_fr"), web.SOCLE_PRESETS["invoicing_fr"][1])
+        self.assertNotIn("account_accountant", web.socle_preset_modules(["invoicing_fr"]))
+
     def test_unknown_socle_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "inconnues"):
             web.validate_socle_presets("sales,unknown")
@@ -363,7 +367,7 @@ class ModuleInstallPlanTests(unittest.TestCase):
         section_ids = {section_id for section_id, _label in web.SOCLE_SECTIONS}
         app_ids = [app_id for app_id, _label, _section, _modules in web.SOCLE_APPS]
 
-        self.assertEqual(49, len(app_ids))
+        self.assertEqual(50, len(app_ids))
         self.assertEqual(len(app_ids), len(set(app_ids)))
         for app_id, _label, section, modules in web.SOCLE_APPS:
             self.assertIn(section, section_ids)
