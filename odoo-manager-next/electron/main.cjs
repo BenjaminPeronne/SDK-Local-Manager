@@ -336,11 +336,14 @@ async function start() {
     // poste remplacer l'installateur entre sa vérification et son installation.
     workDir: path.join(app.getPath("userData"), "updates"),
     logPath: path.join(logDir, "update.log"),
+    markerPath: path.join(app.getPath("userData"), "update-pending.json"),
     fetch: (url, init) => net.fetch(url, init),
     openPath: (file) => shell.openPath(file),
     onProgress: (progress) => window?.webContents.send("sdk:update-progress", progress),
     log: (message) => backend.log(message),
   });
+  // Une mise à jour lancée avant ce démarrage a-t-elle pris ? Sinon, l'interface le dira.
+  updater.checkPreviousAttempt();
   // Téléchargements d'une mise à jour précédente, installée ou abandonnée.
   updater.cleanup();
   const ready = backend.start().catch((error) => {

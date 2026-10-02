@@ -47,6 +47,8 @@ export type UpdateMode = "restart" | "installer" | "none";
 export interface UpdateSupport {
   mode: UpdateMode;
   hint: string;
+  /** Une mise à jour lancée avant ce démarrage ne s'est pas installée. */
+  failure?: string;
 }
 
 export interface UpdateProgress {

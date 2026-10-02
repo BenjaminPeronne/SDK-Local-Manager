@@ -316,30 +316,54 @@ test("on macOS an image holding another application is refused", async (t) => {
   await assert.rejects(update.download(TAG), /ne correspond pas/);
 });
 
-test("installing launches the replacement first, then stops the backend and quits", async (t) => {
+test("on Windows the installer itself is launched, silently, once the backend is stopped", async (t) => {
   const events = [];
+  const markerPath = path.join(temporaryDirectory(t), "update-pending.json");
   const update = updater(t, {
     ...registry({ [EXE]: Buffer.from("installer") }),
-    launch: async (command, args, options) => events.push(["launch", path.basename(command), args, options.env]),
+    markerPath,
+    launch: async (command, args) => events.push(["launch", path.basename(command), args]),
   });
   await update.download(TAG);
 
-  await update.install({ beforeExit: async () => events.push(["stop backend"]), exit: () => events.push(["exit"]) });
+  await update.install({
+    beforeExit: async () => events.push(["stop backend", JSON.parse(fs.readFileSync(markerPath, "utf8")).version]),
+    exit: () => events.push(["exit"]),
+  });
 
-  assert.deepEqual(
-    events.map((event) => event.slice(0, 2)),
-    [["launch", "powershell.exe"], ["stop backend"], ["exit"]],
-  );
-  const [, , args, env] = events[0];
-  assert.ok(args.includes("-Command"));
-  assert.equal(env.SDK_UPDATE_PID, "4242");
-  assert.equal(env.SDK_UPDATE_INSTALLER, update.prepared.file);
+  // Pas de PowerShell masqué, que les antivirus bloquent : l'installateur NSIS attend et relance seul.
+  assert.deepEqual(events, [["stop backend", "0.14.0"], ["launch", EXE, ["--updated", "/S", "--force-run"]], ["exit"]]);
 });
 
-test("a replacement that cannot start stops nothing", async (t) => {
+test("on Windows an installer that cannot start keeps the application open and forgets the attempt", async (t) => {
   const events = [];
+  const markerPath = path.join(temporaryDirectory(t), "update-pending.json");
   const update = updater(t, {
     ...registry({ [EXE]: Buffer.from("installer") }),
+    markerPath,
+    launch: async () => {
+      throw new Error("blocked");
+    },
+  });
+  await update.download(TAG);
+
+  await assert.rejects(
+    update.install({ beforeExit: async () => events.push("stop"), exit: () => events.push("exit") }),
+    /Ferme puis rouvre/,
+  );
+  assert.deepEqual(events, ["stop"]);
+  assert.equal(fs.existsSync(markerPath), false);
+});
+
+test("on macOS and Linux a replacement that cannot start stops nothing", async (t) => {
+  const folder = temporaryDirectory(t);
+  const appImage = path.join(folder, "sdk.AppImage");
+  fs.writeFileSync(appImage, "old version");
+  const events = [];
+  const update = updater(t, {
+    ...registry({ [APPIMAGE]: Buffer.from("new version") }),
+    platform: "linux",
+    env: { APPIMAGE: appImage },
     launch: async () => {
       throw new Error("ENOENT");
     },
@@ -351,6 +375,23 @@ test("a replacement that cannot start stops nothing", async (t) => {
     /n'a pas pu démarrer/,
   );
   assert.deepEqual(events, []);
+});
+
+test("the next start tells whether the update took, once", async (t) => {
+  const folder = temporaryDirectory(t);
+  const markerPath = path.join(folder, "update-pending.json");
+
+  fs.writeFileSync(markerPath, JSON.stringify({ version: "0.14.0" }));
+  const failed = updater(t, { currentVersion: "0.13.1", markerPath });
+  assert.deepEqual(failed.checkPreviousAttempt(), { version: "0.14.0", installed: false });
+  assert.match(failed.support().failure, /ne s'est pas installée/);
+  assert.equal(fs.existsSync(markerPath), false);
+  assert.equal(failed.checkPreviousAttempt(), null);
+
+  fs.writeFileSync(markerPath, JSON.stringify({ version: "0.14.0" }));
+  const installed = updater(t, { currentVersion: "0.14.0", markerPath });
+  assert.deepEqual(installed.checkPreviousAttempt(), { version: "0.14.0", installed: true });
+  assert.equal(installed.support().failure, undefined);
 });
 
 test("a .deb package is handed to the system installer without quitting", async (t) => {

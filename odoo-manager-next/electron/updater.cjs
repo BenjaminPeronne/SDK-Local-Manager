@@ -92,13 +92,11 @@ done
 exec "$target" >/dev/null 2>&1
 `;
 
-// L'installateur ne démarre qu'une fois l'application fermée, backend arrêté : il ne trouve aucun
-// fichier verrouillé. --updated et --force-run sont ceux d'electron-updater pour NSIS.
-const WINDOWS_SCRIPT = [
-  "$ErrorActionPreference = 'SilentlyContinue'",
-  "Wait-Process -Id ([int]$env:SDK_UPDATE_PID) -Timeout 120",
-  "Start-Process -FilePath $env:SDK_UPDATE_INSTALLER -ArgumentList '--updated','/S','--force-run'",
-].join("\n");
+// Arguments de l'installateur NSIS, ceux d'electron-updater : silencieux (/S), il attend lui-même
+// la fermeture de l'application (--updated) puis la relance (--force-run).
+const WINDOWS_INSTALLER_ARGUMENTS = ["--updated", "/S", "--force-run"];
+const PREVIOUS_FAILURE =
+  "La mise à jour précédente ne s'est pas installée. Réessaie, ou télécharge la version depuis GitLab.";
 
 class UpdateError extends Error {}
 
@@ -229,6 +227,8 @@ class AppUpdater {
     pid = process.pid,
     baseUrl = PACKAGE_REGISTRY_URL,
     logPath = "",
+    // Note de la version en cours d'installation, relue au démarrage suivant pour savoir si elle a pris.
+    markerPath = "",
     run = runCommand,
     launch = spawnDetached,
     freeSpace = availableBytes,
@@ -247,6 +247,8 @@ class AppUpdater {
     this.pid = pid;
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.logPath = logPath;
+    this.markerPath = markerPath;
+    this.previousFailure = "";
     this.run = run;
     this.launch = launch;
     this.freeSpace = freeSpace;
@@ -263,6 +265,40 @@ class AppUpdater {
    * l'installateur pour que l'utilisateur termine (`installer`), ou rien (`none`).
    */
   support() {
+    const result = this.supportMode();
+    return this.previousFailure ? { ...result, failure: this.previousFailure } : result;
+  }
+
+  /**
+   * Relit, une seule fois au démarrage, la note laissée par une installation : si la version
+   * attendue n'est pas celle qui tourne, l'échec est journalisé et l'interface le dira.
+   */
+  checkPreviousAttempt() {
+    if (!this.markerPath) return null;
+    let marker;
+    try {
+      marker = JSON.parse(fs.readFileSync(this.markerPath, "utf8"));
+    } catch {
+      return null;
+    }
+    try {
+      fs.rmSync(this.markerPath, { force: true });
+    } catch {
+      /* Relue au prochain démarrage : sans conséquence. */
+    }
+    const version = typeof marker?.version === "string" ? marker.version : "";
+    if (!version) return null;
+    const installed = !isNewer(version, this.currentVersion);
+    if (installed) {
+      this.log(`Mise à jour ${version} installée.`);
+    } else {
+      this.previousFailure = PREVIOUS_FAILURE;
+      this.log(`La mise à jour ${version} ne s'est pas installée : la version ${this.currentVersion} a redémarré.`);
+    }
+    return { version, installed };
+  }
+
+  supportMode() {
     const none = { mode: "none", hint: "" };
     const restart = { mode: "restart", hint: "" };
     if (!this.packaged) return none;
@@ -530,11 +566,31 @@ class AppUpdater {
     }
     if (this.installing) return { mode: "restart" };
     this.installing = true;
+    this.writeMarker(prepared.version);
+    if (this.platform === "win32") {
+      // L'installateur NSIS ferme ce qui reste de l'application dès son lancement : le backend
+      // est arrêté avant, pour ne pas être interrompu en pleine fermeture.
+      this.log(`Installation de la version ${prepared.version} : fermeture de l'application.`);
+      await beforeExit();
+      try {
+        await this.launch(prepared.file, WINDOWS_INSTALLER_ARGUMENTS, { env: this.env, logPath: this.logPath });
+      } catch (error) {
+        this.installing = false;
+        this.clearMarker();
+        this.log(`Installateur non lancé : ${error.message}`);
+        throw new UpdateError(
+          "L'installation n'a pas pu démarrer. Ferme puis rouvre l'application, et télécharge la version depuis GitLab.",
+        );
+      }
+      exit();
+      return { mode: "restart" };
+    }
     try {
       // Le remplaçant démarre avant l'arrêt du backend : s'il ne démarre pas, rien n'est arrêté.
       await this.launchReplacement(prepared);
     } catch (error) {
       this.installing = false;
+      this.clearMarker();
       this.log(`Remplaçant non lancé : ${error.message}`);
       throw new UpdateError("La mise à jour n'a pas pu démarrer. Télécharge la version depuis GitLab.");
     }
@@ -542,6 +598,24 @@ class AppUpdater {
     await beforeExit();
     exit();
     return { mode: "restart" };
+  }
+
+  writeMarker(version) {
+    if (!this.markerPath) return;
+    try {
+      fs.writeFileSync(this.markerPath, JSON.stringify({ version, at: new Date().toISOString() }));
+    } catch (error) {
+      this.log(`Note de mise à jour non écrite : ${error.message}`);
+    }
+  }
+
+  clearMarker() {
+    if (!this.markerPath) return;
+    try {
+      fs.rmSync(this.markerPath, { force: true });
+    } catch {
+      /* Absente ou déjà retirée. */
+    }
   }
 
   async launchReplacement(prepared) {
@@ -563,30 +637,6 @@ class AppUpdater {
           prepared.directory,
         ],
         options,
-      );
-      return;
-    }
-    if (this.platform === "win32") {
-      const powershell = path.join(
-        this.env.SystemRoot || "C:\\Windows",
-        "System32",
-        "WindowsPowerShell",
-        "v1.0",
-        "powershell.exe",
-      );
-      await this.launch(
-        powershell,
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-WindowStyle",
-          "Hidden",
-          "-Command",
-          WINDOWS_SCRIPT,
-        ],
-        { ...options, env: { ...this.env, SDK_UPDATE_PID: String(this.pid), SDK_UPDATE_INSTALLER: prepared.file } },
       );
       return;
     }

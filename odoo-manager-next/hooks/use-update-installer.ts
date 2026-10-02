@@ -76,7 +76,9 @@ export function useUpdateInstaller(update: AppUpdate | null) {
   }, [phase, tag]);
 
   // L'échec d'une version déjà dépassée ne concerne plus celle qui vient d'être annoncée.
-  const current = phase.name === "failed" && phase.tag !== tag ? IDLE : phase;
+  let current = phase.name === "failed" && phase.tag !== tag ? IDLE : phase;
+  // Installation tentée avant ce démarrage, restée sans effet : l'annonce le dit au lieu de reproposer en silence.
+  if (current.name === "idle" && tag && support?.failure) current = { name: "failed", message: support.failure, tag };
   return {
     automatic: Boolean(tag) && support !== null && support.mode !== "none",
     busy: current.name === "downloading" || current.name === "ready" || current.name === "restarting",
