@@ -15,11 +15,13 @@ import { ChristmasHat } from "@/components/seasonal/christmas";
 import { WitchHat } from "@/components/seasonal/halloween";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/shell/update-banner";
+import type { UpdateInstaller } from "@/hooks/use-update-installer";
 
 type AppSidebarProps = {
   availableUpdate: AppUpdate | null;
   dismissUpdate: () => void;
   hasRunningJobs: boolean;
+  updateInstaller: UpdateInstaller;
   jobs: Job[];
   openCreateProjectDialog: () => void;
   openSettingsDialog: () => void;
@@ -62,6 +64,7 @@ export function AppSidebar({
   setSelectedProjectName,
   settings,
   systemStatus,
+  updateInstaller,
 }: AppSidebarProps) {
   const [projectsFilter, setProjectsFilter] = useState("");
   const projectLifecycleJobs = useMemo(() => {
@@ -253,6 +256,7 @@ export function AppSidebar({
           {availableUpdate && (
             <UpdateBanner
               update={availableUpdate}
+              installer={updateInstaller}
               hasRunningJobs={hasRunningJobs}
               onDismiss={dismissUpdate}
               openUrl={openUrl}

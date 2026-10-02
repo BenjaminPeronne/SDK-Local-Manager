@@ -1,6 +1,6 @@
 import unittest
 
-from odoo_manager_core.releases import RELEASES_PAGE, latest_release, release_update
+from odoo_manager_core.releases import RELEASES_PAGE, latest_release, release_check_error, release_update
 
 LS_REMOTE = """\
 fb9172f9a0ea52a388fb1e58d839793afa2ade72\trefs/tags/app-v0.8.0-build5
@@ -45,6 +45,21 @@ class ReleaseUpdateTests(unittest.TestCase):
         self.assertFalse(update["update_available"])
         self.assertEqual("", update["latest"])
         self.assertEqual("", update["tag"])
+
+
+class ReleaseCheckErrorTests(unittest.TestCase):
+    def test_each_failure_is_explained_with_what_to_do(self):
+        cases = {
+            (128, "ssh: Could not resolve hostname gitlab.sudokeys.com"): "injoignable",
+            (124, ""): "injoignable",
+            (128, "ssh: connect to host gitlab.sudokeys.com port 10022: Connection refused"): "injoignable",
+            (128, "Host key verification failed."): "identité attendue",
+            (128, "git@gitlab.sudokeys.com: Permission denied (publickey)."): "clé SSH",
+            (1, "fatal: something unexpected"): "Réessaie plus tard",
+        }
+        for (code, output), expected in cases.items():
+            with self.subTest(output=output):
+                self.assertIn(expected, release_check_error(code, output))
 
 
 if __name__ == "__main__":

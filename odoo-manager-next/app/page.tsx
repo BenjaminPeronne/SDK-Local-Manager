@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Boxes, Database, Logs, Settings } from "lucide-react";
 import { useApiAvailability } from "@/hooks/use-api-availability";
 import { useAppUpdate } from "@/hooks/use-app-update";
+import { useUpdateInstaller } from "@/hooks/use-update-installer";
 import { useDatabaseDependencies } from "@/hooks/use-database-dependencies";
 import { useHiddenBelowStickyHeader } from "@/hooks/use-hidden-below-sticky-header";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -270,7 +271,16 @@ export default function Home() {
     applyOverview,
     commitSystemStatus,
   });
-  const { availableUpdate, dismissUpdate } = useAppUpdate(!initializing && !apiUnavailable);
+  const {
+    update: appUpdate,
+    availableUpdate,
+    dismissUpdate,
+    checkNow: checkForUpdate,
+    checking: checkingUpdate,
+    checkFailure: updateCheckFailure,
+  } = useAppUpdate(!initializing && !apiUnavailable);
+  // Une seule installation en cours, suivie par l'annonce comme par « À propos ».
+  const updateInstaller = useUpdateInstaller(appUpdate);
   const onboardingPrompted = useRef(false);
   const wslSetupPrompted = useRef(false);
   const logOutputRef = useRef<HTMLPreElement>(null);
@@ -1465,6 +1475,7 @@ export default function Home() {
           setSelectedProjectName={setSelectedProjectName}
           settings={settings}
           systemStatus={systemStatus}
+          updateInstaller={updateInstaller}
         />
 
         {/* overflow-x-clip borne le bandeau pleine largeur des onglets sans casser les éléments collés. */}
@@ -1837,8 +1848,15 @@ export default function Home() {
 
       <AboutDialog
         appVersion={appVersion}
+        hasRunningJobs={hasRunningJobs}
+        onCheckUpdate={() => void checkForUpdate()}
         onOpenChange={setAboutOpen}
         open={aboutOpen}
+        openUrl={openUrl}
+        update={appUpdate}
+        updateCheckFailure={updateCheckFailure}
+        updateChecking={checkingUpdate}
+        updateInstaller={updateInstaller}
         pushToast={pushToast}
         selectedAppIcon={selectedAppIcon}
         settings={settings}

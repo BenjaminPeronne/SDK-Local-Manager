@@ -80,6 +80,10 @@ export type AppUpdate = {
   update_available: boolean;
   url: string;
   checked: boolean;
+  /** Raison, en clair, d'une vérification impossible (GitLab injoignable, clé SSH refusée…). */
+  error?: string;
+  /** Heure de la vérification, en secondes depuis 1970. */
+  checked_at?: number;
 };
 
 export type SystemStatus = {

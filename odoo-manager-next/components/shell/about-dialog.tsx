@@ -1,10 +1,13 @@
 "use client";
 
-import { Copy, Heart } from "lucide-react";
+import { Copy, Heart, Loader2, RefreshCw } from "lucide-react";
 import type { StaticImageData } from "next/image";
-import type { ManagerSettings, Toast } from "@/lib/types";
+import type { UpdateInstaller } from "@/hooks/use-update-installer";
+import { formatCheckedAt, updateCheckStatus } from "@/lib/app-update";
+import type { AppUpdate, ManagerSettings, Toast } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { UpdateActions } from "@/components/shell/update-actions";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { REFINED_LABEL } from "@/components/common/refined-layout";
 
@@ -14,21 +17,37 @@ const APP_COMMIT = process.env.NEXT_PUBLIC_APP_COMMIT || "";
 
 type AboutDialogProps = {
   appVersion: string;
+  hasRunningJobs: boolean;
+  onCheckUpdate: () => void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  openUrl: (url?: string) => Promise<void>;
   pushToast: (kind: Toast["kind"], message: string) => void;
   selectedAppIcon: StaticImageData;
   settings: ManagerSettings | null;
+  update: AppUpdate | null;
+  updateCheckFailure: string;
+  updateChecking: boolean;
+  updateInstaller: UpdateInstaller;
 };
 
 export function AboutDialog({
   appVersion,
+  hasRunningJobs,
+  onCheckUpdate,
   onOpenChange,
   open,
+  openUrl,
   pushToast,
   selectedAppIcon,
   settings,
+  update,
+  updateCheckFailure,
+  updateChecking,
+  updateInstaller,
 }: AboutDialogProps) {
+  const status = updateCheckStatus(update, { checking: updateChecking, failure: updateCheckFailure });
+  const checkedAt = formatCheckedAt(update?.checked_at);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
@@ -96,6 +115,55 @@ export function AboutDialog({
                 </div>
               )}
             </dl>
+          </div>
+          <div className="rounded-md border p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-semibold">Mises à jour</div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={updateChecking || updateInstaller.busy}
+                onClick={onCheckUpdate}
+              >
+                {updateChecking ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                Rechercher une mise à jour
+              </Button>
+            </div>
+            <p
+              className={cn(
+                "mt-3 text-sm",
+                status.tone === "muted" && "text-muted-foreground",
+                status.tone === "success" && "text-emerald-600 dark:text-emerald-400",
+                status.tone === "available" && "font-medium",
+                status.tone === "error" && "text-destructive",
+              )}
+              role="status"
+            >
+              {status.text}
+            </p>
+            {checkedAt && !updateChecking && (
+              <p className="mt-1 text-xs text-muted-foreground">Dernière vérification : {checkedAt}</p>
+            )}
+            {update?.update_available && !updateChecking && (
+              <div className="max-w-xs">
+                <UpdateActions
+                  update={update}
+                  installer={updateInstaller}
+                  hasRunningJobs={hasRunningJobs}
+                  openUrl={openUrl}
+                />
+              </div>
+            )}
+            {status.tone === "error" && update?.url && (
+              <button
+                type="button"
+                className="mt-2 text-xs font-medium text-primary underline-offset-2 hover:underline"
+                onClick={() => void openUrl(update.url)}
+              >
+                Voir les versions sur GitLab
+              </button>
+            )}
           </div>
           <div className="rounded-md border p-4">
             <div className="text-sm font-semibold">À propos du créateur</div>

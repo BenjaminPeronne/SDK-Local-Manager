@@ -44,3 +44,26 @@ def release_update(current_version, ls_remote_output):
         "update_available": version_key(version) > version_key(current_version),
         "url": f"{RELEASES_PAGE}/{tag}",
     }
+
+
+def release_check_error(code, output):
+    """Pourquoi la liste des versions n'a pas pu être lue, dit simplement et avec la suite à donner."""
+    text = str(output or "").lower()
+    unreachable = (
+        "could not resolve hostname",
+        "connection timed out",
+        "operation timed out",
+        "connection refused",
+        "network is unreachable",
+        "no route to host",
+    )
+    if code == 124 or any(marker in text for marker in unreachable):
+        return "GitLab est injoignable : vérifie la connexion à Internet ou au réseau de Sudokeys, puis réessaie."
+    if "host key verification failed" in text or "remote host identification has changed" in text:
+        return (
+            "Le serveur GitLab ne présente pas l'identité attendue : vérification arrêtée par sécurité. "
+            "Préviens l'équipe technique."
+        )
+    if "permission denied" in text or "publickey" in text:
+        return "GitLab refuse la clé SSH de ce poste : ajoute-la dans ton compte GitLab, puis réessaie."
+    return "Vérification impossible pour le moment. Réessaie plus tard."

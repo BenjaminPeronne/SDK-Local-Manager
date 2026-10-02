@@ -133,7 +133,7 @@ from odoo_manager_core.project_creator import (
 )
 from odoo_manager_core.project_service import OdooError
 from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
-from odoo_manager_core.releases import RELEASES_REPOSITORY, release_update
+from odoo_manager_core.releases import RELEASES_PAGE, RELEASES_REPOSITORY, release_check_error, release_update
 from odoo_manager_core.repositories import (
     REPOSITORY_COMMIT_RE,
     REPOSITORY_GIT_OPTIONS,
@@ -2657,20 +2657,28 @@ def overview(docker=None, databases_max_age=None):
 
 APP_UPDATE_CHECK_SECONDS = 6 * 60 * 60
 APP_UPDATE_RETRY_SECONDS = 30 * 60
+# Bouton « Rechercher une mise à jour » : cliqué à répétition, il n'interroge GitLab qu'une fois
+# par intervalle et rend sinon la réponse qui vient d'être lue.
+APP_UPDATE_FORCE_MIN_SECONDS = 10
 APP_UPDATE_LOCK = threading.Lock()
 APP_UPDATE = {"checked_at": None, "value": None}
 
 
-def app_update_payload():
+def app_update_payload(force=False):
     """Dernière version publiée sur GitLab, relue au plus toutes les six heures.
 
-    Sans accès à GitLab (hors réseau, clé SSH absente), la réponse le dit sans erreur :
-    l'interface n'affiche alors rien.
+    `force` (bouton « Rechercher une mise à jour ») relit GitLab tout de suite, sauf si une
+    lecture vient d'avoir lieu. Sans accès à GitLab (hors réseau, clé SSH refusée), la réponse
+    le dit en clair dans `error`, sans erreur HTTP : l'annonce de la barre latérale n'affiche
+    alors rien, la fenêtre « À propos » donne la raison.
     """
     with APP_UPDATE_LOCK:
         checked_at, value = APP_UPDATE["checked_at"], APP_UPDATE["value"]
         if checked_at is not None and value is not None:
-            max_age = APP_UPDATE_CHECK_SECONDS if value.get("checked") else APP_UPDATE_RETRY_SECONDS
+            if force:
+                max_age = APP_UPDATE_FORCE_MIN_SECONDS
+            else:
+                max_age = APP_UPDATE_CHECK_SECONDS if value.get("checked") else APP_UPDATE_RETRY_SECONDS
             if time.monotonic() - checked_at < max_age:
                 return value
     service = project_service()
@@ -2680,16 +2688,19 @@ def app_update_payload():
         timeout=20,
     )
     if code == 0:
-        value = {**release_update(APP_VERSION, output), "checked": True}
+        value = {**release_update(APP_VERSION, output), "checked": True, "error": ""}
     else:
         value = {
             "current": APP_VERSION,
             "latest": "",
             "tag": "",
             "update_available": False,
-            "url": "",
+            "url": RELEASES_PAGE,
             "checked": False,
+            "error": release_check_error(code, output),
         }
+    # Heure de la vérification, affichée par « À propos ».
+    value["checked_at"] = int(time.time())
     with APP_UPDATE_LOCK:
         APP_UPDATE.update(checked_at=time.monotonic(), value=value)
     return value
@@ -6801,6 +6812,11 @@ def api_route(method, template, view, on_error=None):
     return Route(method, template, view, on_error or (read_route_errors if method == "GET" else write_route_errors))
 
 
+def app_update_view(request):
+    """`?refresh=1` : vérification demandée par l'utilisateur, sans attendre le cache de six heures."""
+    return app_update_payload(force=truthy(request.query_value("refresh")))
+
+
 def payload_view(build):
     """Vue de lecture qui ne dépend d'aucun paramètre."""
     return lambda _request: build()
@@ -6811,7 +6827,7 @@ ROUTER = Router(
         api_route("GET", "/", serve_fallback_page),
         api_route("GET", "/favicon.ico", serve_favicon),
         api_route("GET", "/api/version", payload_view(api_version_payload)),
-        api_route("GET", "/api/app-update", payload_view(app_update_payload)),
+        api_route("GET", "/api/app-update", app_update_view),
         api_route("GET", "/api/disk-usage", payload_view(disk_usage_payload)),
         api_route("GET", "/api/capabilities", payload_view(api_capabilities_payload)),
         api_route("GET", "/api/health", health_payload),

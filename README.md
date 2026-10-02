@@ -56,7 +56,8 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 - Gestion des modules absents d'une copie locale, sans désinstaller ni supprimer de données.
 
 **Mises à jour**
-- Annonce d'une nouvelle version publiée sur GitLab, lue avec la clé SSH du poste.
+- Annonce d'une nouvelle version publiée sur GitLab, lue avec la clé SSH du poste au lancement puis toutes les six heures tant que l'application reste ouverte.
+- Bouton **Rechercher une mise à jour** dans « À propos » : vérification immédiate, heure de la dernière vérification, et raison en clair si GitLab n'a pas répondu (réseau, clé SSH refusée). Une version masquée dans la barre latérale y reste installable.
 - Mise à jour en un clic dans l'application de bureau : téléchargement avec progression, vérification de la taille et de l'empreinte SHA-512, puis redémarrage sur la nouvelle version (sous macOS, l'application se remplace elle-même ; sous Windows, l'installateur tourne en silencieux ; sous Linux, l'AppImage est remplacée et un paquet `.deb` est confié à l'installateur du système). Le redémarrage attend la fin des actions en cours. Si le téléchargement automatique n'est pas possible, le lien vers la Release reste proposé.
 
 **Actions et suivi**

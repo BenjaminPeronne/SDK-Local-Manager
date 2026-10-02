@@ -12,6 +12,7 @@ from unittest.mock import Mock, PropertyMock, call, patch
 import odoo_manager_web as web
 from odoo_manager_core import command_output, job_queue
 from odoo_manager_core.config import ManagerSettings
+from odoo_manager_core.http_routes import RouteRequest
 from odoo_manager_core.traefik import reset_traefik_entrypoint_cache
 
 _ERROR_LOG_SANDBOX = None
@@ -1978,13 +1979,41 @@ class AppUpdateTests(unittest.TestCase):
         self.assertIn(web.RELEASES_REPOSITORY, service.capture.call_args.args[0])
 
     @patch("odoo_manager_web.project_service")
-    def test_an_unreachable_gitlab_reports_nothing(self, project_service):
+    def test_an_unreachable_gitlab_reports_nothing_but_explains_why(self, project_service):
         project_service.return_value.capture.return_value = (128, "Permission denied (publickey).")
 
         update = web.app_update_payload()
 
         self.assertFalse(update["update_available"])
         self.assertFalse(update["checked"])
+        self.assertIn("clé SSH", update["error"])
+        self.assertEqual(web.RELEASES_PAGE, update["url"])
+        self.assertIsInstance(update["checked_at"], int)
+
+    @patch("odoo_manager_web.APP_VERSION", "0.9.0")
+    @patch("odoo_manager_web.project_service")
+    def test_a_requested_check_rereads_gitlab_but_not_twice_in_a_row(self, project_service):
+        service = project_service.return_value
+        service.git.side_effect = lambda *args: ["git", *args]
+        service.capture.return_value = (0, "aaaa\trefs/tags/app-v0.9.0-build1\n")
+        web.app_update_payload()
+        # Le cache de six heures servirait cette lecture ; le bouton, lui, relit GitLab.
+        service.capture.return_value = (0, "bbbb\trefs/tags/app-v0.10.0-build1\n")
+        web.APP_UPDATE["checked_at"] -= web.APP_UPDATE_FORCE_MIN_SECONDS + 1
+
+        self.assertFalse(web.app_update_payload()["update_available"])
+        refreshed = web.app_update_payload(force=True)
+        again = web.app_update_payload(force=True)
+
+        self.assertTrue(refreshed["update_available"])
+        self.assertIs(refreshed, again)
+        self.assertEqual(2, service.capture.call_count)
+
+    def test_the_route_forwards_the_refresh_request(self):
+        with patch("odoo_manager_web.app_update_payload", return_value={"ok": True}) as payload:
+            web.app_update_view(RouteRequest(None, {}, {"refresh": ["1"]}))
+            web.app_update_view(RouteRequest(None, {}, {}))
+        self.assertEqual([call(force=True), call(force=False)], payload.call_args_list)
 
 
 class ProjectCreationPrerequisitesTests(unittest.TestCase):
