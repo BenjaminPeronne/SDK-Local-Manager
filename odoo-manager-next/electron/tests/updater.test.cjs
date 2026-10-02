@@ -226,64 +226,93 @@ test("a redirect to a less secure address is refused", async (t) => {
   await assert.rejects(updater(t, { fetch }).download(TAG), /non sécurisée/);
 });
 
-test("on macOS the downloaded image is opened, copied and checked before anything is replaced", async (t) => {
-  const applications = temporaryDirectory(t);
-  const bundle = path.join(applications, "SDK Local Manager.app");
-  fs.mkdirSync(path.join(bundle, "Contents", "MacOS"), { recursive: true });
-  const image = Buffer.from("disk image");
+/**
+ * Outils macOS simulés : montage de l'image (diskutil ou hdiutil), copie, lecture d'Info.plist.
+ * `oldMacOS` imite un système sans `diskutil image` ; `identifier` l'application que contient l'image.
+ */
+function macTools({
+  oldMacOS = false,
+  identifier = "com.sudokeys.odoo-manager",
+  appName = "SDK Local Manager.app",
+} = {}) {
   const commands = [];
+  const mount = (volume) => {
+    fs.mkdirSync(path.join(volume, appName, "Contents"), { recursive: true });
+    fs.mkdirSync(path.join(volume, "Applications"), { recursive: true });
+  };
   const run = async (command, args) => {
-    commands.push([path.basename(command), args[0]]);
-    if (command.endsWith("hdiutil") && args[0] === "attach") {
-      const volume = args[args.indexOf("-mountpoint") + 1];
-      fs.mkdirSync(path.join(volume, "SDK Local Manager.app", "Contents"), { recursive: true });
-      fs.mkdirSync(path.join(volume, "Applications"));
+    const tool = path.basename(command);
+    commands.push(
+      tool === "ditto"
+        ? "ditto"
+        : tool === "diskutil" && args[0] === "image"
+          ? `diskutil image ${args[1]}`
+          : `${tool} ${args[0]}`,
+    );
+    if (tool === "diskutil" && args[0] === "image") {
+      if (oldMacOS) throw new Error('diskutil: did not recognize verb "image"');
+      mount(args[args.indexOf("--mountPoint") + 1]);
     }
-    if (command.endsWith("ditto")) fs.cpSync(args[0], args[1], { recursive: true });
-    if (command.endsWith("plutil")) return args[1] === "CFBundleIdentifier" ? "com.sudokeys.odoo-manager" : "0.14.0";
+    if (tool === "diskutil" && args[0] === "eject" && oldMacOS) throw new Error("Volume failed to eject");
+    if (tool === "hdiutil" && args[0] === "attach") mount(args[args.indexOf("-mountpoint") + 1]);
+    if (tool === "ditto") fs.cpSync(args[0], args[1], { recursive: true });
+    if (tool === "plutil") return args[1] === "CFBundleIdentifier" ? identifier : "0.14.0";
     return "";
   };
-  const update = updater(t, {
-    ...registry({ [DMG]: image }),
+  return { run, commands };
+}
+
+function macUpdater(t, tools) {
+  const bundle = path.join(temporaryDirectory(t), "SDK Local Manager.app");
+  fs.mkdirSync(path.join(bundle, "Contents", "MacOS"), { recursive: true });
+  return updater(t, {
+    ...registry({ [DMG]: Buffer.from("disk image") }),
     platform: "darwin",
     arch: "arm64",
     execPath: macExecutablePath(bundle),
-    run,
+    run: tools.run,
   });
+}
+
+test("on macOS the downloaded image is opened, copied and checked before anything is replaced", async (t) => {
+  const tools = macTools();
+  const update = macUpdater(t, tools);
 
   await update.download(TAG);
 
-  assert.deepEqual(commands, [
-    ["hdiutil", "attach"],
-    ["ditto", commands[1][1]],
-    ["hdiutil", "detach"],
-    ["plutil", "-extract"],
-    ["plutil", "-extract"],
-    ["codesign", "--verify"],
+  assert.deepEqual(tools.commands, [
+    "diskutil image attach",
+    "ditto",
+    "diskutil eject",
+    "plutil -extract",
+    "plutil -extract",
+    "codesign --verify",
   ]);
   assert.equal(path.basename(update.prepared.staged), "SDK Local Manager.app");
   assert.ok(fs.existsSync(update.prepared.staged));
 });
 
+test("on an older macOS without diskutil image, hdiutil opens and closes the image", async (t) => {
+  const tools = macTools({ oldMacOS: true });
+  const update = macUpdater(t, tools);
+
+  await update.download(TAG);
+
+  assert.deepEqual(tools.commands, [
+    "diskutil image attach",
+    "hdiutil attach",
+    "ditto",
+    "diskutil eject",
+    "hdiutil detach",
+    "plutil -extract",
+    "plutil -extract",
+    "codesign --verify",
+  ]);
+  assert.ok(fs.existsSync(update.prepared.staged));
+});
+
 test("on macOS an image holding another application is refused", async (t) => {
-  const applications = temporaryDirectory(t);
-  const bundle = path.join(applications, "SDK Local Manager.app");
-  fs.mkdirSync(path.join(bundle, "Contents", "MacOS"), { recursive: true });
-  const run = async (command, args) => {
-    if (command.endsWith("hdiutil") && args[0] === "attach") {
-      fs.mkdirSync(path.join(args[args.indexOf("-mountpoint") + 1], "Other.app"), { recursive: true });
-    }
-    if (command.endsWith("ditto")) fs.cpSync(args[0], args[1], { recursive: true });
-    if (command.endsWith("plutil")) return args[1] === "CFBundleIdentifier" ? "com.example.other" : "0.14.0";
-    return "";
-  };
-  const update = updater(t, {
-    ...registry({ [DMG]: Buffer.from("disk image") }),
-    platform: "darwin",
-    arch: "arm64",
-    execPath: macExecutablePath(bundle),
-    run,
-  });
+  const update = macUpdater(t, macTools({ identifier: "com.example.other", appName: "Other.app" }));
   await assert.rejects(update.download(TAG), /ne correspond pas/);
 });
 

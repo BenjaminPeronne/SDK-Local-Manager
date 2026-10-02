@@ -67,7 +67,8 @@ refusé si sa taille ou son empreinte SHA-512 diffère du manifeste.
 L'application n'étant pas signée, le mécanisme d'Electron (Squirrel) est inutilisable
 sous macOS : il exige une signature Developer ID. À la place :
 
-- **macOS** : l'image disque est montée sans fenêtre, l'application copiée puis
+- **macOS** : l'image disque est montée sans fenêtre (`diskutil image attach`, ou
+  `hdiutil` sur un macOS plus ancien), l'application copiée puis
   contrôlée (identifiant, version, intégrité de la signature locale avec `codesign`).
   Un script attend la fermeture de l'application, échange les dossiers `.app`, remet
   l'ancienne version en place en cas d'échec, puis relance. Si le dossier de

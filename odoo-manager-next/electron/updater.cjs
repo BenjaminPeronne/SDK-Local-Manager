@@ -432,6 +432,56 @@ class AppUpdater {
     if (received !== expected.size || hash.digest("hex") !== expected.sha512) throw new UpdateError(CORRUPTED);
   }
 
+  /**
+   * Monte l'image disque en lecture seule, sans fenêtre ni icône dans le Finder.
+   *
+   * `hdiutil` est déclaré obsolète par macOS au profit de `diskutil image`, absent des versions
+   * plus anciennes : `diskutil` d'abord, `hdiutil` en repli.
+   */
+  async attachImage(image, volume) {
+    try {
+      await this.run("/usr/sbin/diskutil", [
+        "image",
+        "attach",
+        "--readOnly",
+        "--nobrowse",
+        "--mountPoint",
+        volume,
+        image,
+      ]);
+      return;
+    } catch (error) {
+      this.log(`diskutil image indisponible (${error.message}) : hdiutil prend le relais.`);
+    }
+    await this.run("/usr/bin/hdiutil", [
+      "attach",
+      "-nobrowse",
+      "-readonly",
+      "-noautoopen",
+      "-mountpoint",
+      volume,
+      image,
+    ]);
+  }
+
+  /** Démonte l'image, quel que soit l'outil qui l'a montée ; de force seulement en dernier recours. */
+  async detachImage(volume) {
+    const attempts = [
+      ["/usr/sbin/diskutil", ["eject", volume]],
+      ["/usr/bin/hdiutil", ["detach", volume]],
+      ["/usr/sbin/diskutil", ["eject", "force", volume]],
+      ["/usr/bin/hdiutil", ["detach", "-force", volume]],
+    ];
+    for (const [command, args] of attempts) {
+      try {
+        await this.run(command, args);
+        return;
+      } catch {
+        /* Outil absent ou volume occupé : essai suivant. */
+      }
+    }
+  }
+
   /** Copie l'application de l'image disque vérifiée, puis contrôle son identité et son intégrité. */
   async stageMacApp(image, version, directory) {
     const volume = path.join(directory, "volume");
@@ -439,15 +489,7 @@ class AppUpdater {
     fs.mkdirSync(volume, { recursive: true });
     fs.mkdirSync(path.dirname(staged), { recursive: true });
     try {
-      await this.run("/usr/bin/hdiutil", [
-        "attach",
-        "-nobrowse",
-        "-readonly",
-        "-noautoopen",
-        "-mountpoint",
-        volume,
-        image,
-      ]);
+      await this.attachImage(image, volume);
     } catch {
       throw new UpdateError("L'image de la nouvelle version n'a pas pu être ouverte.");
     }
@@ -456,9 +498,7 @@ class AppUpdater {
       if (bundles.length !== 1) throw new UpdateError("L'image téléchargée ne contient pas l'application attendue.");
       await this.run("/usr/bin/ditto", [path.join(volume, bundles[0]), staged]);
     } finally {
-      await this.run("/usr/bin/hdiutil", ["detach", volume]).catch(() =>
-        this.run("/usr/bin/hdiutil", ["detach", "-force", volume]).catch(() => undefined),
-      );
+      await this.detachImage(volume);
     }
     const plist = path.join(staged, "Contents", "Info.plist");
     const read = (key) => this.run("/usr/bin/plutil", ["-extract", key, "raw", "-o", "-", plist]).catch(() => "");
