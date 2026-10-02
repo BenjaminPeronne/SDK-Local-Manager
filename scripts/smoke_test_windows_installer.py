@@ -206,6 +206,27 @@ def installed_paths(install_dir: Path):
     return (application if application.is_file() else None), runtime
 
 
+def installed_size(install_dir: Path) -> str:
+    files = [path for path in install_dir.rglob("*") if path.is_file()] if install_dir.is_dir() else []
+    return f"{len(files)} fichiers, {sum(path.stat().st_size for path in files) // 2**20} Mo"
+
+
+def run_installer(installer: Path, install_dir: Path, timeout: float) -> None:
+    """Installe en silence ; un dépassement tue tout l'arbre NSIS et dit où il en était."""
+    started = time.monotonic()
+    process = subprocess.Popen([str(installer), "/S", f"/D={install_dir}"])
+    try:
+        exit_code = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        stop_process_tree(process)
+        raise RuntimeError(
+            f"L'installateur ne s'est pas terminé en {timeout:.0f} s (déjà écrit : {installed_size(install_dir)})."
+        ) from error
+    if exit_code != 0:
+        raise RuntimeError(f"L'installateur a échoué (code {exit_code}).")
+    print(f"Installation terminée en {time.monotonic() - started:.0f} s.", flush=True)
+
+
 def main() -> None:
     if os.name != "nt":
         raise SystemExit("Ce test doit être exécuté sur Windows.")
@@ -213,6 +234,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Teste l'installateur NSIS SDK Local Manager.")
     parser.add_argument("--installer", required=True, type=Path)
     parser.add_argument("--timeout", type=float, default=45.0)
+    # Une installation prend ~40 s sur un runner GitHub, plus du double sur un runner lent.
+    parser.add_argument("--install-timeout", type=float, default=300.0)
     args = parser.parse_args()
     installer = args.installer.resolve()
     if not installer.is_file():
@@ -225,7 +248,10 @@ def main() -> None:
         config_dir = root / "config"
         global API_TOKEN_FILE
         API_TOKEN_FILE = config_dir / "api-token"
-        subprocess.run([str(installer), "/S", f"/D={install_dir}"], check=True, timeout=90)
+        try:
+            run_installer(installer, install_dir, args.install_timeout)
+        except RuntimeError as error:
+            raise SystemExit(f"Échec de la première installation Windows: {error}") from error
 
         application, runtime = installed_paths(install_dir)
         if application is None or runtime is None or not runtime.is_dir():
@@ -242,20 +268,16 @@ def main() -> None:
         process = subprocess.Popen([str(application)], env=env)
         try:
             wait_for_health(process, args.timeout)
-            print("Première installation Windows opérationnelle.")
+            print("Première installation Windows opérationnelle.", flush=True)
 
             # Exercise the exact user workflow: update while the previous app
             # and its backend still own files in the installation directory.
-            subprocess.run(
-                [str(installer), "/S", f"/D={install_dir}"],
-                check=True,
-                timeout=90,
-            )
+            run_installer(installer, install_dir, args.install_timeout)
             try:
                 process.wait(timeout=15)
             except subprocess.TimeoutExpired as error:
                 raise RuntimeError("La mise à niveau n'a pas arrêté l'ancienne application.") from error
-        except (RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        except (RuntimeError, subprocess.TimeoutExpired) as error:
             raise SystemExit(
                 f"Échec du test de mise à niveau Windows: {error}\n--- backend.log ---\n{log_tail(backend_log())}"
             ) from error
@@ -265,7 +287,7 @@ def main() -> None:
         process = subprocess.Popen([str(application)], env=env)
         try:
             wait_for_health(process, args.timeout)
-            print(f"Mise à niveau Windows opérationnelle: {BACKEND_URL}/api/health")
+            print(f"Mise à niveau Windows opérationnelle: {BACKEND_URL}/api/health", flush=True)
         except RuntimeError as error:
             raise SystemExit(f"{error}\n--- backend.log ---\n{log_tail(backend_log())}") from error
         finally:
