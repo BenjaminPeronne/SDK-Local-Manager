@@ -1,11 +1,11 @@
 "use client";
 
 import { CheckCircle2, CircuitBoard, Loader2, ShieldCheck, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { desktopBridge, type WslPrepareStep } from "@/lib/desktop";
-import { wslSetupError, wslSetupState, type WslStatus } from "@/lib/wsl-setup";
+import { prepareProgressPercent, wslSetupError, wslSetupState, type WslStatus } from "@/lib/wsl-setup";
 
 function formatElapsed(seconds: number) {
   if (seconds < 60) return `${seconds} s`;
@@ -30,19 +30,29 @@ export function WslSetupDialog({
   const [rebootRequired, setRebootRequired] = useState(false);
   const [progress, setProgress] = useState<WslPrepareStep | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  // Temps écoulé au début de l'étape en cours : la barre avance pendant chaque étape.
+  const [stepStartedAt, setStepStartedAt] = useState(0);
+  const elapsedRef = useRef(0);
 
-  // L'installation dure plusieurs minutes : l'écran dit à quelle étape elle en est.
+  // L'installation dure plusieurs minutes : l'écran montre où elle en est.
   useEffect(() => {
     const bridge = desktopBridge();
     if (!open || !bridge?.onWslProgress) return;
-    return bridge.onWslProgress(setProgress);
+    return bridge.onWslProgress((step) => {
+      setProgress(step);
+      setStepStartedAt(elapsedRef.current);
+    });
   }, [open]);
 
   useEffect(() => {
     if (!busy) return;
     const started = Date.now();
+    elapsedRef.current = 0;
     setElapsed(0);
-    const timer = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
+    const timer = setInterval(() => {
+      elapsedRef.current = Math.round((Date.now() - started) / 1000);
+      setElapsed(elapsedRef.current);
+    }, 1000);
     return () => clearInterval(timer);
   }, [busy]);
 
@@ -68,6 +78,7 @@ export function WslSetupDialog({
     setBusy(true);
     setError("");
     setProgress(null);
+    setStepStartedAt(0);
     try {
       if (state.step === "install-wsl" || state.step === "outdated-wsl") {
         const result = await bridge.wslInstallWsl!();
@@ -127,7 +138,7 @@ export function WslSetupDialog({
             {error}
           </p>
         )}
-        {busy && <PrepareProgress progress={progress} elapsed={elapsed} />}
+        {busy && <PrepareProgress progress={progress} elapsed={elapsed} stepElapsed={elapsed - stepStartedAt} />}
         {!busy && state.step === "install-environment" && (
           <p className="flex items-start gap-2 text-sm text-muted-foreground">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
@@ -152,48 +163,46 @@ export function WslSetupDialog({
 }
 
 /**
- * Avancement de la préparation : étapes franchies, étape en cours, temps écoulé.
+ * Avancement de la préparation : une seule barre, en pourcentage, et le temps écoulé.
  *
- * `wsl --import` ne publie aucun avancement et les étapes n'ont pas la même durée : la
- * barre montre ce qui est terminé, et l'étape en cours est signalée par une zone animée
- * plutôt que par un pourcentage qui n'aurait aucun fondement.
+ * `wsl --import` ne publie aucun avancement : le pourcentage s'appuie sur la durée habituelle
+ * de chaque étape, avance pendant qu'elle tourne et ne recule jamais.
  */
-function PrepareProgress({ progress, elapsed }: { progress: WslPrepareStep | null; elapsed: number }) {
-  const total = progress?.total ?? 0;
-  const done = progress ? (progress.step === "done" ? progress.total : progress.index - 1) : 0;
-  const completed = total > 0 ? (done / total) * 100 : 0;
-  const running = total > 0 && progress?.step !== "done" ? 100 / total : 0;
+function PrepareProgress({
+  progress,
+  elapsed,
+  stepElapsed,
+}: {
+  progress: WslPrepareStep | null;
+  elapsed: number;
+  stepElapsed: number;
+}) {
+  const percent = prepareProgressPercent(progress, stepElapsed);
+  const label = progress ? progress.label : "Vérification de l’environnement…";
 
   return (
     <div className="space-y-2 rounded-md border bg-muted/40 px-3 py-3">
       <div className="flex min-w-0 items-center gap-2 text-sm">
         <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate font-medium">
-          {progress ? progress.label : "Vérification de l’environnement…"}
-        </span>
-        {progress && progress.step !== "done" && (
-          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-            Étape {progress.index} sur {progress.total}
-          </span>
-        )}
+        <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{percent} %</span>
       </div>
       <div
-        className="flex h-1.5 overflow-hidden rounded-full bg-muted"
+        className="h-1.5 overflow-hidden rounded-full bg-muted"
         role="progressbar"
-        aria-label={progress ? progress.label : "Préparation du poste"}
+        aria-label={label}
         aria-valuemin={0}
-        aria-valuemax={total || undefined}
-        aria-valuenow={total ? done : undefined}
+        aria-valuemax={100}
+        aria-valuenow={percent}
       >
         <div
-          className="h-full bg-emerald-500 transition-[width] duration-500 ease-out"
-          style={{ width: `${completed}%` }}
+          className="h-full rounded-full bg-emerald-500 transition-[width] duration-1000 ease-linear"
+          style={{ width: `${percent}%` }}
         />
-        {running > 0 && <div className="h-full animate-pulse bg-emerald-500/50" style={{ width: `${running}%` }} />}
       </div>
       <p className="text-xs text-muted-foreground">
-        Temps écoulé {formatElapsed(elapsed)}. Cette étape peut durer plusieurs minutes ; l’application reste utilisable
-        ensuite sans rien réinstaller.
+        Temps écoulé {formatElapsed(elapsed)}. La préparation peut durer plusieurs minutes ; l’application reste
+        utilisable ensuite sans rien réinstaller.
       </p>
     </div>
   );

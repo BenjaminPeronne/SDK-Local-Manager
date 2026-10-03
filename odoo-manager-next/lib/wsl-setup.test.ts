@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isWslSetupPending, wslSetupError, wslSetupState, type WslStatus } from "./wsl-setup.ts";
+import {
+  isWslSetupPending,
+  prepareProgressPercent,
+  wslSetupError,
+  wslSetupState,
+  type WslStatus,
+} from "./wsl-setup.ts";
 
 const status = (overrides: Partial<WslStatus> = {}): WslStatus => ({
   wslInstalled: true,
@@ -71,4 +77,23 @@ test("failures are explained in terms the user can act on", () => {
 test("Electron's technical wrapper is removed from native errors", () => {
   const wrapped = new Error("Error invoking remote method 'sdk:wsl-prepare': Error: Échec inattendu");
   assert.equal(wslSetupError(wrapped), "Échec inattendu");
+});
+
+test("the preparation bar is one continuous percentage that never goes back", () => {
+  const first = (step: string, index: number) => ({ step, index, total: 3 });
+  assert.equal(prepareProgressPercent(null, 0), 0);
+  assert.equal(prepareProgressPercent(first("import", 1), 0), 0);
+  const duringImport = prepareProgressPercent(first("import", 1), 60);
+  const lateImport = prepareProgressPercent(first("import", 1), 900);
+  const backend = prepareProgressPercent(first("backend", 2), 0);
+  assert.ok(duringImport > 0 && duringImport < lateImport);
+  assert.ok(lateImport < backend, "une étape trop longue reste sous le début de la suivante");
+  assert.ok(prepareProgressPercent(first("provision", 3), 10_000) <= 99);
+  assert.equal(prepareProgressPercent(first("done", 3), 0), 100);
+});
+
+test("an update without import spreads the bar over the remaining steps", () => {
+  assert.equal(prepareProgressPercent({ step: "backend", index: 1, total: 2 }, 0), 0);
+  assert.ok(prepareProgressPercent({ step: "provision", index: 2, total: 2 }, 0) > 0);
+  assert.equal(prepareProgressPercent({ step: "provision", index: 1, total: 1 }, 0), 0);
 });

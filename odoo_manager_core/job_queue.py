@@ -14,6 +14,7 @@ import threading
 import time
 import traceback
 
+from odoo_manager_core import job_progress
 from odoo_manager_core import jobs as job_control
 from odoo_manager_core.command_output import parse_output_progress
 from odoo_manager_core.events import publish_event
@@ -36,6 +37,9 @@ JOB_INTERRUPTED_MESSAGE = "Action interrompue : le gestionnaire s'est arrêté p
 # qu'une fois par intervalle, puis relit la suite de la sortie.
 JOBS_CHANGED = threading.Event()
 JOBS_EVENT_MIN_INTERVAL_SECONDS = 0.5
+# Sans sortie nouvelle, la barre d'une action en cours avance encore avec le temps : l'interface
+# est prévenue à ce rythme pour la voir bouger.
+PROGRESS_TICK_SECONDS = 1.0
 JOB_ACTIVE_STATUSES = frozenset({"running", "cancelling"})
 JOB_UNFINISHED_STATUSES = frozenset({"queued", "running", "cancelling"})
 DEFAULT_JOB_CANCEL_POLICY = (
@@ -46,6 +50,9 @@ DEFAULT_JOB_CANCEL_POLICY = (
 
 # (arrêt possible, ce que fait l'arrêt ou pourquoi il est impossible), par nom de fonction d'action.
 CANCEL_POLICIES = {}
+# Durée habituelle, en secondes, par nom de fonction d'action : elle règle la vitesse de la barre
+# tant que l'action ne déclare pas elle-même ses tranches d'avancement.
+EXPECTED_DURATIONS = {}
 _HOOKS = {
     # Journal des erreurs du gestionnaire : (source, erreur, details=…, project=…).
     "record_error": lambda *_args, **_kwargs: None,
@@ -54,11 +61,14 @@ _HOOKS = {
 }
 
 
-def configure(*, cancel_policies=None, record_error=None, on_finished=None):
+def configure(*, cancel_policies=None, expected_durations=None, record_error=None, on_finished=None):
     """Branche ce qui appartient au backend ; les tests peuvent utiliser la file sans rien brancher."""
     if cancel_policies is not None:
         CANCEL_POLICIES.clear()
         CANCEL_POLICIES.update(cancel_policies)
+    if expected_durations is not None:
+        EXPECTED_DURATIONS.clear()
+        EXPECTED_DURATIONS.update(expected_durations)
     if record_error is not None:
         _HOOKS["record_error"] = record_error
     if on_finished is not None:
@@ -175,7 +185,9 @@ class Job:
         # Nombre cumulé de caractères écrits : permet à l'interface de ne demander que la suite.
         self.output_total = 0
         self.result = {}
-        self.progress = None
+        self.progress = job_progress.JobProgress(
+            EXPECTED_DURATIONS.get(getattr(target, "__name__", ""), job_progress.DEFAULT_EXPECTED_SECONDS)
+        )
         self.target = target
         self.args = args
         self.thread = None
@@ -244,8 +256,11 @@ class Job:
     def add(self, line):
         text = line.rstrip("\n")
         progress = parse_output_progress(text)
-        if progress is not None:
-            self.set_progress(progress["label"], progress["current"], progress["total"])
+        if progress is not None and self.progress is not None:
+            if "index" in progress:
+                self.progress.measure_position(progress["index"], progress["total"])
+            else:
+                self.progress.measure(progress["fraction"])
         # Seules les lignes réécrites en place par la commande sont retenues hors de
         # l'historique ; tout ce que le gestionnaire écrit lui-même y reste.
         if progress is None or not progress["transient"]:
@@ -270,20 +285,11 @@ class Job:
             self.output = self.output[-JOB_OUTPUT_LIMIT:]
         self._trim_lines()
 
-    def set_progress(self, label, current=None, total=None):
-        with JOBS_LOCK:
-            self.progress = {
-                "label": str(label),
-                "current": current,
-                "total": total,
-            }
-        notify_jobs_changed()
-
     def run(self):
         failure = None
         failure_trace = ""
         try:
-            with job_control.bind_control(self.control):
+            with job_control.bind_control(self.control), job_progress.bind_progress(self.progress):
                 try:
                     self.target(self, *self.args)
                 except BaseException as exc:
@@ -397,7 +403,7 @@ def jobs_snapshot(detail_job_id=None, compact=False, output_from=None):
                 "output_total": job.output_total,
                 **job_output_payload(job, compact, detail_job_id, output_from),
                 "result": dict(job.result),
-                "progress": dict(job.progress) if job.progress else None,
+                "progress": job.progress.snapshot() if job.progress and job.status in JOB_ACTIVE_STATUSES else None,
                 **job_cancel_payload(job),
             }
             for job in reversed(values)
@@ -512,7 +518,11 @@ def notify_jobs_changed():
 def jobs_event_loop():
     """Prévient l'interface qu'une action a bougé ; elle relit alors /api/jobs, sortie incrémentale comprise."""
     while True:
-        JOBS_CHANGED.wait()
+        if not JOBS_CHANGED.wait(timeout=PROGRESS_TICK_SECONDS):
+            with JOBS_LOCK:
+                running = any(job.status in JOB_ACTIVE_STATUSES for job in JOBS.values())
+            if not running:
+                continue
         JOBS_CHANGED.clear()
         publish_event("jobs_changed", {})
         time.sleep(JOBS_EVENT_MIN_INTERVAL_SECONDS)

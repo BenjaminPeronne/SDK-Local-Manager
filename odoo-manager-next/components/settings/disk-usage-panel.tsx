@@ -199,8 +199,7 @@ export function DiskUsagePanel({
           )}
           {scanJob?.progress && (
             <div className="mt-1 text-xs text-muted-foreground">
-              {scanJob.progress.label}
-              {scanJob.progress.total ? ` (${(scanJob.progress.current ?? 0) + 1}/${scanJob.progress.total})` : ""}
+              {scanJob.progress.label} · <span className="tabular-nums">{scanJob.progress.percent} %</span>
             </div>
           )}
         </div>

@@ -12,7 +12,7 @@ import urllib.parse
 import uuid
 from pathlib import Path
 
-from . import jobs
+from . import job_progress, jobs
 from .platform import (
     command_uses_wsl,
     executable_search_path,
@@ -251,6 +251,14 @@ class OdooError(RuntimeError):
     Le gestionnaire a bien lancé la commande : l'interface l'affiche à part des erreurs
     du gestionnaire (Docker, réseau, fichiers, validation), qui restent des RuntimeError.
     """
+
+
+def module_command_expected_seconds(modules):
+    """Durée habituelle d'une installation ou mise à jour : elle règle la vitesse de la barre quand Odoo se tait."""
+    names = [name for name in str(modules).split(",") if name.strip()]
+    if "all" in names:
+        return 600
+    return min(45 + 15 * len(names), 600)
 
 
 class ProjectService:
@@ -1823,6 +1831,7 @@ class ProjectService:
         if option not in {"-i", "-u"}:
             raise ValueError("Option module Odoo invalide.")
         container = f"odoo-{project}"
+        job_progress.span("Préparation d'Odoo", share=0.12, expected=20)
         self.ensure_odoo_containers_ready(project, log=log)
         self.install_project_pip_requirements(project, log=log)
 
@@ -1893,6 +1902,11 @@ class ProjectService:
                     command_error_detail.append(part)
             self.log(log, line)
 
+        if overwrite_translations:
+            label = "Réinitialisation des traductions"
+        else:
+            label = "Installation des modules" if option == "-i" else "Mise à jour des modules"
+        job_progress.span(label, share=0.9, expected=module_command_expected_seconds(modules))
         code = None
         try:
             code = self.stream(command, log=log_module_output)
@@ -1924,6 +1938,7 @@ class ProjectService:
         except BaseException:
             self.restart_odoo_server_after_failure(project, log=log)
             raise
+        job_progress.span("Redémarrage d'Odoo", share=0.8, expected=20)
         self.log(log, "Redémarrage du serveur Odoo...")
         self.start_odoo_server(project, log=log)
         self.wait_project_http(project, log=log)

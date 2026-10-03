@@ -28,7 +28,15 @@ from odoo_manager_runtime import initialize_runtime_streams
 
 RUNTIME_LOG_PATH, _RUNTIME_STREAMS = initialize_runtime_streams()
 
-from odoo_manager_core import ProjectCreator, ProjectService, SettingsStore, docker_status, job_queue, start_docker
+from odoo_manager_core import (
+    ProjectCreator,
+    ProjectService,
+    SettingsStore,
+    docker_status,
+    job_progress,
+    job_queue,
+    start_docker,
+)
 from odoo_manager_core import jobs as job_control
 from odoo_manager_core.archives import (
     SAFE_IMPORT_NAME_RE,
@@ -2859,9 +2867,33 @@ def refresh_after_job():
     EVENT_WAKE.set()
 
 
+# Durée habituelle, en secondes, des actions qui ne découpent pas elles-mêmes leur barre
+# d'avancement : sans mesure, elle règle sa vitesse. Les autres actions durent 30 s par défaut.
+JOB_EXPECTED_DURATIONS = {
+    "start_project_job": 40,
+    "stop_project_job": 15,
+    "update_project_job": 60,
+    "update_all_projects_job": 180,
+    "neutralize_database_job": 60,
+    "regenerate_assets_job": 60,
+    "reset_all_translations_job": 180,
+    "drop_database_job": 20,
+    "delete_project_job": 30,
+    "repository_modules_job": 60,
+    "install_traefik_job": 60,
+    "install_git_job": 120,
+    "start_mailpit_job": 40,
+    "stop_mailpit_job": 10,
+    "purge_deleted_projects_job": 60,
+    "remove_docker_images_job": 60,
+    "convert_wsl_addon_links_job": 60,
+}
+
+
 # Les fonctions sont relues à chaque appel : un test peut remplacer record_manager_error dans ce module.
 job_queue.configure(
     cancel_policies=JOB_CANCEL_POLICIES,
+    expected_durations=JOB_EXPECTED_DURATIONS,
     record_error=lambda *args, **kwargs: record_manager_error(*args, **kwargs),
     on_finished=lambda: refresh_after_job(),
 )
@@ -3164,6 +3196,7 @@ def migrate_project_job(job, project, force=False):
         job.add(f"Verrou PostgreSQL présent mais non confirmé : migration de {project} demandée malgré tout.")
     destination = WORKSPACE / project
 
+    job_progress.span("Mesure du projet", end=5, expected=30)
     job.add(f"Mesure de {project}...")
     # Lue une seule fois : elle sert à la mesure puis au contrôle de la copie.
     source_listing = list_tree(source, prefix) if prefix else None
@@ -3174,7 +3207,9 @@ def migrate_project_job(job, project, force=False):
         raise RuntimeError("Espace disque insuffisant dans l'environnement Linux pour cette copie.")
 
     def report(copied, total):
-        job.progress = {"current": copied, "total": total or measured["files"]}
+        job_progress.measure(copied, total or measured["files"])
+
+    job_progress.span("Copie du projet", end=88, expected=300)
 
     try:
         if prefix:
@@ -3191,6 +3226,7 @@ def migrate_project_job(job, project, force=False):
             shutil.rmtree(destination, ignore_errors=True)
         raise
 
+    job_progress.span("Contrôle de la copie", end=99, expected=60)
     job.add("Contrôle de la copie...")
     comparison = compare_projects(source, destination, prefix, source_listing=source_listing)
     if not comparison["identical"]:
@@ -3510,6 +3546,7 @@ def post_odoo_database_restore(job, url, backup_path, filename, db_name, master_
             connection.putheader("Content-Length", str(content_length))
             connection.putheader("Connection", "close")
             connection.endheaders()
+            job_progress.span("Envoi de la sauvegarde", end=40, expected=30)
             connection.send(prefix)
             with Path(backup_path).open("rb") as source:
                 while True:
@@ -3518,11 +3555,14 @@ def post_odoo_database_restore(job, url, backup_path, filename, db_name, master_
                         break
                     connection.send(chunk)
                     sent += len(chunk)
+                    job_progress.measure(sent, backup_size)
                     progress = int((sent * 100) / backup_size) if backup_size else 100
                     if progress >= next_progress:
                         job.add(f"Envoi de la sauvegarde vers Odoo... {min(progress, 100)} %")
                         next_progress = ((progress // 10) + 1) * 10
             connection.send(suffix)
+            # Odoo restaure pendant la requête, sans rien écrire : la barre avance avec le temps.
+            job_progress.span("Restauration de la base", end=90, expected=60 + backup_size / (4 * 1024 * 1024))
             response = connection.getresponse()
             content = response.read(1024 * 1024).decode("utf-8", errors="replace")
             return response.status, content
@@ -3551,6 +3591,7 @@ def restore_database_job(job, project, backup_path, filename, db_name, master_pw
         job.add("Base déclarée comme copie: " + ("oui" if copy else "non"))
         job.add("Neutralisation: " + ("activée" if neutralize else "désactivée"))
         job.add("Démarrage du projet avant restauration...")
+        job_progress.span("Démarrage du projet", end=15, expected=20)
         service.start_project(project, log=job.add)
 
         if db_name in set(list_databases_for(project)):
@@ -3599,6 +3640,7 @@ def restore_database_job(job, project, backup_path, filename, db_name, master_pw
                 raise OdooError(odoo_error)
             raise RuntimeError(f"Odoo a refusé la restauration (code {status}). Le détail est dans les logs d'Odoo.")
 
+        job_progress.span("Finalisation de la restauration", end=99, expected=60 if neutralize else 15)
         for waited in range(0, 122, 2):
             if db_name in set(list_databases_for(project)):
                 job.add(f"Base restaurée: {db_name}")
@@ -3645,6 +3687,7 @@ def create_database_job(job, project, db_name, master_pwd, login, password, lang
 
     job.add(f"Creation de la base {db_name} dans {project}")
     job.add("Demarrage du projet avant creation de base...")
+    job_progress.span("Démarrage du projet", end=20, expected=20)
     project_service().start_project(project, log=job.add)
 
     existing = set(list_databases_for(project))
@@ -3676,6 +3719,8 @@ def create_database_job(job, project, db_name, master_pwd, login, password, lang
     if country:
         form["country_code"] = country
 
+    # Odoo crée la base pendant la requête, sans rien écrire : la barre avance avec le temps.
+    job_progress.span("Création de la base", end=99, expected=150 if demo else 60)
     job.add(f"Appel Odoo: {url}")
     job.add(f"Langue: {lang}" + (f" · Pays: {country}" if country else ""))
     job.add("Donnees de demonstration: " + ("oui" if demo else "non"))
@@ -3689,10 +3734,8 @@ def create_database_job(job, project, db_name, master_pwd, login, password, lang
 
     max_wait = 120
     for waited in range(0, max_wait + 2, 2):
-        job.set_progress("Initialisation de la base Odoo", min(waited, max_wait), max_wait)
         databases = set(list_databases_for(project))
         if db_name in databases:
-            job.set_progress("Base Odoo prête", max_wait, max_wait)
             job.add(f"Base créée : {db_name}")
             clear_project_module_cache(project)
             job.result = {"kind": "database_creation", "database": db_name}
@@ -3724,6 +3767,7 @@ def duplicate_database_job(job, project, db_name, new_name, master_pwd, neutrali
     job.add(f"Duplication de {db_name} vers {new_name} dans {project}")
     job.add("Neutralisation: " + ("activée" if neutralize else "désactivée"))
     job.add("Démarrage du projet avant duplication...")
+    job_progress.span("Démarrage du projet", end=15, expected=20)
     service.start_project(project, log=job.add)
     if new_name in set(list_databases_for(project)):
         raise RuntimeError(f"La base existe déjà: {new_name}")
@@ -3752,7 +3796,10 @@ def duplicate_database_job(job, project, db_name, new_name, master_pwd, neutrali
             form["neutralize_database"] = "on"
         job.add(f"Appel Odoo: {url}")
         job.add("Les connexions ouvertes sur la base d'origine sont fermées par Odoo pendant la copie.")
+        # Odoo copie la base pendant la requête, sans rien écrire : la barre avance avec le temps.
+        job_progress.span("Copie de la base", end=85, expected=90)
         status, content = post_form_no_redirect(url, form, timeout=2 * 60 * 60)
+        job_progress.span("Finalisation de la copie", end=99, expected=60 if neutralize else 15)
         job.add(f"Réponse Odoo: HTTP {status}")
         odoo_error = extract_odoo_page_error(content) if status == 200 else ""
         if odoo_error:
@@ -4030,9 +4077,10 @@ def scan_disk_usage_job(job):
     step = 0
 
     def advance(label):
+        # Chaque élément mesuré occupe une part égale de la barre.
         nonlocal step
-        job.set_progress(label, step, total)
         step += 1
+        job_progress.span(label, end=step * job_progress.MAX_RUNNING_PERCENT / total, expected=5)
 
     project_rows = []
     for project in projects:
@@ -4071,7 +4119,6 @@ def scan_disk_usage_job(job):
             }
         except RuntimeError as exc:
             job.add(f"Images Docker non analysées : {exc}")
-    job.set_progress("Analyse terminée", total, total)
     report = {
         "scanned_at": time.time(),
         "workspace": str(WORKSPACE),
@@ -5175,6 +5222,8 @@ def create_project_job(
         job.add("Docker n'est pas disponible: le projet a été créé mais n'a pas été démarré.")
         return
 
+    # Le premier démarrage télécharge et prépare les images du projet : c'est souvent le plus long.
+    job_progress.span("Démarrage du projet", end=99, expected=150)
     current_traefik = traefik_status(docker)
     if not current_traefik["installed"] and not current_traefik["running"]:
         job.add("Traefik est absent. Installation automatique avant le premier démarrage...")

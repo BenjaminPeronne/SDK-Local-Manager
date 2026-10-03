@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import Mock, PropertyMock, call, patch
 
 import odoo_manager_web as web
-from odoo_manager_core import command_output, job_queue
+from odoo_manager_core import command_output, job_progress, job_queue
 from odoo_manager_core.config import ManagerSettings
 from odoo_manager_core.http_routes import RouteRequest
 from odoo_manager_core.traefik import reset_traefik_entrypoint_cache
@@ -264,35 +264,38 @@ class OutputProgressTests(unittest.TestCase):
     """La barre d'avancement lit ce que les commandes longues écrivent."""
 
     def test_git_phases_drive_the_bar_without_filling_the_history(self):
-        cases = {
-            "remote: Compressing objects:  45% (9/20)": ("Compression des objets", 9, 20, True),
-            "Receiving objects:  17% (2451/14000), 12.00 MiB | 3.00 MiB/s": ("Réception des objets", 2451, 14000, True),
-            "Receiving objects: 100% (14000/14000), 48.00 MiB | 3.00 MiB/s, done.": (
-                "Réception des objets",
-                14000,
-                14000,
-                False,
-            ),
-            "Resolving deltas:  60% (600/1000)": ("Application des différences", 600, 1000, True),
-            "Updating files:  99% (1400/1416)": ("Écriture des fichiers", 1400, 1416, True),
-            "Filtering content:  20%": ("Récupération des fichiers volumineux", 20, 100, True),
-        }
-        for line, expected in cases.items():
+        # Chaque phase repart de 0 % dans la sortie de Git ; bout à bout, elles ne reculent jamais.
+        lines = [
+            ("remote: Compressing objects:  45% (9/20)", True),
+            ("Receiving objects:  17% (2451/14000), 12.00 MiB | 3.00 MiB/s", True),
+            ("Receiving objects: 100% (14000/14000), 48.00 MiB | 3.00 MiB/s, done.", False),
+            ("Resolving deltas:  60% (600/1000)", True),
+            ("Updating files:  99% (1400/1416)", True),
+            ("Filtering content:  20%", True),
+        ]
+        fractions = []
+        for line, transient in lines:
             with self.subTest(line=line):
                 progress = command_output.parse_output_progress(line)
                 self.assertIsNotNone(progress)
-                self.assertEqual(
-                    expected,
-                    (progress["label"], progress["current"], progress["total"], progress["transient"]),
-                )
+                self.assertEqual(transient, progress["transient"])
+                fractions.append(progress["fraction"])
+        self.assertEqual(sorted(fractions[:5]), fractions[:5])
+        self.assertAlmostEqual(0.75, fractions[2])
+        self.assertTrue(all(0 <= fraction <= 1 for fraction in fractions))
 
     def test_manager_counters_drive_the_bar_and_stay_in_the_history(self):
         progress = command_output.parse_output_progress("Préparation des liens: 1200/1416")
 
-        self.assertEqual(
-            ("Préparation des liens", 1200, 1416, False),
-            (progress["label"], progress["current"], progress["total"], progress["transient"]),
+        self.assertAlmostEqual(1200 / 1416, progress["fraction"])
+        self.assertFalse(progress["transient"])
+
+    def test_odoo_module_loading_drives_the_bar(self):
+        progress = command_output.parse_output_progress(
+            "2026-10-02 10:00:00,123 42 INFO demo odoo.modules.loading: Loading module sale (45/87)"
         )
+
+        self.assertEqual({"index": 45, "total": 87, "transient": False}, progress)
 
     def test_ordinary_output_is_never_mistaken_for_progress(self):
         for line in (
@@ -308,7 +311,8 @@ class OutputProgressTests(unittest.TestCase):
 
     def test_rewritten_lines_feed_the_bar_only(self):
         job = job_queue.Job.__new__(job_queue.Job)
-        job.lines, job.output, job.output_total, job.progress = [], "", 0, None
+        job.lines, job.output, job.output_total = [], "", 0
+        job.progress = job_progress.JobProgress(expected_seconds=10_000, clock=lambda: 0)
         job.control = Mock()
 
         job.add("Receiving objects:  17% (2451/14000)\n")
@@ -319,7 +323,8 @@ class OutputProgressTests(unittest.TestCase):
             ["Receiving objects: 100% (14000/14000), done.", "Préparation des liens: 1200/1416"],
             job.lines,
         )
-        self.assertEqual({"label": "Préparation des liens", "current": 1200, "total": 1416}, job.progress)
+        # 1200/1416 de la seule tranche de l'action, plafonnée à 99 % avant la fin.
+        self.assertEqual({"label": "Traitement en cours", "percent": 83}, job.progress.snapshot())
 
 
 class ManagerErrorLogTests(unittest.TestCase):
@@ -790,16 +795,28 @@ class JobResourceTests(unittest.TestCase):
         self.assertEqual(job_queue.JOB_LINES_LIMIT, len(snapshot["lines"]))
         self.assertTrue(snapshot["output"].endswith("ligne 29999\n"))
 
-    def test_job_snapshot_exposes_structured_progress(self):
-        job = job_queue.Job("Progress", lambda current_job: current_job.set_progress("Initialisation", 30, 120))
+    def test_job_snapshot_exposes_one_global_percent_while_running(self):
+        release = threading.Event()
+
+        def work(_job):
+            job_progress.span("Création de la base", end=50, expected=10_000)
+            job_progress.measure(1, 2)
+            release.wait(5)
+
+        job = job_queue.Job("Progress", work)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            snapshot = job_queue.jobs_snapshot(detail_job_id=job.id, compact=True)[0]
+            if snapshot["progress"] and snapshot["progress"]["label"] == "Création de la base":
+                break
+            time.sleep(0.01)
+        release.set()
         self.wait_for(job)
 
-        snapshot = job_queue.jobs_snapshot(detail_job_id=job.id, compact=True)[0]
-
-        self.assertEqual(
-            snapshot["progress"],
-            {"label": "Initialisation", "current": 30, "total": 120},
-        )
+        self.assertEqual("Création de la base", snapshot["progress"]["label"])
+        self.assertGreaterEqual(snapshot["progress"]["percent"], 25)
+        self.assertLess(snapshot["progress"]["percent"], 50)
+        self.assertIsNone(job_queue.jobs_snapshot(detail_job_id=job.id, compact=True)[0]["progress"])
 
     @patch("odoo_manager_web.record_manager_error")
     def test_failed_job_exposes_business_error_without_traceback(self, _record_error):

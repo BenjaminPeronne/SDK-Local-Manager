@@ -4,7 +4,7 @@ export function jobsFingerprint(items: Job[]) {
   return items
     .map(
       (job) =>
-        `${job.id}:${job.status}:${job.finished_at || ""}:${job.error_message || ""}:${job.lines.length}:${job.last_line ?? job.lines.at(-1) ?? ""}:${job.output_total ?? job.output?.length ?? 0}:${job.progress?.label || ""}:${job.progress?.current ?? ""}:${job.progress?.total ?? ""}`,
+        `${job.id}:${job.status}:${job.finished_at || ""}:${job.error_message || ""}:${job.lines.length}:${job.last_line ?? job.lines.at(-1) ?? ""}:${job.output_total ?? job.output?.length ?? 0}:${job.progress?.label || ""}:${job.progress?.percent ?? ""}`,
     )
     .join("|");
 }

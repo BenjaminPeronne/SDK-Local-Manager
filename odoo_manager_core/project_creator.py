@@ -12,6 +12,7 @@ import zipfile
 from http.cookiejar import CookieJar
 from pathlib import Path
 
+from . import job_progress
 from .platform import (
     execution_path,
     find_wsl_executable_distribution,
@@ -705,6 +706,7 @@ class ProjectCreator:
             next_report = time.monotonic() + RIKA_PROGRESS_INTERVAL_SECONDS
             for index, entry in enumerate(safe_entries, start=1):
                 bundle.extract(entry, destination)
+                job_progress.measure(index, total)
                 if log and time.monotonic() >= next_report:
                     log(f"Décompression... {index}/{total} ({index * 100 // total} %)")
                     next_report = time.monotonic() + RIKA_PROGRESS_INTERVAL_SECONDS
@@ -768,6 +770,7 @@ class ProjectCreator:
             }
         ).encode("utf-8")
         try:
+            job_progress.span("Connexion à RIKA", end=4, expected=10)
             self.log(log, "Connexion sécurisée à RIKA...")
             with opener.open(
                 urllib.request.Request(
@@ -783,6 +786,7 @@ class ProjectCreator:
             self.log(log, "Authentification RIKA acceptée.")
 
             encoded_instance = urllib.parse.quote(instance, safe="")
+            job_progress.span("Préparation de la copie RIKA", end=20, expected=90)
             self.log(log, f"Génération de la copie RIKA de {instance}...")
             with opener.open(
                 urllib.parse.urljoin(RIKA_BASE_URL, f"{encoded_instance}?action=zip"),
@@ -821,6 +825,7 @@ class ProjectCreator:
                 content_length = int(response.headers.get("Content-Length") or 0)
                 if content_length > MAX_RIKA_ARCHIVE_BYTES:
                     raise RuntimeError("La copie RIKA dépasse la taille maximale autorisée.")
+                job_progress.span("Téléchargement de la copie RIKA", end=55, expected=120)
                 if content_length:
                     self.log(log, f"Taille de la copie RIKA : {format_size(content_length)}.")
                 downloaded = 0
@@ -834,6 +839,8 @@ class ProjectCreator:
                     if downloaded > MAX_RIKA_ARCHIVE_BYTES:
                         raise RuntimeError("La copie RIKA dépasse la taille maximale autorisée.")
                     output.write(chunk)
+                    if content_length:
+                        job_progress.measure(downloaded, content_length)
                     if time.monotonic() >= next_report:
                         progress = f" ({min(downloaded * 100 // content_length, 100)} %)" if content_length else ""
                         self.log(
@@ -871,6 +878,7 @@ class ProjectCreator:
             raise RuntimeError("RIKA est inaccessible. Vérifie la connexion réseau puis réessaie.") from exc
 
         extracted = Path(temporary) / "rika"
+        job_progress.span("Décompression de la copie RIKA", end=75, expected=60)
         self.log(log, "Décompression et contrôle de la copie RIKA...")
         try:
             self.extract_rika_archive(archive, extracted, log=lambda line: self.log(log, line))
@@ -935,6 +943,10 @@ class ProjectCreator:
                     requested_version=version,
                 )
             self.log(log, f"Création du projet {name} en Odoo {version}")
+            if rika_source is not None:
+                job_progress.span("Préparation du projet", end=85, expected=15)
+            else:
+                job_progress.span("Préparation du projet", end=3, expected=10)
             self.clone(LOCAL_TEMPLATE_REPOSITORY, version, staged_project, log=log)
 
             odoo_root = staged_project / "odoo"
@@ -956,14 +968,20 @@ class ProjectCreator:
             addons_dir.mkdir(parents=True, exist_ok=True)
             store_dir.mkdir(parents=True, exist_ok=True)
 
+            with_repository = source_type == "gitlab"
+            job_progress.span("Téléchargement d'Odoo", end=40 if with_repository else 48, expected=150)
             self.clone(ODOO_REPOSITORY, version, odoo_root / "odoo", log=log)
             enterprise_dir = store_dir / "odoo_entreprise"
+            job_progress.span("Téléchargement d'Odoo Enterprise", end=62 if with_repository else 72, expected=90)
             self.clone(ENTERPRISE_REPOSITORY, version, enterprise_dir, log=log)
+            job_progress.span("Préparation des modules", end=66 if with_repository else 76, expected=15)
             self.link_modules(enterprise_dir, addons_dir, log=log)
 
-            if source_type == "gitlab":
+            if with_repository:
                 custom_dir = store_dir / repository_slug(repository_url)
+                job_progress.span("Téléchargement des modules du dépôt", end=74, expected=60)
                 self.clone(repository_url, repository_branch, custom_dir, log=log)
+                job_progress.span("Préparation des modules", end=76, expected=15)
                 custom_count = self.link_modules(custom_dir, addons_dir, log=log, replace=True)
                 if custom_count == 0:
                     raise RuntimeError("Aucun module Odoo (__manifest__.py) n'a été trouvé dans le dépôt d'addons.")

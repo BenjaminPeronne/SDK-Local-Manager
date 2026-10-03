@@ -111,3 +111,38 @@ export function wslSetupError(error: unknown): string {
   }
   return message || "La préparation a échoué.";
 }
+
+// Durée habituelle de chaque étape de la préparation, en secondes. Aucune ne publie son
+// avancement : ces durées donnent à chacune sa part de la barre et la vitesse à laquelle la
+// barre avance pendant qu'elle tourne.
+const PREPARE_STEP_SECONDS = { import: 180, backend: 20, provision: 120 } as const;
+type PrepareStepName = keyof typeof PREPARE_STEP_SECONDS;
+const PREPARE_STEP_ORDER: PrepareStepName[] = ["import", "backend", "provision"];
+
+/**
+ * Avancement global de la préparation, de 0 à 100 : une seule barre qui ne recule pas.
+ *
+ * Pendant une étape, la barre approche de sa fin sans l'atteindre : aux deux tiers à la durée
+ * habituelle, puis de plus en plus lentement si l'étape dure davantage.
+ */
+export function prepareProgressPercent(
+  progress: { step: string; index: number; total: number } | null,
+  stepElapsedSeconds: number,
+): number {
+  if (!progress) return 0;
+  if (progress.step === "done") return 100;
+  // Seule une première installation passe par les trois étapes ; une mise à jour saute l'import.
+  const planned =
+    progress.total >= PREPARE_STEP_ORDER.length
+      ? PREPARE_STEP_ORDER
+      : PREPARE_STEP_ORDER.slice(PREPARE_STEP_ORDER.length - progress.total);
+  const current = progress.step as PrepareStepName;
+  const position = planned.indexOf(current);
+  if (position < 0) return 0;
+  const total = planned.reduce((sum, step) => sum + PREPARE_STEP_SECONDS[step], 0);
+  const done = planned.slice(0, position).reduce((sum, step) => sum + PREPARE_STEP_SECONDS[step], 0);
+  const expected = PREPARE_STEP_SECONDS[current];
+  const elapsed = Math.max(0, stepElapsedSeconds);
+  const running = expected * (elapsed / (elapsed + expected / 2));
+  return Math.min(99, Math.floor(((done + running) / total) * 100));
+}

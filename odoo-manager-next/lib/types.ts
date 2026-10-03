@@ -240,10 +240,10 @@ export type Job = {
   output_from?: number;
   output_total?: number;
   last_line?: string;
+  // Avancement global de l'action en cours : une seule barre, de 0 à 100, qui ne recule pas.
   progress?: {
     label: string;
-    current?: number | null;
-    total?: number | null;
+    percent: number;
   } | null;
   result?: {
     kind?: string;

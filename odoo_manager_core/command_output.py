@@ -7,16 +7,17 @@ la langue de l'utilisateur plutôt que dans celle de la commande.
 import html
 import re
 
-# Étapes de `git clone --progress`, dans l'ordre où Git les parcourt. Chacune repart de 0 :
-# la barre affiche l'étape en cours plutôt qu'un total inventé sur l'ensemble.
+# Étapes de `git clone --progress`, dans l'ordre où Git les parcourt, avec la part de la
+# récupération que chacune représente. Chaque étape repart de 0 % dans la sortie de Git :
+# les mettre bout à bout donne une seule progression qui ne recule pas.
 GIT_PROGRESS_PHASES = {
-    "Counting objects": "Recensement des objets",
-    "Enumerating objects": "Recensement des objets",
-    "Compressing objects": "Compression des objets",
-    "Receiving objects": "Réception des objets",
-    "Resolving deltas": "Application des différences",
-    "Updating files": "Écriture des fichiers",
-    "Filtering content": "Récupération des fichiers volumineux",
+    "Counting objects": (0.0, 0.05),
+    "Enumerating objects": (0.0, 0.05),
+    "Compressing objects": (0.05, 0.05),
+    "Receiving objects": (0.10, 0.65),
+    "Resolving deltas": (0.75, 0.15),
+    "Updating files": (0.90, 0.10),
+    "Filtering content": (0.90, 0.10),
 }
 
 
@@ -28,15 +29,22 @@ GIT_PROGRESS_RE = re.compile(
 COUNTED_PROGRESS_RE = re.compile(r"^(?P<label>[^:]{3,60}):\s+(?P<current>\d+)/(?P<total>\d+)\s*$")
 
 
+# Odoo annonce en INFO chaque module qu'il installe ou met à jour, avec sa place dans la liste
+# des modules de la base.
+ODOO_MODULE_LOADING_RE = re.compile(r"odoo\.modules\.loading: Loading module \S+ \((?P<index>\d+)/(?P<total>\d+)\)")
+
+
 def parse_output_progress(text):
-    """Avancement chiffré lu dans une ligne de sortie, ou None.
+    """Avancement lu dans une ligne de sortie, ou None.
 
     Les étapes les plus longues sont des commandes externes : leur seule mesure d'avancement
-    est ce qu'elles écrivent. `transient` marque une ligne que la commande réécrit en place,
-    des centaines de fois : elle nourrit la barre, pas l'historique.
+    est ce qu'elles écrivent. Le résultat porte soit une `fraction` (0 à 1) de la commande,
+    soit la place (`index`, `total`) d'un module Odoo dans la liste qu'il parcourt.
+    `transient` marque une ligne que la commande réécrit en place, des centaines de fois :
+    elle nourrit la barre, pas l'historique.
 
-    Cette lecture ne fait que compléter `set_progress`, que les actions appellent déjà
-    directement quand elles connaissent leur propre avancement.
+    Cette lecture ne fait que compléter l'avancement que les actions déclarent elles-mêmes
+    quand elles le connaissent.
     """
     line = text.strip()
     # Le serveur Git préfixe ses propres étapes, réécrites elles aussi en place.
@@ -44,23 +52,25 @@ def parse_output_progress(text):
         line = line[len("remote: ") :]
     match = GIT_PROGRESS_RE.match(line)
     if match:
-        label = GIT_PROGRESS_PHASES.get(match.group("phase"))
-        if label is None:
+        phase = GIT_PROGRESS_PHASES.get(match.group("phase"))
+        if phase is None:
             return None
         if match.group("total") and int(match.group("total")):
-            current, total = int(match.group("current")), int(match.group("total"))
+            done = min(int(match.group("current")) / int(match.group("total")), 1.0)
         else:
-            current, total = min(int(match.group("percent")), 100), 100
-        return {"label": label, "current": current, "total": total, "transient": not line.endswith("done.")}
+            done = min(int(match.group("percent")), 100) / 100
+        offset, weight = phase
+        return {"fraction": offset + weight * done, "transient": not line.endswith("done.")}
     match = COUNTED_PROGRESS_RE.match(line)
     if match and int(match.group("total")):
         return {
-            "label": match.group("label").strip(),
-            "current": int(match.group("current")),
-            "total": int(match.group("total")),
+            "fraction": min(int(match.group("current")) / int(match.group("total")), 1.0),
             # Une ligne écrite par le gestionnaire lui-même : elle reste dans l'historique.
             "transient": False,
         }
+    match = ODOO_MODULE_LOADING_RE.search(line)
+    if match and int(match.group("total")):
+        return {"index": int(match.group("index")), "total": int(match.group("total")), "transient": False}
     return None
 
 

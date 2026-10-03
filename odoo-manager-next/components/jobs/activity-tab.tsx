@@ -119,13 +119,6 @@ export function ActivityTab({
   const outputTitle = scopedExternalLogView?.title || selectedJob?.title || "Aucune action sélectionnée";
   const outputProgress =
     !scopedExternalLogView && selectedJob && isJobActive(selectedJob) ? selectedJob.progress : null;
-  const outputProgressPercent =
-    outputProgress &&
-    typeof outputProgress.current === "number" &&
-    typeof outputProgress.total === "number" &&
-    outputProgress.total > 0
-      ? Math.max(0, Math.min(100, Math.round((outputProgress.current / outputProgress.total) * 100)))
-      : null;
   const outputTitleIsLong = outputTitle.length > LOG_DESCRIPTION_MAX_LENGTH;
   const displayedOutputTitle =
     outputTitleIsLong && !logDescriptionExpanded
@@ -269,10 +262,8 @@ export function ActivityTab({
             {!scopedExternalLogView && selectedJob && <JobCancelState job={selectedJob} action={selectedJobStop} />}
             {!scopedExternalLogView && selectedJob && isJobActive(selectedJob) && (
               <JobProgressPanel
-                label={
-                  outputProgress?.label || selectedJob.last_line || selectedJob.lines.at(-1) || "Traitement en cours"
-                }
-                percent={outputProgressPercent}
+                label={outputProgress?.label || "Traitement en cours"}
+                percent={outputProgress?.percent ?? 0}
                 action={selectedJobStop}
               />
             )}
