@@ -3,6 +3,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { DropdownMenu } from "@radix-ui/themes";
 import {
+  CalendarClock,
   CheckCircle2,
   ChevronRight,
   Copy,
@@ -17,6 +18,7 @@ import {
   Terminal,
   Trash2,
   Upload,
+  UserCheck,
 } from "lucide-react";
 import { statusVariant } from "@/lib/format";
 import type { DatabaseMenuAction, DependencyReport, PendingDatabaseAction, Project } from "@/lib/types";
@@ -193,6 +195,14 @@ export function DatabasesTab({
                     <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "admin_password")}>
                       <KeyRound className="h-4 w-4" />
                       Mot de passe admin
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "test_user")}>
+                      <UserCheck className="h-4 w-4" />
+                      Utilisateur de recette
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "fix_expiration")}>
+                      <CalendarClock className="h-4 w-4" />
+                      Corriger une base expirée
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Label>Outils</DropdownMenu.Label>

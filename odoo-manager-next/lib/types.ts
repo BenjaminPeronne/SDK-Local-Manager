@@ -146,6 +146,8 @@ export type DatabaseMenuAction =
   | "reset_translations"
   | "neutralize"
   | "admin_password"
+  | "test_user"
+  | "fix_expiration"
   | "psql"
   | "dependencies"
   | "duplicate"

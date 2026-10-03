@@ -239,8 +239,10 @@ API_ACTIONS = (
     "remove_docker_images",
     "restore_deleted_project",
     "scan_disk_usage",
+    "create_test_user",
     "drop_database",
     "duplicate_database",
+    "fix_expired_database",
     "ignore_missing_modules_locally",
     "install_git",
     "install_module",
@@ -2797,6 +2799,8 @@ JOB_CANCEL_POLICIES = {
     "regenerate_assets_job": (True, ODOO_SCRIPT_CANCEL_HINT),
     "reset_all_translations_job": (True, ODOO_SCRIPT_CANCEL_HINT),
     "reset_admin_password_job": (True, ODOO_SCRIPT_CANCEL_HINT),
+    "create_test_user_job": (True, ODOO_SCRIPT_CANCEL_HINT),
+    "fix_expired_database_job": (True, ODOO_SCRIPT_CANCEL_HINT),
     "restore_database_job": (
         True,
         "La restauration est interrompue et la base partiellement restaurée est supprimée avec son filestore.",
@@ -3434,6 +3438,34 @@ def reset_all_translations_job(job, project, db_name, languages):
 def reset_admin_password_job(job, project, db_name, password):
     project, db_name = existing_odoo_database(project, db_name)
     project_service().run_odoo_reset_admin_password(project, db_name, validate_admin_password(password), log=job.add)
+
+
+TEST_USER_LOGIN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@+-]{0,63}$")
+
+
+def validate_test_user_login(login):
+    login = str(login or "").strip()
+    if not login:
+        raise ValueError("Saisis l'identifiant de l'utilisateur de recette.")
+    if not TEST_USER_LOGIN_RE.fullmatch(login):
+        raise ValueError(
+            "L'identifiant de recette accepte lettres, chiffres et . _ @ + -, sans espace, 64 caractères au plus."
+        )
+    if login.lower() in {"admin", "__system__"}:
+        raise ValueError("Cet identifiant est réservé à l'administrateur : choisis-en un autre.")
+    return login
+
+
+def create_test_user_job(job, project, db_name, login, with_settings=False):
+    project, db_name = existing_odoo_database(project, db_name)
+    project_service().run_odoo_create_test_user(
+        project, db_name, validate_test_user_login(login), with_settings=bool(with_settings), log=job.add
+    )
+
+
+def fix_expired_database_job(job, project, db_name):
+    project, db_name = existing_odoo_database(project, db_name)
+    project_service().run_odoo_fix_expired_database(project, db_name, log=job.add)
 
 
 def local_odoo_connection(url, timeout):
@@ -6806,6 +6838,18 @@ def reset_admin_password_action(payload):
     )
 
 
+def create_test_user_action(payload):
+    project = payload_project(payload)
+    db_name = payload_database(payload)
+    login = validate_test_user_login(payload.get("login"))
+    return Job(
+        f"Créer l'utilisateur de recette {login} sur {db_name}",
+        create_test_user_job,
+        (project, db_name, login, bool(payload.get("with_settings", False))),
+        project=project,
+    )
+
+
 def delete_project_action(payload):
     project = payload_project(payload)
     # Double clic ou double envoi : la seconde suppression échouerait sur un projet déjà parti.
@@ -6903,6 +6947,8 @@ JOB_ACTIONS = {
     "reset_all_translations": reset_all_translations_action,
     "regenerate_assets": database_job("Régénérer les assets de {db}", regenerate_assets_job),
     "reset_admin_password": reset_admin_password_action,
+    "create_test_user": create_test_user_action,
+    "fix_expired_database": database_job("Corriger l'expiration de {db}", fix_expired_database_job),
     "delete_project": delete_project_action,
     "delete_module_code": delete_module_code_action,
     "install_module": module_command_action("--install-module", "Installer"),

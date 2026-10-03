@@ -111,6 +111,8 @@ ODOO_STARTUP_LOG = "/home/odoo/srv/data/odoo-manager-startup.log"
 ODOO_STARTUP_STATUS = "/home/odoo/srv/data/odoo-manager-startup.status"
 ODOO_LOG_FILE = "/home/odoo/srv/data/odoo.log"
 PENDING_MODULE_STATES_SQL = "('to install','to upgrade','to remove')"
+# Nouvelle échéance d'une base expirée corrigée : Odoo n'avertit qu'à 30 jours de la date.
+DATABASE_EXPIRATION_DAYS = 365
 ODOO_STATE_MARKER = "odoo-manager-state:"
 # Même choix que le démarrage du serveur : le script `odoo` de l'image peut échouer (patch
 # LOG_ATTACHMENTS qui ne s'applique pas, « /usr/bin/env: bad interpreter » sur une copie RIKA),
@@ -2118,6 +2120,218 @@ print("Mot de passe réinitialisé pour l'identifiant : " + user.login)
             log=log,
         )
         self.log(log, "Mot de passe administrateur réinitialisé.")
+        self.log(log, f"URL Odoo: {self.project_url(project)}")
+
+    def run_odoo_create_test_user(self, project, db_name, login, with_settings=False, log=None):
+        """Crée ou remet à jour un utilisateur de recette, mot de passe identique à l'identifiant.
+
+        Il reçoit le niveau le plus élevé de chaque application, sauf les Ressources humaines
+        (paie, congés, recrutement, notes de frais...) et, par défaut, l'administration.
+        """
+        if not login:
+            raise ValueError("L'identifiant de l'utilisateur de recette est vide.")
+        self.ensure_odoo_containers_ready(project, log=log)
+        self.log(log, "")
+        self.log(log, "Création de l'utilisateur de recette")
+        self.log(log, f"Projet: {project}")
+        self.log(log, f"Base: {db_name}")
+        self.log(log, f"Identifiant et mot de passe: {login}")
+        self.log(log, "Accès aux Paramètres: " + ("oui" if with_settings else "non"))
+        # Odoo 19 regroupe les niveaux d'une application dans res.groups.privilege et
+        # renomme groups_id en group_ids ; les versions précédentes passent par category_id.
+        script = """import os
+
+login = os.environ["ODOO_TEST_USER_LOGIN"]
+with_settings = os.environ.get("ODOO_TEST_USER_SETTINGS") == "1"
+Users = env["res.users"].sudo().with_context(active_test=False, no_reset_password=True)
+Groups = env["res.groups"].sudo()
+Category = env["ir.module.category"].sudo()
+users_field = "group_ids" if "group_ids" in Users._fields else "groups_id"
+uses_privileges = "privilege_id" in Groups._fields
+
+
+def ref(xmlid):
+    return env.ref(xmlid, raise_if_not_found=False)
+
+
+def closure(groups):
+    result = Groups.browse()
+    pending = groups
+    while pending:
+        result |= pending
+        pending = pending.mapped("implied_ids") - result
+    return result
+
+
+def category_of(group):
+    if uses_privileges:
+        return group.privilege_id.category_id
+    return group.category_id
+
+
+def selection_of(group):
+    return group.privilege_id if uses_privileges else group.category_id
+
+
+hr_root = ref("base.module_category_human_resources")
+hr_categories = Category.search([("id", "child_of", hr_root.id)]) if hr_root else Category.browse()
+# Les administrateurs de Documents voient tous les fichiers, bulletins de paie compris :
+# le compte de recette reste au niveau utilisateur, qui respecte les droits par dossier.
+sensitive_xmlids = {"documents.group_documents_manager", "documents.group_documents_system"}
+xmlids = {}
+for data in env["ir.model.data"].sudo().search([("model", "=", "res.groups")]):
+    xmlids.setdefault(data.res_id, (data.module, data.name))
+
+
+def is_sensitive(group):
+    module, name = xmlids.get(group.id, ("", ""))
+    if module + "." + name in sensitive_xmlids:
+        return True
+    if module == "hr" or "payroll" in module:
+        return True
+    if module.startswith("hr_") and not module.startswith("hr_timesheet"):
+        return True
+    return bool(category_of(group) & hr_categories)
+
+
+def is_hidden(group):
+    category = category_of(group)
+    while category:
+        if "visible" in category._fields and not category.visible:
+            return True
+        category = category.parent_id
+    return False
+
+
+admin_groups = Groups.browse([g.id for g in (ref("base.group_erp_manager"), ref("base.group_system")) if g])
+# Options activées dans les Paramètres (ex. « Afficher le PDF de la fiche de paie ») : tout
+# utilisateur interne les reçoit déjà, elles ne donnent accès à aucune donnée.
+baseline = closure(ref("base.group_user"))
+user_type = ref("base.module_category_user_type")
+candidates = Groups.search([("share", "=", False)])
+allowed = Groups.browse()
+excluded = Groups.browse()
+for group in candidates:
+    if not selection_of(group) or (user_type and category_of(group) == user_type) or is_hidden(group):
+        continue
+    implied = closure(group) - baseline
+    if implied.filtered(is_sensitive):
+        excluded |= group
+    elif implied & admin_groups:
+        continue
+    else:
+        allowed |= group
+
+# Dans chaque application, seul le niveau le plus élevé est donné : il inclut les autres.
+granted = Groups.browse()
+for selection in allowed.mapped(lambda group: selection_of(group)):
+    levels = allowed.filtered(lambda group: selection_of(group) == selection)
+    for group in levels:
+        others = levels - group
+        if not any(group in closure(other) - other for other in others):
+            granted |= group
+granted |= ref("base.group_user")
+if with_settings and ref("base.group_system"):
+    granted |= ref("base.group_system")
+
+leaked = (closure(granted) - baseline).filtered(is_sensitive)
+if leaked:
+    raise SystemExit("Droits sensibles accordés par erreur, rien n'est enregistré : " + ", ".join(leaked.mapped("full_name")))
+
+protected = Users.browse([user.id for user in (ref("base.user_root"), ref("base.user_admin")) if user])
+user = Users.search([("login", "=", login)], limit=1)
+if user & protected:
+    raise SystemExit("L'identifiant " + login + " est celui de l'administrateur : choisis-en un autre.")
+
+admin = ref("base.user_admin") or env.user
+companies = env["res.company"].sudo().search([])
+values = {
+    "password": login,
+    "active": True,
+    users_field: [(6, 0, granted.ids)],
+    "company_ids": [(6, 0, companies.ids)],
+    "company_id": (admin.company_id or companies[:1]).id,
+}
+if user:
+    user.write(values)
+    print("Utilisateur existant mis à jour : " + login)
+else:
+    values.update({"name": "Utilisateur de recette (" + login + ")", "login": login, "lang": admin.lang, "tz": admin.tz})
+    user = Users.create(values)
+    print("Utilisateur créé : " + login)
+env.cr.commit()
+
+print("Droits accordés :")
+for name in sorted(granted.mapped("full_name")):
+    print("  + " + name)
+if excluded:
+    print("Droits non accordés (ressources humaines, paie, données personnelles) :")
+    for name in sorted(excluded.mapped("full_name")):
+        print("  - " + name)
+"""
+        self.run_odoo_shell_script(
+            project,
+            db_name,
+            script,
+            "La création de l'utilisateur de recette a échoué",
+            env={"ODOO_TEST_USER_LOGIN": login, "ODOO_TEST_USER_SETTINGS": "1" if with_settings else "0"},
+            log=log,
+        )
+        self.log(log, f"Utilisateur de recette prêt : identifiant {login}, mot de passe {login}.")
+        self.log(log, f"URL Odoo: {self.project_url(project)}")
+
+    def run_odoo_fix_expired_database(self, project, db_name, log=None):
+        """Repousse la date d'expiration et coupe la tâche qui la redemande aux serveurs d'Odoo."""
+        self.ensure_odoo_containers_ready(project, log=log)
+        self.log(log, "")
+        self.log(log, "Correction d'une base expirée")
+        self.log(log, f"Projet: {project}")
+        self.log(log, f"Base: {db_name}")
+        # La tâche planifiée « Publisher: Update Notification » interroge odoo.com chaque
+        # semaine et réécrit database.expiration_date : la date seule ne tiendrait pas.
+        script = f"""import datetime
+
+from odoo import fields
+
+ICP = env["ir.config_parameter"].sudo()
+# Odoo 20 remplace get_param/set_param par des accesseurs typés.
+get_param = getattr(ICP, "get_str", None) or ICP.get_param
+set_param = getattr(ICP, "set_str", None) or ICP.set_param
+previous = get_param("database.expiration_date") or ""
+expiration = fields.Datetime.now() + datetime.timedelta(days={DATABASE_EXPIRATION_DAYS})
+try:
+    current = fields.Datetime.to_datetime(previous)
+except ValueError:
+    current = None
+if current and current > expiration:
+    print("Date d'expiration conservée, déjà plus lointaine : " + previous)
+else:
+    expiration = fields.Datetime.to_string(expiration)
+    set_param("database.expiration_date", expiration)
+    print("Date d'expiration : " + (previous or "aucune") + " -> " + expiration)
+
+Cron = env["ir.cron"].sudo().with_context(active_test=False)
+crons = Cron.search([("model_id.model", "=", "publisher_warranty.contract")])
+legacy = env.ref("mail.ir_cron_module_update_notification", raise_if_not_found=False)
+if legacy:
+    crons |= legacy.sudo()
+active = crons.filtered("active")
+if active:
+    active.write({{"active": False}})
+if crons:
+    print(f"Contact avec les serveurs d'Odoo désactivé ({{len(active)}} tâche(s) arrêtée(s) sur {{len(crons)}}).")
+else:
+    print("Aucune tâche de contact avec les serveurs d'Odoo dans cette base.")
+env.cr.commit()
+"""
+        self.run_odoo_shell_script(
+            project,
+            db_name,
+            script,
+            "La correction de la base expirée a échoué",
+            log=log,
+        )
+        self.log(log, "Base corrigée. Recharge la page Odoo pour faire disparaître le message d'expiration.")
         self.log(log, f"URL Odoo: {self.project_url(project)}")
 
     def pending_module_operations(self, project, db_name):

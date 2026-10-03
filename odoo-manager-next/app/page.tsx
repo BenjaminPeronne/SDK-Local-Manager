@@ -66,8 +66,10 @@ import { DatabasesTab } from "@/components/databases/databases-tab";
 import { DependenciesDialog } from "@/components/databases/dependencies-dialog";
 import { DropDatabaseDialog } from "@/components/databases/drop-database-dialog";
 import { DuplicateDatabaseDialog } from "@/components/databases/duplicate-database-dialog";
+import { FixExpiredDatabaseDialog } from "@/components/databases/fix-expired-database-dialog";
 import { NeutralizeDatabaseDialog } from "@/components/databases/neutralize-database-dialog";
 import { RestoreDatabaseDialog } from "@/components/databases/restore-database-dialog";
+import { TestUserDialog } from "@/components/databases/test-user-dialog";
 import { ActivityTab } from "@/components/jobs/activity-tab";
 import { CancelJobDialog } from "@/components/jobs/cancel-job-dialog";
 import { RunningJobsBanner } from "@/components/jobs/running-jobs-banner";
@@ -195,6 +197,8 @@ export default function Home() {
   const [uninstallDialogOpen, setUninstallDialogOpen] = useState(false);
   const [pendingTranslationResetModules, setPendingTranslationResetModules] = useState<string[]>([]);
   const [adminPasswordOpen, setAdminPasswordOpen] = useState(false);
+  const [testUserOpen, setTestUserOpen] = useState(false);
+  const [fixExpirationOpen, setFixExpirationOpen] = useState(false);
   const [storedRikaCredentials, setStoredRikaCredentials] = useState<StoredRikaCredentials | null>(null);
   const [allTranslationsOpen, setAllTranslationsOpen] = useState(false);
   const [translationLanguages, setTranslationLanguages] = useState<{ code: string; name: string }[] | null>(null);
@@ -1150,6 +1154,8 @@ export default function Home() {
     else if (action === "reset_translations") void openAllTranslationsReset();
     else if (action === "neutralize") setNeutralizeDbOpen(true);
     else if (action === "admin_password") setAdminPasswordOpen(true);
+    else if (action === "test_user") setTestUserOpen(true);
+    else if (action === "fix_expiration") setFixExpirationOpen(true);
     else if (action === "psql") void openPostgresqlConsole();
     else if (action === "dependencies") setDependenciesOpen(true);
     else if (action === "duplicate") setDuplicateDbOpen(true);
@@ -2092,6 +2098,27 @@ export default function Home() {
         onOpenChange={setAdminPasswordOpen}
         open={adminPasswordOpen}
         selectedDatabaseOrNotify={selectedDatabaseOrNotify}
+        selectedDb={selectedDb}
+        selectedProject={selectedProject}
+      />
+
+      <TestUserDialog
+        canUseDb={canUseDb}
+        createJob={createJob}
+        loading={loading}
+        onOpenChange={setTestUserOpen}
+        open={testUserOpen}
+        selectedDatabaseOrNotify={selectedDatabaseOrNotify}
+        selectedDb={selectedDb}
+        selectedProject={selectedProject}
+      />
+
+      <FixExpiredDatabaseDialog
+        canUseDb={canUseDb}
+        createJob={createJob}
+        loading={loading}
+        onOpenChange={setFixExpirationOpen}
+        open={fixExpirationOpen}
         selectedDb={selectedDb}
         selectedProject={selectedProject}
       />

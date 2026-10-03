@@ -2878,6 +2878,34 @@ class DatabaseNeutralizationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 web.validate_admin_password(invalid)
 
+    @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
+    @patch("odoo_manager_web.project_service")
+    @patch("odoo_manager_web.validate_project", return_value="DEMO")
+    def test_test_user_job_validates_login(self, _validate_project, project_service, _list_databases):
+        job = self.LogJob()
+
+        web.create_test_user_job(job, "DEMO", "demo", " recette ", True)
+
+        project_service.return_value.run_odoo_create_test_user.assert_called_once_with(
+            "DEMO", "demo", "recette", with_settings=True, log=job.add
+        )
+        self.assertEqual("qa.client@example.com", web.validate_test_user_login("qa.client@example.com"))
+        for invalid in ("", "   ", "re cette", "a\nb", "x" * 65, "admin", "-recette"):
+            with self.assertRaises(ValueError):
+                web.validate_test_user_login(invalid)
+
+    @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
+    @patch("odoo_manager_web.project_service")
+    @patch("odoo_manager_web.validate_project", return_value="DEMO")
+    def test_expired_database_fix_job_delegates_to_odoo_shell(
+        self, _validate_project, project_service, _list_databases
+    ):
+        job = self.LogJob()
+
+        web.fix_expired_database_job(job, "DEMO", "demo")
+
+        project_service.return_value.run_odoo_fix_expired_database.assert_called_once_with("DEMO", "demo", log=job.add)
+
 
 class DockerEventsWiringTests(unittest.TestCase):
     def setUp(self):

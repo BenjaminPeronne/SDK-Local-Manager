@@ -5,6 +5,7 @@ from unittest.mock import ANY, patch
 
 from odoo_manager_core.config import ManagerSettings
 from odoo_manager_core.project_service import (
+    DATABASE_EXPIRATION_DAYS,
     ODOO_STARTUP_LOG,
     ODOO_STARTUP_STATUS,
     ODOO_STATE_MARKER,
@@ -1103,6 +1104,53 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertIn("modules._update_translations(languages, overwrite=True)", shell[-1])
         self.assertFalse(any("--stop-after-init" in command for command in commands))
         self.assertTrue(any("Langue(s): fr_FR" in line for line in logs))
+
+    def test_test_user_uses_login_as_password_and_excludes_human_resources(self):
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        self.runner.odoo_port_ready = True
+        logs = []
+
+        self.service.run_odoo_create_test_user("DEMO", "PROTEX_20812", "recette", log=logs.append)
+
+        commands = [command for command, _cwd in self.runner.streams]
+        shell = next(command for command in commands if "odoo_cli shell" in command[-1])
+        self.assertIn("ODOO_TEST_USER_LOGIN=recette", shell)
+        self.assertIn("ODOO_TEST_USER_SETTINGS=0", shell)
+        self.assertIn('"password": login', shell[-1])
+        self.assertIn('ref("base.module_category_human_resources")', shell[-1])
+        self.assertIn('"payroll" in module', shell[-1])
+        self.assertIn("raise SystemExit", shell[-1])
+        self.assertTrue(any("identifiant recette, mot de passe recette" in line for line in logs))
+
+    def test_test_user_can_receive_settings_access(self):
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        self.runner.odoo_port_ready = True
+
+        self.service.run_odoo_create_test_user(
+            "DEMO", "PROTEX_20812", "recette", with_settings=True, log=lambda _line: None
+        )
+
+        shell = next(command for command, _cwd in self.runner.streams if "odoo_cli shell" in command[-1])
+        self.assertIn("ODOO_TEST_USER_SETTINGS=1", shell)
+
+    def test_test_user_rejects_empty_login(self):
+        with self.assertRaises(ValueError):
+            self.service.run_odoo_create_test_user("DEMO", "PROTEX_20812", "", log=lambda _line: None)
+
+    def test_expired_database_fix_moves_date_and_disables_publisher_ping(self):
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        self.runner.odoo_port_ready = True
+
+        self.service.run_odoo_fix_expired_database("DEMO", "PROTEX_20812", log=lambda _line: None)
+
+        shell = next(command for command, _cwd in self.runner.streams if "odoo_cli shell" in command[-1])
+        self.assertIn('set_param("database.expiration_date", expiration)', shell[-1])
+        self.assertIn(f"timedelta(days={DATABASE_EXPIRATION_DAYS})", shell[-1])
+        self.assertIn('("model_id.model", "=", "publisher_warranty.contract")', shell[-1])
+        self.assertIn('active.write({"active": False})', shell[-1])
 
     def test_admin_password_reset_rejects_empty_password(self):
         with self.assertRaises(ValueError):
