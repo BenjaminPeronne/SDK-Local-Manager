@@ -331,7 +331,7 @@ test("on Windows the installer itself is launched, silently, once the backend is
     exit: () => events.push(["exit"]),
   });
 
-  // Pas de PowerShell masqué, que les antivirus bloquent : l'installateur NSIS attend et relance seul.
+  // Pas de script intermédiaire : powershell.exe détaché sort sans rien exécuter. L'installateur NSIS attend et relance seul.
   assert.deepEqual(events, [["stop backend", "0.14.0"], ["launch", EXE, ["--updated", "/S", "--force-run"]], ["exit"]]);
 });
 

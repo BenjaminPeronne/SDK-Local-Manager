@@ -94,6 +94,9 @@ exec "$target" >/dev/null 2>&1
 
 // Arguments de l'installateur NSIS, ceux d'electron-updater : silencieux (/S), il attend lui-même
 // la fermeture de l'application (--updated) puis la relance (--force-run).
+// Aucun script intermédiaire sous Windows : lancé détaché, donc sans console, powershell.exe sort
+// aussitôt avec le code 0 sans exécuter une ligne. Jusqu'à la 0.16.1, l'installateur ne démarrait
+// jamais et l'application fermée ne revenait pas.
 const WINDOWS_INSTALLER_ARGUMENTS = ["--updated", "/S", "--force-run"];
 const PREVIOUS_FAILURE =
   "La mise à jour précédente ne s'est pas installée. Réessaie, ou télécharge la version depuis GitLab.";

@@ -74,8 +74,12 @@ sous macOS : il exige une signature Developer ID. À la place :
   l'ancienne version en place en cas d'échec, puis relance. Si le dossier de
   l'application n'est pas modifiable, l'image disque est ouverte et l'utilisateur
   glisse l'application lui-même ;
-- **Windows** : l'installateur NSIS est lancé en silencieux (`--updated /S
-  --force-run`) une fois l'application fermée et le backend arrêté ;
+- **Windows** : le backend est arrêté, puis l'installateur NSIS est lancé directement en
+  silencieux (`--updated /S --force-run`). Il ferme ce qui reste de l'application, installe,
+  puis la relance (environ 20 s sur un poste avec Defender actif). Aucun script ne s'intercale :
+  lancé détaché, donc sans console, `powershell.exe` sort aussitôt sans rien exécuter. Les
+  versions 0.14.0 à 0.16.1 passaient par là : leur mise à jour ferme l'application sans
+  jamais lancer l'installateur, et il faut installer une fois la nouvelle version à la main ;
 - **Linux** : l'AppImage est remplacée par renommage dans son dossier, puis relancée ;
   un paquet `.deb` est ouvert dans l'installateur du système.
 
