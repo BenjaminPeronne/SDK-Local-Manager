@@ -10,7 +10,7 @@ type DefaultPasswordInputProps = {
   onChange: (value: string) => void;
   /** Valeur pré-remplie d'Odoo (« odoo », « admin ») : publique, et propre au poste. */
   defaultValue: string;
-  /** Ce que dit la ligne sous le champ tant que la valeur par défaut est gardée. */
+  /** Ce que dit la ligne sous le champ tant que la valeur pré-remplie est gardée. */
   defaultHint?: string;
   disabled?: boolean;
 };
@@ -20,7 +20,8 @@ type DefaultPasswordInputProps = {
  *
  * Masqué sans explication, un champ pré-rempli ressemble à un champ à remplir : des utilisateurs
  * effaçaient la bonne valeur pour en taper une autre. Le mot de passe reste masqué (l'œil
- * l'affiche), mais une ligne dit qu'il n'y a rien à changer, ou, une fois modifié, offre de le rétablir.
+ * l'affiche), mais une ligne dit qu'il est déjà rempli, ou, une fois modifié, offre de le rétablir.
+ * Cette ligne n'écrit jamais le mot de passe.
  *
  * À côté d'un autre champ dans une grille, celle-ci doit aligner ses cellules en haut (`items-start`) :
  * la ligne sous le champ allonge la colonne.
@@ -29,7 +30,7 @@ export function DefaultPasswordInput({
   value,
   onChange,
   defaultValue,
-  defaultHint = "Valeur par défaut d’Odoo : rien à changer.",
+  defaultHint = "Déjà pré-rempli : rien à changer.",
   disabled = false,
 }: DefaultPasswordInputProps) {
   const [visible, setVisible] = useState(false);
@@ -65,7 +66,7 @@ export function DefaultPasswordInput({
           onClick={() => onChange(defaultValue)}
         >
           <RotateCcw className="h-3 w-3" />
-          Rétablir « {defaultValue} »
+          Rétablir la valeur pré-remplie
         </button>
       )}
     </span>
