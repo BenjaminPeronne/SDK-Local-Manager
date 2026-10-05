@@ -32,10 +32,12 @@ import {
   openDockerDesktopNative,
   openExternalUrl,
   requestTaskNotificationPermission,
+  sendSystemNotification,
 } from "@/lib/desktop-runtime";
 import { isJobActive, isJobUnfinished, PROJECT_ARRIVAL_PREFIXES } from "@/lib/jobs";
 import { moduleRepositoryUrlError, socleAppInstalled } from "@/lib/modules";
 import { fallbackManagerSettings, firstOdooDatabase } from "@/lib/projects";
+import { deletionDate, deletionLabel, notificationKey, upcomingDeletions } from "@/lib/retention";
 import type {
   AddonLinksStatus,
   DatabaseMenuAction,
@@ -91,6 +93,7 @@ import { DockerNotice } from "@/components/notices/docker-notice";
 import { ICloudNotice } from "@/components/notices/icloud-notice";
 import { MigrationNotice } from "@/components/notices/migration-notice";
 import { RefinedInterfaceNotice } from "@/components/notices/refined-interface-notice";
+import { RetentionNotice } from "@/components/notices/retention-notice";
 import { StagingCleanupNotice } from "@/components/notices/staging-cleanup-notice";
 import { TraefikNotice } from "@/components/notices/traefik-notice";
 import { OnboardingDialog } from "@/components/onboarding/onboarding-dialog";
@@ -151,6 +154,8 @@ export default function Home() {
   const [degradedBackendReason, setDegradedBackendReason] = useState("");
   const [wslBackend, setWslBackend] = useState(false);
   const [diskEncryption, setDiskEncryption] = useState<DiskEncryption | null>(null);
+  // Base dont l'échéance est en cours de report, sous la forme `projet/base`.
+  const [extendingRetention, setExtendingRetention] = useState("");
 
   const [selectedDb, setSelectedDb] = useState("");
   // Base choisie pour chaque projet pendant la session : un rafraîchissement, une sonde Postgres
@@ -598,6 +603,48 @@ export default function Home() {
       .then(setDiskEncryption)
       .catch(() => setDiskEncryption(null));
   }, [initializing, workspacePath]);
+
+  // Bases supprimées automatiquement dans la semaine, tous projets confondus.
+  const retentionDeletions = useMemo(() => upcomingDeletions(overview?.projects ?? []), [overview]);
+
+  // Une notification du système une semaine avant, puis la veille : une seule fois par palier.
+  useEffect(() => {
+    for (const deletion of retentionDeletions) {
+      const key = notificationKey(deletion);
+      try {
+        if (window.localStorage.getItem(key)) continue;
+        window.localStorage.setItem(key, "1");
+      } catch {
+        continue;
+      }
+      const when = deletionLabel(deletion.expiresAt).text.toLowerCase();
+      void sendSystemNotification(
+        `Base ${when}`,
+        `${deletion.project} · ${deletion.db}. Ouvre SDK Local Manager pour la garder 30 jours de plus.`,
+      ).catch(() => {
+        // Une permission refusée ne doit pas gêner l'affichage.
+      });
+    }
+  }, [retentionDeletions]);
+
+  const extendDatabaseRetention = useCallback(
+    async (project: string, db: string) => {
+      setExtendingRetention(`${project}/${db}`);
+      try {
+        const result = await api<{ database: string; expires_at: number }>(
+          `/api/projects/${encodeURIComponent(project)}/database-retention`,
+          { method: "POST", body: JSON.stringify({ db }) },
+        );
+        pushToast("success", `La base ${db} est gardée jusqu’au ${deletionDate(result.expires_at)}.`);
+        void refreshOverview();
+      } catch (err) {
+        pushToast("error", err instanceof Error ? err.message : "La base n’a pas pu être gardée plus longtemps.");
+      } finally {
+        setExtendingRetention("");
+      }
+    },
+    [pushToast, refreshOverview],
+  );
 
   useEffect(() => {
     if (wslSetupPrompted.current || !wslStatus || !isWslSetupPending(wslStatus, appVersion)) return;
@@ -1587,6 +1634,13 @@ export default function Home() {
               )}
               {systemStatus?.workspace_icloud_synced && <ICloudNotice openSettingsDialog={openSettingsDialog} />}
               {diskEncryption?.state === "off" && <DiskEncryptionNotice platform={diskEncryption.platform} />}
+              {retentionDeletions.length > 0 && (
+                <RetentionNotice
+                  deletions={retentionDeletions}
+                  extending={extendingRetention}
+                  extendDatabaseRetention={(project, db) => void extendDatabaseRetention(project, db)}
+                />
+              )}
               {(systemStatus?.abandoned_staging?.count ?? 0) > 0 && (
                 <StagingCleanupNotice
                   loading={loading}
@@ -1660,6 +1714,7 @@ export default function Home() {
                       chooseDatabase={chooseDatabase}
                       dependencyReport={databaseDependencies.report}
                       executeDatabaseAction={executeDatabaseAction}
+                      extendDatabaseRetention={(project, db) => void extendDatabaseRetention(project, db)}
                       loading={loading}
                       odooDatabases={odooDatabases}
                       openingPostgresql={openingPostgresql}

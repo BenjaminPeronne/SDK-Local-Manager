@@ -48,6 +48,7 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 - Capture des e-mails des bases neutralisées dans **Mailpit** (`http://mail.localhost/`), installé en un clic : rien ne part vers l'extérieur, tout reste consultable.
 - Réinitialisation du mot de passe administrateur et des traductions, régénération des assets.
 - Console `psql` ouverte à la demande dans le conteneur, sans exposer de port SQL.
+- Suppression automatique des bases 30 jours après leur arrivée sur le poste, filestore compris, pour ne pas garder les données des clients. Bandeau et notification une semaine avant puis la veille ; « Garder 30 jours de plus » repousse l'échéance.
 
 **Modules**
 - Recherche, filtres, sélection multiple et barre d'actions groupées.
@@ -330,6 +331,12 @@ Dans l'onglet **Bases**, **Restaurer une sauvegarde ZIP** remplace le passage pa
 La base est déclarée comme une copie et la **neutralisation** est activée par défaut. Pendant la restauration, Odoo tourne avec ses workers cron coupés ; le gestionnaire relance ensuite le moteur de neutralisation des modules installés et vérifie dans PostgreSQL que la base est marquée neutralisée, que les crons métier sont inactifs (seul l'autovacuum peut rester actif) et qu'aucun serveur de messagerie exploitable n'est actif. Le seul serveur sortant conservé est le SMTP factice de la neutralisation, redirigé vers `mailpit:1025` : quand Mailpit tourne sur le réseau `traefik-local`, les e-mails y sont capturés ; sinon, leur envoi échoue comme avant. Odoo 16 à 19 utilisent le moteur natif ; Odoo 15 applique un repli limité aux crons et aux serveurs de messagerie. Le bouton **Neutraliser et contrôler** rejoue cette passe sur une base existante.
 
 Une base neutralisée l'est de nouveau après chaque installation ou mise à jour de module, avant le redémarrage d'Odoo : un addon nouvellement chargé ne peut pas réactiver un cron ou une intégration externe.
+
+### Durée de conservation des bases
+
+Une base qui arrive sur le poste est supprimée 30 jours plus tard, avec son filestore : base restaurée depuis une sauvegarde, base dupliquée (la copie garde l'échéance de l'original), ou base trouvée dans PostgreSQL sans que le gestionnaire l'ait créée (restaurée par le gestionnaire de bases d'Odoo, ou présente avant cette règle : ses 30 jours partent de sa découverte). Seule une base vide créée par le gestionnaire est conservée. La règle ne se désactive pas ; **Garder 30 jours de plus**, dans le bandeau ou le menu « ⋯ » d'une base, repousse l'échéance autant de fois que nécessaire.
+
+Le registre (`database_retention.json`, dans le dossier de configuration) reconnaît une base par son nom et son identifiant PostgreSQL : une base supprimée puis recréée sous le même nom repart pour 30 jours. Le gestionnaire relève les bases des projets démarrés toutes les heures. Un projet arrêté est relevé à sa première rencontre puis tous les 30 jours, et à chaque échéance : ses conteneurs démarrent sans lancer Odoo, le temps du relevé et des suppressions, puis s'arrêtent. Ces passages sont des actions de l'historique, qui attendent la fin des actions en cours sur le projet. Les projets de la corbeille sont supprimés définitivement 30 jours après leur suppression.
 
 ### Modules absents d'une copie locale
 

@@ -64,8 +64,11 @@ export async function requestTaskNotificationPermission() {
 
 export async function sendTaskNotification(job: Job) {
   const successful = job.status === "done";
-  const title = jobCompletionTitle(job);
   const body = !successful && job.error_message ? `${job.title}\n${job.error_message}` : job.title;
+  await sendSystemNotification(jobCompletionTitle(job), body);
+}
+
+export async function sendSystemNotification(title: string, body: string) {
   if (isDesktopRuntime()) {
     await window.sdkDesktop!.notify(title, body);
     return;

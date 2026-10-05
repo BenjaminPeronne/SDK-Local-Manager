@@ -24,7 +24,8 @@ export function DeleteProjectDialog({ createJob, onOpenChange, open, selectedPro
         <DialogHeader>
           <DialogTitle>Supprimer {selectedProject?.name}</DialogTitle>
           <DialogDescription>
-            Le projet sera déplacé dans `.odoo_manager_deleted`. Saisis le nom du projet pour confirmer.
+            Le projet part dans la corbeille : tu peux le récupérer pendant 30 jours depuis Paramètres, section Espace
+            disque. Ensuite, il est supprimé définitivement. Saisis le nom du projet pour confirmer.
           </DialogDescription>
         </DialogHeader>
         <Input

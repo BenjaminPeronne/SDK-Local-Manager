@@ -4,6 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { DropdownMenu } from "@radix-ui/themes";
 import {
   CalendarClock,
+  CalendarPlus,
   CheckCircle2,
   ChevronRight,
   Copy,
@@ -21,6 +22,7 @@ import {
   UserCheck,
 } from "lucide-react";
 import { statusVariant } from "@/lib/format";
+import { deletionLabel } from "@/lib/retention";
 import type { DatabaseMenuAction, DependencyReport, PendingDatabaseAction, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +44,7 @@ type DatabasesTabProps = {
   chooseDatabase: (db: string, projectName?: string | undefined) => void;
   dependencyReport: DependencyReport | null;
   executeDatabaseAction: (action: DatabaseMenuAction) => void;
+  extendDatabaseRetention: (project: string, db: string) => void;
   loading: boolean;
   odooDatabases: string[];
   openingPostgresql: boolean;
@@ -61,6 +64,7 @@ export function DatabasesTab({
   chooseDatabase,
   dependencyReport,
   executeDatabaseAction,
+  extendDatabaseRetention,
   loading,
   odooDatabases,
   openingPostgresql,
@@ -137,103 +141,125 @@ export function DatabasesTab({
 
         {odooDatabases.length ? (
           <div className="grid gap-3 sm:grid-cols-2">
-            {odooDatabases.map((db) => (
-              <div key={db} className="group relative min-w-0">
-                <InteractiveCard
-                  aria-pressed={selectedDb === db}
-                  className={cn(
-                    "w-full min-w-0 p-4 pr-14",
-                    selectedDb === db
-                      ? "border-primary bg-selected ring-2 ring-primary/35"
-                      : "hover:border-primary/35 hover:bg-hover",
-                  )}
-                  onClick={() => chooseDatabase(db)}
-                >
-                  <div className="flex min-w-0 items-start gap-2">
-                    <span className={cn("min-w-0 break-all", REFINED_IDENTIFIER)}>{db}</span>
-                    {db === selectedDb && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
-                  </div>
-                  <div
+            {odooDatabases.map((db) => {
+              const expiresAt = selectedProject?.database_retention?.[db]?.expires_at ?? null;
+              const deletion = expiresAt === null ? null : deletionLabel(expiresAt);
+              return (
+                <div key={db} className="group relative min-w-0">
+                  <InteractiveCard
+                    aria-pressed={selectedDb === db}
                     className={cn(
-                      "mt-2 text-xs",
-                      db === selectedDb ? "font-medium text-primary" : "text-muted-foreground",
+                      "w-full min-w-0 p-4 pr-14",
+                      selectedDb === db
+                        ? "border-primary bg-selected ring-2 ring-primary/35"
+                        : "hover:border-primary/35 hover:bg-hover",
                     )}
+                    onClick={() => chooseDatabase(db)}
                   >
-                    {db === selectedDb ? "Base de travail" : selectedProject?.database_versions?.[db] || "Base Odoo"}
-                  </div>
-                </InteractiveCard>
-                <DropdownMenu.Root modal={false}>
-                  <DropdownMenu.Trigger>
-                    <Button
-                      size="icon"
-                      variant="ghost"
+                    <div className="flex min-w-0 items-start gap-2">
+                      <span className={cn("min-w-0 break-all", REFINED_IDENTIFIER)}>{db}</span>
+                      {db === selectedDb && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
+                    </div>
+                    <div
                       className={cn(
-                        "absolute right-2 top-2 h-9 w-9 transition-opacity focus-visible:opacity-100 data-[state=open]:opacity-100",
-                        db !== selectedDb && "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100",
+                        "mt-2 text-xs",
+                        db === selectedDb ? "font-medium text-primary" : "text-muted-foreground",
                       )}
-                      disabled={loading}
-                      title={`Actions sur ${db}`}
-                      aria-label={`Actions sur ${db}`}
                     >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenu.Trigger>
-                  <DropdownMenu.Content align="end" className="min-w-60">
-                    <DropdownMenu.Label>Maintenance</DropdownMenu.Label>
-                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "regenerate_assets")}>
-                      <Paintbrush className="h-4 w-4" />
-                      Régénérer les assets
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "reset_translations")}>
-                      <Languages className="h-4 w-4" />
-                      Réinitialiser les traductions
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "neutralize")}>
-                      <ShieldCheck className="h-4 w-4" />
-                      Neutraliser et contrôler
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "admin_password")}>
-                      <KeyRound className="h-4 w-4" />
-                      Mot de passe admin
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "test_user")}>
-                      <UserCheck className="h-4 w-4" />
-                      Utilisateur de recette
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "fix_expiration")}>
-                      <CalendarClock className="h-4 w-4" />
-                      Corriger une base expirée
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Separator />
-                    <DropdownMenu.Label>Outils</DropdownMenu.Label>
-                    <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "dependencies")}>
-                      <PackageX className="h-4 w-4" />
-                      Modules manquants
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                      disabled={!selectedProjectReady}
-                      onSelect={() => runDatabaseAction(db, "duplicate")}
-                    >
-                      <Copy className="h-4 w-4" />
-                      Dupliquer la base
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                      disabled={selectedProject?.postgres_status !== "running" || openingPostgresql}
-                      onSelect={() => runDatabaseAction(db, "psql")}
-                    >
-                      <Terminal className="h-4 w-4" />
-                      Ouvrir psql
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Separator />
-                    <DropdownMenu.Label>Zone dangereuse</DropdownMenu.Label>
-                    <DropdownMenu.Item color="red" onSelect={() => runDatabaseAction(db, "drop")}>
-                      <Trash2 className="h-4 w-4" />
-                      Supprimer la base
-                    </DropdownMenu.Item>
-                  </DropdownMenu.Content>
-                </DropdownMenu.Root>
-              </div>
-            ))}
+                      {db === selectedDb ? "Base de travail" : selectedProject?.database_versions?.[db] || "Base Odoo"}
+                    </div>
+                    {deletion && (
+                      <div
+                        className={cn(
+                          "mt-1 text-xs",
+                          deletion.tone === "danger" && "font-medium text-red-600 dark:text-red-400",
+                          deletion.tone === "warning" && "font-medium text-amber-700 dark:text-amber-400",
+                          deletion.tone === "muted" && "text-muted-foreground",
+                        )}
+                      >
+                        {deletion.text}
+                      </div>
+                    )}
+                  </InteractiveCard>
+                  <DropdownMenu.Root modal={false}>
+                    <DropdownMenu.Trigger>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className={cn(
+                          "absolute right-2 top-2 h-9 w-9 transition-opacity focus-visible:opacity-100 data-[state=open]:opacity-100",
+                          db !== selectedDb && "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100",
+                        )}
+                        disabled={loading}
+                        title={`Actions sur ${db}`}
+                        aria-label={`Actions sur ${db}`}
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Content align="end" className="min-w-60">
+                      <DropdownMenu.Label>Maintenance</DropdownMenu.Label>
+                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "regenerate_assets")}>
+                        <Paintbrush className="h-4 w-4" />
+                        Régénérer les assets
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "reset_translations")}>
+                        <Languages className="h-4 w-4" />
+                        Réinitialiser les traductions
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "neutralize")}>
+                        <ShieldCheck className="h-4 w-4" />
+                        Neutraliser et contrôler
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "admin_password")}>
+                        <KeyRound className="h-4 w-4" />
+                        Mot de passe admin
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "test_user")}>
+                        <UserCheck className="h-4 w-4" />
+                        Utilisateur de recette
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "fix_expiration")}>
+                        <CalendarClock className="h-4 w-4" />
+                        Corriger une base expirée
+                      </DropdownMenu.Item>
+                      {deletion && selectedProject && (
+                        <DropdownMenu.Item onSelect={() => extendDatabaseRetention(selectedProject.name, db)}>
+                          <CalendarPlus className="h-4 w-4" />
+                          Garder 30 jours de plus
+                        </DropdownMenu.Item>
+                      )}
+                      <DropdownMenu.Separator />
+                      <DropdownMenu.Label>Outils</DropdownMenu.Label>
+                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "dependencies")}>
+                        <PackageX className="h-4 w-4" />
+                        Modules manquants
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item
+                        disabled={!selectedProjectReady}
+                        onSelect={() => runDatabaseAction(db, "duplicate")}
+                      >
+                        <Copy className="h-4 w-4" />
+                        Dupliquer la base
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item
+                        disabled={selectedProject?.postgres_status !== "running" || openingPostgresql}
+                        onSelect={() => runDatabaseAction(db, "psql")}
+                      >
+                        <Terminal className="h-4 w-4" />
+                        Ouvrir psql
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Separator />
+                      <DropdownMenu.Label>Zone dangereuse</DropdownMenu.Label>
+                      <DropdownMenu.Item color="red" onSelect={() => runDatabaseAction(db, "drop")}>
+                        <Trash2 className="h-4 w-4" />
+                        Supprimer la base
+                      </DropdownMenu.Item>
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Root>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <FirstDatabaseCallout

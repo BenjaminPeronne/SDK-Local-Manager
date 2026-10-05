@@ -222,7 +222,7 @@ export function DiskUsagePanel({
           <Group
             icon={<Trash2 className="h-4 w-4 text-muted-foreground" />}
             title="Corbeille des projets supprimés"
-            description="Les projets que tu as supprimés. Ils sont gardés ici au cas où tu voudrais les récupérer."
+            description="Les projets que tu as supprimés. Ils sont gardés 30 jours au cas où tu voudrais les récupérer, puis supprimés définitivement."
             total={trashTotal}
             actions={
               report.trash.length > 1 && (

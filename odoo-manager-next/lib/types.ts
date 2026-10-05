@@ -9,6 +9,14 @@ export type Project = {
   database_manager_url: string;
   databases: string[];
   database_versions?: Record<string, string>;
+  /** Échéance de chaque base connue ; `expires_at` nul pour une base vide créée ici, conservée. */
+  database_retention?: Record<string, DatabaseRetention>;
+};
+
+export type DatabaseRetention = {
+  /** Heure de la suppression automatique, en secondes depuis 1970. */
+  expires_at: number | null;
+  origin: "created" | "restored" | "duplicated" | "detected" | string;
 };
 
 export type Overview = {
