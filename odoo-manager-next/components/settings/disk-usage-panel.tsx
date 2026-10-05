@@ -210,10 +210,10 @@ export function DiskUsagePanel({
       </SettingsGroup>
 
       {report?.icloud_synced && (
-        <Notice tone="warning" icon={Cloud} title="Tes projets sont enregistrés dans iCloud">
-          Tes projets sont dans Documents, qu’iCloud copie en ligne. Ce n’est pas fait pour des bases Odoo : elles
-          peuvent s’abîmer. Pour éviter ça, déplace le dossier des projets ailleurs (par exemple dans ton dossier
-          personnel), puis indique le nouvel emplacement dans Général.
+        <Notice tone="warning" icon={Cloud} title="Tes projets sont copiés dans iCloud">
+          Tes projets sont dans Documents ou sur le Bureau, qu’iCloud copie en ligne : les bases de tes clients partent
+          sur les serveurs d’Apple, et elles peuvent s’abîmer. Déplace le dossier des projets ailleurs (par exemple dans
+          ton dossier personnel), puis indique le nouvel emplacement dans Général.
         </Notice>
       )}
 

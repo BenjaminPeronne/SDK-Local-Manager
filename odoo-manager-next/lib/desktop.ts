@@ -6,6 +6,8 @@ export interface DesktopBridge {
   backendDiagnostics(): Promise<{ log_path: string; details: string }>;
   openExternalUrl(url: string): Promise<void>;
   openDockerDesktop(): Promise<void>;
+  /** Chiffrement du disque qui porte le dossier des projets (FileVault, BitLocker, LUKS). */
+  diskEncryption?(workspace: string): Promise<DiskEncryption>;
   /** Backend réellement utilisé, et pourquoi l'environnement Linux a été écarté. */
   backendMode?(): Promise<{ wsl: boolean; degradedReason: string }>;
   pickDirectory(defaultPath?: string): Promise<string | null>;
@@ -36,6 +38,15 @@ export interface DesktopBridge {
   downloadUpdate?(tag: string): Promise<UpdateSupport & { version: string }>;
   installUpdate?(): Promise<{ mode: UpdateMode }>;
   onUpdateProgress?(callback: (progress: UpdateProgress) => void): () => void;
+}
+
+/** `unknown` quand le système ne permet pas de conclure : seul `off` est signalé. */
+export type DiskEncryptionState = "on" | "off" | "unknown";
+
+export interface DiskEncryption {
+  state: DiskEncryptionState;
+  /** Système de l'ordinateur (`darwin`, `win32`, `linux`), qui dit où activer le chiffrement. */
+  platform: string;
 }
 
 /**

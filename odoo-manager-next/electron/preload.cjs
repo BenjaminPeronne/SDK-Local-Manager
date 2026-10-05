@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld(
     backendDiagnostics: () => ipcRenderer.invoke("sdk:backend-diagnostics"),
     openExternalUrl: (url) => ipcRenderer.invoke("sdk:open-external", url),
     openDockerDesktop: () => ipcRenderer.invoke("sdk:open-docker"),
+    diskEncryption: (workspace) => ipcRenderer.invoke("sdk:disk-encryption", workspace),
     backendMode: () => ipcRenderer.invoke("sdk:backend-mode"),
     ...wslCapabilities,
     relaunch: () => ipcRenderer.invoke("sdk:relaunch"),

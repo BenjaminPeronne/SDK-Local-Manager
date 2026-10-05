@@ -977,6 +977,8 @@ def system_status_snapshot(docker=None):
         "mailpit": mailpit_status(docker, traefik),
         "workspace": str(WORKSPACE),
         "workspace_exists": safe_path_is_dir(WORKSPACE),
+        # Bases clients copiées chez Apple : signalé en permanence, pas seulement après une analyse du disque.
+        "workspace_icloud_synced": workspace_synced_by_icloud(),
         "abandoned_staging": abandoned_staging_snapshot(),
     }
 

@@ -1,6 +1,6 @@
 # Application de bureau Electron
 
-L'application de bureau est construite avec Electron 44.3 et electron-builder 26.15.
+L'application de bureau est construite avec Electron 44.5 et electron-builder 26.15.
 Elle charge l'export statique de l'interface Next.js et lance le backend Python
 embarqué. Elle remplace depuis la version 0.2.0 l'ancienne coque Tauri, dont les
 sources ont été retirées du dépôt.
@@ -15,6 +15,7 @@ sources ont été retirées du dépôt.
 | `electron/wsl.cjs` | Installation, préparation et démarrage de l'environnement Linux sous Windows. |
 | `electron/gitlab.cjs` | Connexion au compte GitLab et recherche des dépôts, branches et tags. |
 | `electron/credentials.cjs` | Identifiants RIKA et jeton GitLab chiffrés par `safeStorage`. |
+| `electron/disk-encryption.cjs` | Contrôle du chiffrement du disque qui porte les projets (FileVault, BitLocker, LUKS). |
 | `electron/after-pack.cjs` | Efface les métadonnées Finder du bundle macOS avant signature. |
 | `lib/desktop.ts` | Contrat TypeScript entre l'interface et le preload. |
 | `electron-builder.yml` | Installateurs, et ressources hors ASAR pour le backend. |
@@ -38,6 +39,14 @@ trousseau à sa place.
 Les secrets (identifiants RIKA, jeton GitLab) sont chiffrés par le trousseau du
 système et ne sont jamais écrits en clair dans `config.json`. Un jeton GitLab
 enregistré qui ne peut plus être déchiffré est signalé : le compte est à reconnecter.
+
+Le processus principal contrôle aussi le chiffrement du disque qui porte le dossier des
+projets, donc les bases des clients : `fdesetup status` sous macOS, l'état BitLocker du
+lecteur (lisible sans droits administrateur) sous Windows, la chaîne `findmnt` puis `lsblk`
+sous Linux. Sous Windows, ce contrôle ne peut pas vivre dans le backend, qui tourne dans
+l'environnement Linux et ne voit pas BitLocker ; le lecteur contrôlé est celui du dossier
+des projets, ou celui du disque de l'environnement Linux. Un disque non chiffré est signalé
+par un bandeau permanent ; un état incertain ne l'est jamais.
 
 ## Backend embarqué
 

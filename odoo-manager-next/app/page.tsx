@@ -20,6 +20,7 @@ import { databaseToKeep, readRememberedDatabases, writeRememberedDatabases } fro
 import {
   desktopBridge,
   desktopErrorMessage,
+  type DiskEncryption,
   type GitLabStatus,
   type StoredRikaCredentials,
   type WslStatus,
@@ -85,7 +86,9 @@ import { ZipImportDialog } from "@/components/modules/zip-import-dialog";
 import { AddonLinksNotice } from "@/components/notices/addon-links-notice";
 import { ApiUnavailableNotice } from "@/components/notices/api-unavailable-notice";
 import { DegradedBackendNotice } from "@/components/notices/degraded-backend-notice";
+import { DiskEncryptionNotice } from "@/components/notices/disk-encryption-notice";
 import { DockerNotice } from "@/components/notices/docker-notice";
+import { ICloudNotice } from "@/components/notices/icloud-notice";
 import { MigrationNotice } from "@/components/notices/migration-notice";
 import { RefinedInterfaceNotice } from "@/components/notices/refined-interface-notice";
 import { StagingCleanupNotice } from "@/components/notices/staging-cleanup-notice";
@@ -147,6 +150,7 @@ export default function Home() {
   // Environnement Linux installé mais impossible à démarrer : le backend Windows a pris le relais.
   const [degradedBackendReason, setDegradedBackendReason] = useState("");
   const [wslBackend, setWslBackend] = useState(false);
+  const [diskEncryption, setDiskEncryption] = useState<DiskEncryption | null>(null);
 
   const [selectedDb, setSelectedDb] = useState("");
   // Base choisie pour chaque projet pendant la session : un rafraîchissement, une sonde Postgres
@@ -583,6 +587,17 @@ export default function Home() {
       })
       .catch(() => setDegradedBackendReason(""));
   }, [initializing]);
+
+  // Disque qui porte le dossier des projets : relu quand ce dossier change.
+  const workspacePath = systemStatus?.workspace ?? "";
+  useEffect(() => {
+    const bridge = desktopBridge();
+    if (initializing || !workspacePath || !bridge?.diskEncryption) return;
+    bridge
+      .diskEncryption(workspacePath)
+      .then(setDiskEncryption)
+      .catch(() => setDiskEncryption(null));
+  }, [initializing, workspacePath]);
 
   useEffect(() => {
     if (wslSetupPrompted.current || !wslStatus || !isWslSetupPending(wslStatus, appVersion)) return;
@@ -1570,6 +1585,8 @@ export default function Home() {
                   setMigrationBannerClosed={setMigrationBannerClosed}
                 />
               )}
+              {systemStatus?.workspace_icloud_synced && <ICloudNotice openSettingsDialog={openSettingsDialog} />}
+              {diskEncryption?.state === "off" && <DiskEncryptionNotice platform={diskEncryption.platform} />}
               {(systemStatus?.abandoned_staging?.count ?? 0) > 0 && (
                 <StagingCleanupNotice
                   loading={loading}

@@ -25,6 +25,7 @@ const {
   contentPolicy,
 } = require("./runtime.cjs");
 const { CredentialStore } = require("./credentials.cjs");
+const { diskEncryptionStatus } = require("./disk-encryption.cjs");
 const { GitLabClient } = require("./gitlab.cjs");
 const { AppUpdater } = require("./updater.cjs");
 const {
@@ -182,6 +183,15 @@ function installHandlers() {
   handle("backend-diagnostics", () => backend.diagnostics());
   handle("open-external", (url) => shell.openExternal(externalUrl(url)));
   handle("open-docker", openDocker);
+  // Seul le dossier des projets vient de l'interface : il désigne le disque à contrôler. Le
+  // système est celui de l'ordinateur, pas celui du backend (Linux sous Windows).
+  handle("disk-encryption", async (workspace) => ({
+    state: await diskEncryptionStatus({
+      workspace: typeof workspace === "string" && workspace.length <= 32768 ? workspace : "",
+      fallbackPath: wsl?.installRoot || "",
+    }),
+    platform: process.platform,
+  }));
   // L'environnement Linux n'existe que sous Windows. Le préchargement ne propose même pas ces
   // commandes ailleurs ; un appel malgré tout est refusé, jamais traité comme un WSL manquant.
   const onWindows =

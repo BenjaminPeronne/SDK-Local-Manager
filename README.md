@@ -32,6 +32,7 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 - Assistant de vérification : dossier des projets, Docker, Git, clé SSH et Traefik.
 - Génération d'une clé SSH Ed25519 (régénérable, l'ancienne paire est sauvegardée) et ouverture des pages GitLab ou GitHub pour y déposer la clé publique. La même clé peut servir aux deux services ; la clé privée ne quitte jamais le poste.
 - Installation de Traefik (`docker-local-tools`) sans terminal.
+- Bandeaux permanents quand les bases des clients sont exposées : disque non chiffré (FileVault, BitLocker, LUKS) ou dossier des projets copié par iCloud.
 - Sous Windows : préparation du poste en un clic (WSL, puis environnement Linux « SDK-Manager » avec Docker, Git et le backend), reprise de la clé GitLab Windows, et proposition de copier les projets restés sur `C:\` dans cet environnement.
 
 **Projets**
@@ -119,7 +120,7 @@ flowchart LR
 
 | Technologie | Version | Utilité |
 | --- | --- | --- |
-| **Electron** | 44.3 | Fenêtre native macOS / Windows / Linux. Lance le backend sur un port libre, surveille son état et expose les API natives via un `preload` isolé. |
+| **Electron** | 44.5 | Fenêtre native macOS / Windows / Linux. Lance le backend sur un port libre, surveille son état et expose les API natives via un `preload` isolé. |
 | **electron-builder** | 26.15 | Génère les installateurs : `.dmg` (macOS), `.exe` NSIS (Windows), `.deb` et `.AppImage` (Linux). |
 | **cross-env** | 10.1 | Variables d'environnement des scripts npm, identiques sur toutes les plateformes. |
 | **Node.js** | 22 | Outillage de build et tests Electron (`node --test`). |

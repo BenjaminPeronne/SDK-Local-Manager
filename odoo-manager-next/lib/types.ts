@@ -92,6 +92,8 @@ export type SystemStatus = {
   mailpit?: MailpitStatus;
   workspace: string;
   workspace_exists: boolean;
+  /** Dossier des projets synchronisé par iCloud (macOS) : les bases des clients partent en ligne. */
+  workspace_icloud_synced?: boolean;
   abandoned_staging?: { count: number; names: string[]; oldest_modified_at: number };
 };
 

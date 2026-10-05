@@ -169,6 +169,13 @@ class ICloudDetectionTests(unittest.TestCase):
     def test_other_systems_are_never_reported(self, _platform):
         self.assertFalse(web.workspace_synced_by_icloud())
 
+    @patch("odoo_manager_web.workspace_synced_by_icloud", return_value=True)
+    @patch("odoo_manager_web.mailpit_status", return_value={})
+    @patch("odoo_manager_web.traefik_status", return_value={"running": False})
+    def test_the_system_status_reports_it_without_a_disk_scan(self, _traefik, _mailpit, _icloud):
+        # Le bandeau de l'écran principal en dépend : il ne doit pas attendre une analyse du disque.
+        self.assertTrue(web.system_status_snapshot({"running": False})["workspace_icloud_synced"])
+
 
 if __name__ == "__main__":
     unittest.main()
