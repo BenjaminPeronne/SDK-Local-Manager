@@ -19,6 +19,7 @@ import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,15 +33,16 @@ from odoo_manager_core import (
     ProjectCreator,
     ProjectService,
     SettingsStore,
+    database_restore,
     docker_status,
     job_progress,
     job_queue,
+    performance,
     start_docker,
 )
 from odoo_manager_core import jobs as job_control
 from odoo_manager_core.archives import (
     SAFE_IMPORT_NAME_RE,
-    multipart_field,
     safe_extract_zip,
     safe_import_name,
     save_multipart_upload,
@@ -53,7 +55,6 @@ from odoo_manager_core.command_output import (
     extract_odoo_page_error,
     missing_postgres_extension,
     missing_python_import,
-    odoo_restore_error,
     python_package_for_import,
     report_expression_duplicate_module,
 )
@@ -147,7 +148,7 @@ from odoo_manager_core.project_creator import (
     validate_new_project_name,
     validate_odoo_version,
 )
-from odoo_manager_core.project_service import OdooError
+from odoo_manager_core.project_service import ODOO_DATA_DIR, POSTGRES_DATA_DIR, OdooError
 from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
 from odoo_manager_core.releases import RELEASES_PAGE, RELEASES_REPOSITORY, release_check_error, release_update
 from odoo_manager_core.repositories import (
@@ -190,6 +191,7 @@ API_ENDPOINTS = {
         "/api/overview",
         "/api/app-update",
         "/api/disk-usage",
+        "/api/performance",
         "/api/settings",
         "/api/errors",
         "/api/jobs",
@@ -266,6 +268,7 @@ API_ACTIONS = (
     "reset_all_translations",
     "reset_module_translations",
     "restore_module_update_exclusions",
+    "apply_docker_resources",
     "start_mailpit",
     "start_project",
     "stop_mailpit",
@@ -2366,6 +2369,12 @@ def modules_for(project, db_name=None):
     return modules
 
 
+RESTORE_COMPLETENESS_SQL = (
+    "select count(*) from pg_constraint c join pg_namespace n on n.oid = c.connamespace "
+    "where c.contype = 'f' and n.nspname = 'public';"
+)
+
+
 def db_query_lines(project, db_name, query, timeout=18):
     code, output = run_capture(
         docker_command(
@@ -2376,6 +2385,20 @@ def db_query_lines(project, db_name, query, timeout=18):
     if code != 0:
         raise RuntimeError(output or "Requête PostgreSQL impossible.")
     return [line.strip() for line in output.splitlines() if line.strip()]
+
+
+def restore_was_interrupted(project, db_name):
+    """Vrai pour une base Odoo sans aucune clé étrangère : sa restauration a été coupée.
+
+    pg_dump écrit les clés étrangères en tout dernier ; une base Odoo en compte des milliers. Une
+    restauration interrompue (Odoo relancé au bout de limit_time_real, disque plein) laisse des
+    tables remplies mais aucune clé étrangère.
+    """
+    try:
+        lines = db_query_lines(project, db_name, RESTORE_COMPLETENESS_SQL)
+    except RuntimeError:
+        return False
+    return bool(lines) and lines[0] == "0"
 
 
 def filestore_files(project, db_name):
@@ -2478,6 +2501,19 @@ def database_diagnostics(project, db_name, available_paths):
             }
         )
         return db_info, issues
+
+    if restore_was_interrupted(project, db_name):
+        report(
+            {
+                "severity": "error",
+                "title": f"Base {db_name} incomplète : sa restauration s'est arrêtée avant la fin",
+                "details": (
+                    "Il lui manque une partie de sa structure : elle n'est pas fiable, même si Odoo l'ouvre. "
+                    "Supprime cette base, puis restaure de nouveau la sauvegarde."
+                ),
+                "items": [],
+            }
+        )
 
     pending_missing = modules_missing_from_code(states, available_paths, TRANSIENT_MODULE_STATES)
     db_info["pending_missing_modules"] = pending_missing
@@ -2902,6 +2938,7 @@ JOB_CANCEL_POLICIES = {
         "Possible entre deux projets ; un projet en cours de suppression va à son terme.",
     ),
     "restore_deleted_project_job": (False, "déplacement court d'un dossier."),
+    "apply_docker_resources_job": (False, "Docker Desktop doit redémarrer jusqu'au bout pour rester utilisable."),
     "database_retention_job": (
         True,
         "Le contrôle s'arrête ; une base en cours de suppression va à son terme, et les conteneurs "
@@ -2955,6 +2992,7 @@ JOB_EXPECTED_DURATIONS = {
     "database_retention_job": 60,
     "remove_docker_images_job": 60,
     "convert_wsl_addon_links_job": 60,
+    "apply_docker_resources_job": 120,
 }
 
 
@@ -3607,74 +3645,72 @@ def ensure_backup_matches_project_version(project, details):
         )
 
 
-def post_odoo_database_restore(job, url, backup_path, filename, db_name, master_pwd, copy, neutralize):
-    try:
-        connection, target, host_header = local_odoo_connection(url, timeout=2 * 60 * 60)
-    except RuntimeError as exc:
-        raise RuntimeError("URL Odoo invalide pour la restauration.") from exc
+def check_restore_space(job, service, project, dump_bytes, filestore_bytes):
+    """Refuse avant de commencer une restauration qui ne tiendrait pas sur le disque.
 
-    boundary = f"----OdooManager{os.getpid()}{time.time_ns()}"
-    fields = [
-        ("master_pwd", master_pwd),
-        ("name", db_name),
-        ("copy", "true" if copy else "false"),
-    ]
-    if neutralize:
-        fields.append(("neutralize_database", "on"))
-    prefix = b"".join(multipart_field(boundary, name, value) for name, value in fields)
-    safe_filename = SAFE_IMPORT_NAME_RE.sub("_", Path(filename).name) or "backup.zip"
-    prefix += (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="backup_file"; filename="{safe_filename}"\r\n'
-        "Content-Type: application/zip\r\n\r\n"
-    ).encode()
-    suffix = f"\r\n--{boundary}--\r\n".encode()
-    backup_size = Path(backup_path).stat().st_size
-    content_length = len(prefix) + backup_size + len(suffix)
-    sent = 0
-    next_progress = 10
-    # Fermer la connexion interrompt l'envoi ou l'attente de la réponse quand l'action est arrêtée.
-    with job_control.interruptible(connection.close):
+    Une base de plusieurs dizaines de Go qui sature le disque à mi-parcours échoue au bout d'une
+    heure et laisse une base inutilisable : mieux vaut le dire tout de suite.
+    """
+    database_needed, files_needed = database_restore.space_needed(dump_bytes, filestore_bytes)
+    checks = [(f"postgresql-{project}", POSTGRES_DATA_DIR, database_needed, "les bases PostgreSQL")]
+    if files_needed:
+        checks.append((f"odoo-{project}", ODOO_DATA_DIR, files_needed, "les filestores"))
+    for container, path, needed, label in checks:
+        available = service.container_free_bytes(container, path)
+        if available is None:
+            job.add(f"Espace libre pour {label} non mesuré : la restauration continue.")
+            continue
+        job.add(
+            f"Espace libre pour {label} : {database_restore.format_bytes(available)} "
+            f"(environ {database_restore.format_bytes(needed)} nécessaires)."
+        )
+        if available < needed:
+            raise RuntimeError(
+                f"Espace disque insuffisant : cette sauvegarde demande environ {database_restore.format_bytes(needed)} "
+                f"pour {label}, il reste {database_restore.format_bytes(available)}. Libère de la place (anciennes "
+                "bases, projets supprimés, images Docker inutilisées dans Paramètres) puis relance la restauration."
+            )
+
+
+def neutralize_restored_database(job, service, project, db_name):
+    """Neutralisation complète par Odoo ; un paquet Python manquant est installé puis l'essai repris."""
+    installed = []
+    lines = []
+
+    def log(line):
+        lines.append(str(line))
+        job.add(line)
+
+    while True:
+        lines.clear()
         try:
-            connection.putrequest("POST", target, skip_host=True)
-            connection.putheader("Host", host_header)
-            connection.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
-            connection.putheader("Content-Length", str(content_length))
-            connection.putheader("Connection", "close")
-            connection.endheaders()
-            job_progress.span("Envoi de la sauvegarde", end=40, expected=30)
-            connection.send(prefix)
-            with Path(backup_path).open("rb") as source:
-                while True:
-                    chunk = source.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    connection.send(chunk)
-                    sent += len(chunk)
-                    job_progress.measure(sent, backup_size)
-                    progress = int((sent * 100) / backup_size) if backup_size else 100
-                    if progress >= next_progress:
-                        job.add(f"Envoi de la sauvegarde vers Odoo... {min(progress, 100)} %")
-                        next_progress = ((progress // 10) + 1) * 10
-            connection.send(suffix)
-            # Odoo restaure pendant la requête, sans rien écrire : la barre avance avec le temps.
-            job_progress.span("Restauration de la base", end=90, expected=60 + backup_size / (4 * 1024 * 1024))
-            response = connection.getresponse()
-            content = response.read(1024 * 1024).decode("utf-8", errors="replace")
-            return response.status, content
-        except (OSError, http.client.HTTPException) as exc:
-            raise RuntimeError(f"La restauration n'a pas pu être transmise à Odoo: {exc}") from exc
-        finally:
-            connection.close()
+            service.run_odoo_neutralize_command(project, db_name, log=log)
+            return
+        except RuntimeError as exc:
+            import_name = missing_python_import("\n".join(lines[-400:]))
+            package = python_package_for_import(import_name) if import_name else ""
+            if not package or package in installed or len(installed) >= MAX_AUTO_DEPENDENCY_FIXES:
+                raise OdooError(
+                    f"La base {db_name} est restaurée, crons métier et serveurs de messagerie désactivés, mais la "
+                    f"neutralisation complète par Odoo a échoué : {exc} Relance « Neutraliser » sur cette base "
+                    "une fois la cause corrigée."
+                ) from exc
+            installed.append(package)
+            job.add(f"Paquet Python manquant pour ouvrir la base : {package}. Installation puis nouvel essai...")
+            service.install_python_package(project, package, log=job.add)
 
 
-def restore_database_job(job, project, backup_path, filename, db_name, master_pwd, copy=True, neutralize=True):
+def restore_database_job(job, project, backup_path, filename, db_name, copy=True, neutralize=True):
+    """Restaure une sauvegarde ZIP Odoo en envoyant dump.sql directement à PostgreSQL.
+
+    Voir odoo_manager_core/database_restore.py : la restauration par Odoo lui-même échoue sur les
+    grosses bases (limite de durée des requêtes, décompression dans le conteneur, paquets manquants).
+    """
     project = validate_project(project)
     db_name = validate_new_db(db_name)
-    master_pwd = validate_required_text(master_pwd, "Master password")
     backup_path = Path(backup_path)
     service = project_service()
-    cron_safe_server_started = False
+    odoo_stopped = False
     try:
         details = validate_odoo_backup_archive(backup_path)
         size_mb = backup_path.stat().st_size / (1024 * 1024)
@@ -3683,85 +3719,111 @@ def restore_database_job(job, project, backup_path, filename, db_name, master_pw
         if details["odoo_version"]:
             job.add(f"Version Odoo de la sauvegarde: {details['odoo_version']}")
         ensure_backup_matches_project_version(project, details)
-        job.add("Filestore inclus: " + ("oui" if details["has_filestore"] else "non"))
-        job.add("Base déclarée comme copie: " + ("oui" if copy else "non"))
-        job.add("Neutralisation: " + ("activée" if neutralize else "désactivée"))
-        job.add("Démarrage du projet avant restauration...")
-        job_progress.span("Démarrage du projet", end=15, expected=20)
-        service.start_project(project, log=job.add)
-
-        if db_name in set(list_databases_for(project)):
-            raise RuntimeError(f"La base existe déjà: {db_name}")
-        job_control.on_cancel(
-            f"suppression de la base partiellement restaurée {db_name}",
-            lambda: drop_partial_database(job, project, db_name),
-        )
-
-        if neutralize:
-            job.add("Passage temporaire d'Odoo en mode sans cron pendant la restauration...")
-            service.stop_odoo_server(project, log=job.add)
-            cron_safe_server_started = True
-            service.start_odoo_server(project, log=job.add, disable_cron=True)
-            service.wait_project_http(project, log=job.add)
-
-        url = urllib.parse.urljoin(project_url(project), "web/database/restore")
-        version = project_odoo_version(project)
-        native_restore_neutralization = bool(neutralize and version != "15.0")
-        if neutralize and not native_restore_neutralization:
-            job.add("Odoo 15: neutralisation appliquée par la seconde passe après restauration.")
-        job.add(f"Restauration via Odoo: {url}")
-        if not neutralize:
-            # Odoo poursuit la restauration dans son serveur même si la connexion est coupée.
-            job_control.on_cancel(
-                "redémarrage d'Odoo pour interrompre la restauration côté serveur",
-                lambda: restart_odoo_server(job, service, project),
+        with zipfile.ZipFile(backup_path) as archive:
+            dump, filestore = database_restore.backup_contents(archive)
+            filestore_bytes = sum(entry.file_size for entry in filestore)
+            job.add(f"Données de la base : {database_restore.format_bytes(dump.file_size)} une fois décompressées")
+            job.add(
+                f"Filestore inclus : oui ({len(filestore)} fichier(s), {database_restore.format_bytes(filestore_bytes)})"
+                if filestore
+                else "Filestore inclus : non"
             )
-        status, content = post_odoo_database_restore(
-            job,
-            url,
-            backup_path,
-            filename,
-            db_name,
-            master_pwd,
-            bool(copy),
-            native_restore_neutralization,
-        )
-        job.add(f"Réponse Odoo: HTTP {status}")
-        restore_error = odoo_restore_error(content)
-        if restore_error:
-            raise OdooError(restore_error)
-        if status not in {200, 201, 202, 301, 302, 303}:
-            odoo_error = extract_odoo_page_error(content)
-            if odoo_error:
-                raise OdooError(odoo_error)
-            raise RuntimeError(f"Odoo a refusé la restauration (code {status}). Le détail est dans les logs d'Odoo.")
+            job.add("Base déclarée comme copie: " + ("oui" if copy else "non"))
+            job.add("Neutralisation: " + ("activée" if neutralize else "désactivée"))
 
-        job_progress.span("Finalisation de la restauration", end=99, expected=60 if neutralize else 15)
-        for waited in range(0, 122, 2):
+            job_progress.span("Démarrage du projet", end=6, expected=20)
+            service.start_project_containers(project, log=job.add)
             if db_name in set(list_databases_for(project)):
-                job.add(f"Base restaurée: {db_name}")
-                remember_database_arrival(job, project, db_name, "restored")
-                if neutralize:
-                    job.add("Seconde passe de neutralisation et contrôles de sécurité...")
-                    # Cette méthode arrête le serveur sans cron et redémarre le serveur normal,
-                    # y compris si la neutralisation échoue.
-                    cron_safe_server_started = False
-                    service.run_odoo_neutralize_command(project, db_name, log=job.add)
-                clear_project_module_cache(project)
-                return
-            job.add(f"Attente apparition base... {waited}s/120s")
-            job_control.sleep(2)
-        raise RuntimeError("Odoo a accepté la sauvegarde, mais la base n'apparaît pas dans PostgreSQL.")
+                raise RuntimeError(f"La base existe déjà: {db_name}")
+            check_restore_space(job, service, project, dump.file_size, filestore_bytes)
+            # Odoo n'ouvre la base qu'une fois complète, et sa mémoire revient au chargement.
+            job.add("Arrêt du serveur Odoo pendant la restauration...")
+            service.stop_odoo_server(project, log=job.add)
+            odoo_stopped = True
+            try:
+                # Serveur Odoo arrêté : un nouveau cache PostgreSQL resté en attente s'applique maintenant.
+                service.tune_postgres(project, log=job.add)
+            except RuntimeError as exc:
+                job.add(f"Réglages PostgreSQL non appliqués : {exc}")
+
+            job_control.on_cancel(
+                f"suppression de la base partiellement restaurée {db_name}",
+                lambda: drop_partial_database(job, project, db_name),
+            )
+            job_progress.span("Création de la base", end=8, expected=15)
+            service.create_restore_database(
+                project, db_name, database_restore.dump_extensions(archive, dump), log=job.add
+            )
+            memory, cpus = service.docker_resources()
+            options = database_restore.restore_session_options(service.postgres_server_version(project), memory, cpus)
+            load_end = 70 if filestore else 85
+            job_progress.span("Chargement des données", end=load_end, expected=60 + dump.file_size / (25 * 1024 * 1024))
+            job.add("Chargement des données dans PostgreSQL (sans passer par Odoo)...")
+            started = time.monotonic()
+
+            def post_data():
+                job.add(
+                    "Données chargées. Création des index et des contraintes : étape la plus longue "
+                    "pour une grosse base, la progression ne bouge presque plus pendant ce temps."
+                )
+                job_progress.span("Création des index", end=load_end, expected=60 + dump.file_size / (60 * 1024 * 1024))
+
+            try:
+                errors = service.load_database_dump(
+                    project, db_name, archive, dump, options=options, log=job.add, on_post_data=post_data
+                )
+                if filestore:
+                    job_progress.span("Copie du filestore", end=85, expected=30 + filestore_bytes / (40 * 1024 * 1024))
+                    service.restore_filestore(project, db_name, archive, filestore, log=job.add)
+            except Exception:
+                job.add(f"Restauration incomplète : suppression de la base {db_name}...")
+                try:
+                    drop_partial_database(job, project, db_name)
+                except Exception as exc:
+                    job.add(f"Suppression impossible ({exc}) : supprime la base {db_name} depuis l'onglet Bases.")
+                raise
+            elapsed = int(time.monotonic() - started)
+            job.add(f"Base chargée en {elapsed // 60} min {elapsed % 60:02d} s.")
+            if errors:
+                job.add(
+                    f"Attention : psql a signalé {errors} instruction(s) refusée(s), affichées ci-dessus. "
+                    "Odoo les ignore aussi pendant ses propres restaurations."
+                )
+
+        job_progress.span("Finalisation de la restauration", end=99, expected=90 if neutralize else 40)
+        if not service.run_postgres_sql(project, db_name, "SELECT count(*) FROM ir_module_module;")[0].isdigit():
+            raise RuntimeError("La base chargée ne contient pas les modules Odoo : la sauvegarde est incomplète.")
+        if copy:
+            job.add("Nouvel identifiant de base (copie)...")
+            service.run_postgres_sql(project, db_name, database_restore.copy_parameters_sql())
+        if neutralize:
+            # Avant qu'Odoo n'ouvre la base, même si la neutralisation complète échoue ensuite.
+            job.add("Désactivation des crons métier et des serveurs de messagerie...")
+            service.run_postgres_sql(project, db_name, database_restore.NEUTRALIZATION_SAFETY_SQL)
+        remember_database_arrival(job, project, db_name, "restored")
+        clear_project_module_cache(project)
+        invalidate_overview_databases(project)
+        try:
+            service.ensure_python_dependencies(project, db_name, module_dependency_graph(project), log=job.add)
+        except (RuntimeError, ValueError) as exc:
+            job.add(f"Paquets Python des modules non vérifiés : {exc}")
+
+        odoo_stopped = False
+        if neutralize:
+            job.add("Neutralisation complète par Odoo et contrôles de sécurité...")
+            neutralize_restored_database(job, service, project, db_name)
+        else:
+            service.start_odoo_server(project, log=job.add)
+            service.wait_project_http(project, log=job.add)
+        job.add(f"Base restaurée: {db_name}")
     finally:
         try:
-            if cron_safe_server_started:
-                job.add("Rétablissement du serveur Odoo normal après interruption de la restauration...")
+            if odoo_stopped:
+                job.add("Redémarrage du serveur Odoo...")
                 try:
-                    service.stop_odoo_server(project, log=job.add)
                     service.start_odoo_server(project, log=job.add)
-                    service.wait_project_http(project, log=job.add)
                 except Exception as exc:
-                    job.add(f"Erreur pendant le rétablissement du serveur Odoo: {exc}")
+                    job.add(f"Erreur pendant le redémarrage du serveur Odoo: {exc}")
             backup_path.unlink(missing_ok=True)
             job.add("Fichier temporaire de restauration supprimé.")
         finally:
@@ -4529,6 +4591,147 @@ def prune_docker_build_cache_job(job):
     if run_stream(job, docker_command(SETTINGS, "builder", "prune", "--force")) != 0:
         raise RuntimeError("Docker n'a pas vidé son cache de construction.")
     update_disk_usage_report(lambda report: report["docker"].update(build_cache_bytes=0))
+
+
+# --- Performances : ressources de Docker et réglages PostgreSQL -----------------------
+# Calculs : odoo_manager_core/performance.py. Ici, la lecture de l'état et le redémarrage de
+# Docker Desktop qui applique la recommandation (macOS : Docker Desktop relit ses réglages au démarrage).
+
+DOCKER_DESKTOP_STOP_SECONDS = 180
+DOCKER_DESKTOP_START_SECONDS = 300
+
+
+def wslconfig_text(recommended):
+    """Contenu de %UserProfile%\\.wslconfig qui donne ces ressources à WSL, donc à Docker."""
+    if not recommended:
+        return ""
+    return (
+        "[wsl2]\n"
+        f"memory={recommended['memory'] // performance.GIB}GB\n"
+        f"processors={recommended['cpus']}\n"
+        f"swap={recommended['swap'] // performance.GIB}GB\n"
+    )
+
+
+def performance_payload():
+    system = platform_id()
+    if system == "linux" and performance.running_in_wsl():
+        environment = "wsl"
+    else:
+        environment = system if system in {"macos", "windows"} else "linux"
+    host = performance.host_resources()
+    memory, cpus = project_service().docker_resources(refresh=True)
+    # Sous Linux, Docker utilise directement toute la machine : rien à lui allouer.
+    recommended = (
+        performance.recommended_docker_resources(host["memory"], host["cpus"])
+        if environment in {"macos", "windows"}
+        else None
+    )
+    status = performance.resources_status(memory, cpus, recommended)
+    if environment == "linux" and memory:
+        status = "ok"
+    return {
+        "environment": environment,
+        "host": host,
+        "docker": {"available": bool(memory), "memory": memory, "cpus": cpus},
+        "recommended": recommended,
+        "status": status,
+        # Le fichier de Docker Desktop n'est lu qu'au moment d'appliquer : macOS demande alors l'autorisation.
+        "can_apply": bool(environment == "macos" and recommended and memory),
+        "wslconfig": wslconfig_text(recommended) if environment in {"windows", "wsl"} else "",
+        "postgres": performance.postgres_settings(memory, cpus) if memory else None,
+        "tune_postgres": SETTINGS.tune_postgres,
+    }
+
+
+def docker_desktop_cli_available():
+    code, _output = run_capture(docker_command(SETTINGS, "desktop", "version"), timeout=15)
+    return code == 0
+
+
+def docker_engine_answers():
+    code, _output = run_capture(docker_command(SETTINGS, "version", "--format", "{{.Server.Version}}"), timeout=10)
+    return code == 0
+
+
+def docker_desktop_backend_running():
+    code, _output = run_capture(["pgrep", "-f", "com.docker.backend"], timeout=5)
+    return code == 0
+
+
+def wait_for(condition, seconds, step=3):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        job_control.sleep(step)
+    return condition()
+
+
+def apply_docker_resources_job(job):
+    """Donne à Docker Desktop (macOS) la mémoire et les processeurs recommandés pour cet ordinateur."""
+    if platform_id() != "macos":
+        raise RuntimeError("Le réglage automatique de Docker Desktop n'est disponible que sous macOS.")
+    host = performance.host_resources()
+    recommended = performance.recommended_docker_resources(host["memory"], host["cpus"])
+    if not recommended:
+        raise RuntimeError("Mémoire de l'ordinateur illisible : réglage impossible.")
+    service = project_service()
+    before_memory, before_cpus = service.docker_resources(refresh=True)
+    job.add(f"Ordinateur : {performance.format_gib(host['memory'])} de mémoire, {host['cpus']} processeurs.")
+    job.add(
+        f"Docker Desktop disposait de {performance.format_gib(before_memory)} et {before_cpus} processeurs ; "
+        f"il recevra {performance.format_gib(recommended['memory'])}, {recommended['cpus']} processeurs et "
+        f"{performance.format_gib(recommended['swap'])} de swap."
+    )
+    code, output = run_capture(docker_command(SETTINGS, "ps", "--format", "{{.Names}}"), timeout=20)
+    running = sorted(
+        (name[len("odoo-") :] for name in output.split() if code == 0 and name.startswith("odoo-")), key=str.lower
+    )
+    if running:
+        job.add("Ces projets s'arrêtent avec Docker : " + ", ".join(running) + ". Redémarre-les ensuite.")
+    use_cli = docker_desktop_cli_available()
+    # Avant tout arrêt : un refus de macOS ne doit pas laisser Docker Desktop arrêté.
+    performance.check_docker_desktop_settings()
+
+    with job_control.protected("redémarrage de Docker Desktop", irreversible=True):
+        job_progress.span("Arrêt de Docker Desktop", end=35, expected=40)
+        job.add("Arrêt de Docker Desktop...")
+        if use_cli:
+            service.stream(
+                docker_command(SETTINGS, "desktop", "stop", "--timeout", str(DOCKER_DESKTOP_STOP_SECONDS)), log=job.add
+            )
+        else:
+            run_capture(["osascript", "-e", 'quit app "Docker"'], timeout=30)
+        # Docker Desktop réécrit ses réglages en s'arrêtant : ils ne sont modifiés qu'une fois arrêté.
+        stopped = wait_for(lambda: not docker_desktop_backend_running(), DOCKER_DESKTOP_STOP_SECONDS)
+        try:
+            if not stopped:
+                raise RuntimeError("Docker Desktop ne s'est pas arrêté : ses réglages n'ont pas été modifiés.")
+            path = performance.write_docker_desktop_resources(
+                recommended["memory"], recommended["cpus"], recommended["swap"]
+            )
+            job.add(f"Réglages enregistrés dans {path} (copie de l'original à côté, en .odoo-manager.bak).")
+        finally:
+            # Réglages écrits ou non, Docker Desktop ne reste pas arrêté.
+            job_progress.span("Démarrage de Docker Desktop", end=95, expected=60)
+            job.add("Démarrage de Docker Desktop...")
+            if use_cli:
+                service.stream(docker_command(SETTINGS, "desktop", "start", "--detach"), log=job.add)
+            else:
+                run_capture(["open", "-a", "Docker"], timeout=30)
+        if not wait_for(docker_engine_answers, DOCKER_DESKTOP_START_SECONDS):
+            raise RuntimeError("Docker Desktop ne répond pas après son redémarrage. Ouvre-le pour voir son état.")
+    reset_docker_backend_cache()
+
+    memory, cpus = service.docker_resources(refresh=True)
+    job.add(f"Docker dispose maintenant de {performance.format_gib(memory)} et {cpus} processeurs.")
+    if memory < recommended["memory"] * 0.85:
+        raise RuntimeError(
+            "Docker Desktop n'a pas pris la nouvelle mémoire en compte : ses réglages sont peut-être imposés par "
+            "un administrateur. Règle-la dans Docker Desktop › Settings › Resources."
+        )
+    job.add("Les réglages PostgreSQL des projets suivront au prochain démarrage de chacun.")
 
 
 def disk_usage_payload():
@@ -6598,6 +6801,7 @@ INTERFACE_ONLY_SETTINGS = frozenset(
         "interface_layout",
         "sticky_header",
         "seasonal_decorations",
+        "tune_postgres",
     }
 )
 
@@ -6700,10 +6904,8 @@ def restore_database_upload(request):
         raise ValueError("Format de téléversement invalide. Sélectionne une sauvegarde ZIP Odoo.")
 
     db_name = validate_new_db(urllib.parse.unquote(handler.headers.get("X-Odoo-Database-Name", "")))
-    master_pwd = validate_required_text(
-        urllib.parse.unquote(handler.headers.get("X-Odoo-Master-Password", "odoo")),
-        "Master password",
-    )
+    # La restauration ne passe plus par le gestionnaire de bases d'Odoo : le master password
+    # éventuellement envoyé par une ancienne interface n'est plus utilisé.
     copy_database = truthy(handler.headers.get("X-Odoo-Copy", "1"))
     neutralize = truthy(handler.headers.get("X-Odoo-Neutralize", "1"))
     filename = urllib.parse.unquote(handler.headers.get("X-File-Name", "backup.zip"))
@@ -6724,7 +6926,7 @@ def restore_database_upload(request):
         job = Job(
             f"Restaurer {db_name} dans {project}",
             restore_database_job,
-            (project, destination, filename, db_name, master_pwd, copy_database, neutralize),
+            (project, destination, filename, db_name, copy_database, neutralize),
             project=project,
         )
     except BaseException:
@@ -7175,6 +7377,12 @@ JOB_ACTIONS = {
     "prune_docker_build_cache": lambda _payload: Job(
         "Vider le cache de construction Docker", prune_docker_build_cache_job, resources={"disk"}
     ),
+    "apply_docker_resources": lambda _payload: Job(
+        "Donner plus de ressources à Docker Desktop",
+        apply_docker_resources_job,
+        # Redémarrer Docker arrête tous les projets, Traefik et Mailpit.
+        resources={"*", "traefik", "mailpit", "disk"},
+    ),
     "start_mailpit": lambda _payload: Job("Démarrer Mailpit", start_mailpit_job, resources={"mailpit"}),
     "stop_mailpit": lambda _payload: Job("Arrêter Mailpit", stop_mailpit_job, resources={"mailpit"}),
     "create_database": create_database_action,
@@ -7222,6 +7430,7 @@ ROUTER = Router(
         api_route("GET", "/api/version", payload_view(api_version_payload)),
         api_route("GET", "/api/app-update", app_update_view),
         api_route("GET", "/api/disk-usage", payload_view(disk_usage_payload)),
+        api_route("GET", "/api/performance", payload_view(performance_payload)),
         api_route("GET", "/api/capabilities", payload_view(api_capabilities_payload)),
         api_route("GET", "/api/health", health_payload),
         api_route("GET", "/api/bootstrap", payload_view(bootstrap_snapshot)),

@@ -183,6 +183,8 @@ export type ManagerSettings = {
   interface_layout: "classic" | "refined";
   /** Petites décorations pendant les fêtes (Halloween, Noël, Nouvel An). */
   seasonal_decorations: boolean;
+  /** Réglages PostgreSQL de chaque projet calculés d'après la mémoire et les processeurs de Docker. */
+  tune_postgres?: boolean;
   onboarding_completed: boolean;
   /** Ancien dossier de projets Windows choisi à la main ; vide : détection automatique. */
   legacy_workspace: string;
@@ -268,7 +270,6 @@ export type Job = {
 export type RestoreDatabasePayload = {
   project: string;
   db: string;
-  masterPwd: string;
   copy: boolean;
   neutralize: boolean;
   file: File;
@@ -421,4 +422,18 @@ export type ProjectDiagnostics = {
     ignored_missing_modules?: string[];
     local_excluded_modules?: string[];
   }>;
+};
+
+/** Mémoire et processeurs de l'ordinateur et de Docker, et ce que le gestionnaire recommande. */
+export type PerformanceReport = {
+  environment: "macos" | "windows" | "wsl" | "linux";
+  host: { memory: number; cpus: number };
+  docker: { available: boolean; memory: number; cpus: number };
+  recommended: { memory: number; cpus: number; swap: number } | null;
+  status: "ok" | "low" | "critical" | "unknown";
+  can_apply: boolean;
+  /** Contenu de .wslconfig à recopier sous Windows. */
+  wslconfig: string;
+  postgres: Record<string, string> | null;
+  tune_postgres: boolean;
 };

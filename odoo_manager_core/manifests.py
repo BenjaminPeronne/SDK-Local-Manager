@@ -51,7 +51,17 @@ def manifest_graph_entry(manifest):
         "application": bool(manifest.get("application", False)),
         # L'installation auto dépend alors du pays des sociétés : non prévisible ici.
         "country_restricted": bool(manifest.get("countries")),
+        "python_dependencies": python_dependencies(manifest),
     }
+
+
+def python_dependencies(manifest):
+    """Paquets Python que le module déclare dans external_dependencies (noms d'import, le plus souvent)."""
+    declared = manifest.get("external_dependencies")
+    names = declared.get("python") if isinstance(declared, dict) else None
+    if not isinstance(names, (list, tuple, set)):
+        return []
+    return sorted({name.strip() for name in names if isinstance(name, str) and re.fullmatch(r"[\w.\-]+", name.strip())})
 
 
 def module_graph_from_paths(paths):

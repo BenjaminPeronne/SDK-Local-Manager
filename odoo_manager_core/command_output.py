@@ -86,20 +86,6 @@ def extract_odoo_page_error(content):
     return ""
 
 
-def odoo_restore_error(content):
-    if "Database restore error:" not in content:
-        return ""
-    # Le message est dans l'alerte de la page : sans ce ciblage, la suite du gestionnaire de
-    # bases d'Odoo (boutons, liste de langues…) était recopiée dans l'erreur.
-    alert = extract_odoo_page_error(content)
-    if "Database restore error:" in alert:
-        return alert[alert.find("Database restore error:") :][:800]
-    plain = html.unescape(re.sub(r"<[^>]+>", " ", content))
-    plain = re.sub(r"\s+", " ", plain).strip()
-    marker = "Database restore error:"
-    return plain[plain.find(marker) : plain.find(marker) + 800]
-
-
 # Erreurs Odoo typiques d'une base qui référence le code d'un module absent du projet.
 MISSING_CODE_ERROR_RE = re.compile(
     r"n'existe pas|does not exist|non-existing model|External ID not found|No module named|KeyError",
@@ -130,6 +116,15 @@ PIP_PACKAGE_ALIASES = {
     "bs4": "beautifulsoup4",
     "dateutil": "python-dateutil",
     "openssl": "pyOpenSSL",
+    "jwt": "PyJWT",
+    "ldap": "python-ldap",
+    "magic": "python-magic",
+    "docx": "python-docx",
+    "barcode": "python-barcode",
+    "slugify": "python-slugify",
+    "stdnum": "python-stdnum",
+    "sklearn": "scikit-learn",
+    "levenshtein": "python-Levenshtein",
 }
 
 
@@ -179,7 +174,9 @@ def missing_python_import(message):
     if not match:
         return ""
     name = match.group("name1") or match.group("name2") or match.group("name3")
-    return name.split(".")[0]
+    root = name.split(".")[0]
+    # « No module named 'odoo.addons.x' » : le code d'un module Odoo manque, pas un paquet Python.
+    return "" if root.lower() in {"odoo", "openerp"} else root
 
 
 def python_package_for_import(import_name):

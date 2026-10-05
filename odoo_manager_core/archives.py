@@ -220,10 +220,6 @@ def save_request_body_to_file(stream, content_length, destination, chunk_size=10
     return destination
 
 
-def multipart_field(boundary, name, value):
-    return (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n').encode()
-
-
 def safe_import_name(filename):
     stem = Path(filename or "modules").stem or "modules"
     return SAFE_IMPORT_NAME_RE.sub("_", stem).strip("._") or "modules"

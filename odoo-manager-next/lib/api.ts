@@ -119,7 +119,6 @@ export function uploadDatabaseBackup(
     request.open("POST", `${API_BASE}/api/projects/${encodeURIComponent(payload.project)}/database-restore`);
     request.setRequestHeader("Content-Type", "application/zip");
     request.setRequestHeader("X-Odoo-Database-Name", encodeURIComponent(payload.db));
-    request.setRequestHeader("X-Odoo-Master-Password", encodeURIComponent(payload.masterPwd));
     request.setRequestHeader("X-Odoo-Copy", payload.copy ? "1" : "0");
     request.setRequestHeader("X-Odoo-Neutralize", payload.neutralize ? "1" : "0");
     request.setRequestHeader("X-File-Name", encodeURIComponent(payload.file.name));

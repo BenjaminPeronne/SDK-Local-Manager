@@ -43,7 +43,7 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 - Suppression réversible : le projet est déplacé dans `.odoo_manager_deleted/`.
 
 **Bases de données**
-- Création d'une base vide, restauration d'une sauvegarde ZIP Odoo (envoi en flux, avec progression), duplication d'une base existante (filestore inclus, copie neutralisée par défaut) et suppression.
+- Création d'une base vide, restauration d'une sauvegarde ZIP Odoo de toute taille (chargée directement dans PostgreSQL, avec progression), duplication d'une base existante (filestore inclus, copie neutralisée par défaut) et suppression.
 - Neutralisation contrôlée des copies : crons métier et serveurs de messagerie désactivés, puis vérification dans PostgreSQL.
 - Capture des e-mails des bases neutralisées dans **Mailpit** (`http://mail.localhost/`), installé en un clic : rien ne part vers l'extérieur, tout reste consultable.
 - Réinitialisation du mot de passe administrateur et des traductions, régénération des assets.
@@ -134,7 +134,7 @@ flowchart LR
 | `http.server` (`ThreadingHTTPServer`) | stdlib | API REST locale et flux temps réel SSE (`/api/stream`). |
 | `subprocess`, `threading`, `queue` | stdlib | Exécution des commandes Docker, Git et WSL et file des actions en arrière-plan. |
 | `zipfile`, `shutil`, `tempfile` | stdlib | Imports ZIP contrôlés, sauvegardes et restaurations, préparation atomique des projets. |
-| `urllib`, `http.cookiejar` | stdlib | Téléchargement des copies RIKA et appels HTTP vers Odoo (restauration de base). |
+| `urllib`, `http.cookiejar` | stdlib | Téléchargement des copies RIKA et appels HTTP vers Odoo (création et duplication de base). |
 | **PyInstaller** | — | Transforme le backend en exécutable autonome embarqué dans l'application (aucun Python requis chez l'utilisateur). |
 | **unittest** | stdlib | Tests du backend. |
 
@@ -326,11 +326,38 @@ Le backend récupère le modèle Docker, Odoo Community et Odoo Enterprise depui
 
 ### Restaurer une sauvegarde
 
-Dans l'onglet **Bases**, **Restaurer une sauvegarde ZIP** remplace le passage par `/web/database/selector`. Le fichier est écrit progressivement sur disque puis transmis en flux au contrôleur officiel `/web/database/restore`, sans charger la sauvegarde en mémoire. Le fichier temporaire est supprimé à la fin, y compris en cas d'erreur.
+Dans l'onglet **Bases**, **Restaurer une sauvegarde ZIP** remplace le passage par `/web/database/selector`. Le fichier est écrit progressivement sur disque, puis `dump.sql` est lu dans le ZIP et envoyé **directement à `psql`** dans le conteneur PostgreSQL (`docker exec -i`), sans passer par Odoo ni rien décompresser sur le disque ; le filestore suit en flux tar vers le conteneur Odoo. Le fichier temporaire est supprimé à la fin, y compris en cas d'erreur.
 
-La base est déclarée comme une copie et la **neutralisation** est activée par défaut. Pendant la restauration, Odoo tourne avec ses workers cron coupés ; le gestionnaire relance ensuite le moteur de neutralisation des modules installés et vérifie dans PostgreSQL que la base est marquée neutralisée, que les crons métier sont inactifs (seul l'autovacuum peut rester actif) et qu'aucun serveur de messagerie exploitable n'est actif. Le seul serveur sortant conservé est le SMTP factice de la neutralisation, redirigé vers `mailpit:1025` : quand Mailpit tourne sur le réseau `traefik-local`, les e-mails y sont capturés ; sinon, leur envoi échoue comme avant. Odoo 16 à 19 utilisent le moteur natif ; Odoo 15 applique un repli limité aux crons et aux serveurs de messagerie. Le bouton **Neutraliser et contrôler** rejoue cette passe sur une base existante.
+La restauration par Odoo (`/web/database/restore`) échouait sur les grosses bases : Odoo recopie l'archive dans le `/tmp` du conteneur et y décompresse le dump (31 Go pour un ZIP de 4 Go), se relance lui-même au-delà de `limit_time_real` (20 min dans le modèle) au milieu de l'opération, charge le code de tous les modules (un paquet Python manquant fait tout échouer à la fin) et laisse ses fichiers temporaires derrière lui. Désormais :
+
+- l'espace libre est contrôlé avant de commencer (environ 70 % du dump pour la base, plus 2 Go) ;
+- la base est créée comme Odoo la crée (encodage unicode, tri « C »), avec les extensions que le dump demande, créées par le superutilisateur (pgvector compris : l'image PostgreSQL passe au besoin sur `pgvector/pgvector`) ;
+- la session `psql` reçoit plus de mémoire pour les index et plusieurs processus par index (`PGOPTIONS`), d'après les ressources de Docker ;
+- les erreurs de `psql` sont comptées et affichées (Odoo les ignorait sans rien dire) ; un chargement interrompu supprime la base partielle ;
+- les paquets Python déclarés par les modules installés (`external_dependencies`) sont installés dans le conteneur et ajoutés à `init/requirements_pip.txt` ;
+- le master password n'est plus demandé.
+
+La base est déclarée comme une copie (nouvel identifiant, comme le fait Odoo) et la **neutralisation** est activée par défaut. Crons métier et serveurs de messagerie sont désactivés en SQL avant qu'Odoo n'ouvre la base, puis le gestionnaire lance le moteur de neutralisation des modules installés et vérifie dans PostgreSQL que la base est marquée neutralisée, que les crons métier sont inactifs (seul l'autovacuum peut rester actif) et qu'aucun serveur de messagerie exploitable n'est actif. Le seul serveur sortant conservé est le SMTP factice de la neutralisation, redirigé vers `mailpit:1025` : quand Mailpit tourne sur le réseau `traefik-local`, les e-mails y sont capturés ; sinon, leur envoi échoue comme avant. Odoo 16 à 19 utilisent le moteur natif ; Odoo 15 applique un repli limité aux crons et aux serveurs de messagerie. Le bouton **Neutraliser et contrôler** rejoue cette passe sur une base existante.
 
 Une base neutralisée l'est de nouveau après chaque installation ou mise à jour de module, avant le redémarrage d'Odoo : un addon nouvellement chargé ne peut pas réactiver un cron ou une intégration externe.
+
+### Restes d'une restauration interrompue
+
+Une restauration faite par Odoo et coupée en route (version précédente du gestionnaire, gestionnaire de bases d'Odoo) laisse dans le `/tmp` du conteneur Odoo la copie du ZIP et le dump décompressé, soit plusieurs dizaines de Go. Ils sont supprimés au démarrage du projet s'ils ont plus de 10 minutes, qu'aucun processus ne les utilise et qu'aucun `psql` ne tourne. La base laissée à moitié chargée (aucune clé étrangère) est signalée par le diagnostic du projet : il faut la supprimer puis restaurer de nouveau la sauvegarde.
+
+### Démarrage et paquets Python manquants
+
+Quand Odoo répond en erreur 500 pendant son chargement, le journal du lancement en cours est lu : un paquet Python manquant (`No module named 'openai'`) est installé dans le conteneur, noté dans `init/requirements_pip.txt`, puis le serveur est relancé. Une base qui échoue trois fois à se charger pour une autre raison arrête l'attente avec l'erreur d'Odoo, au lieu d'attendre dix minutes.
+
+### Performances
+
+**Paramètres › Performances** compare la mémoire et les processeurs de l'ordinateur à ceux dont dispose Docker et propose une répartition : le système garde au moins 4 Go (35 % au-delà), Docker reçoit le reste (8 Go → 4 Go, 16 Go → 10 Go, 32 Go → 20 Go), tous les processeurs jusqu'à 4 puis tous sauf deux, et 2 à 4 Go de swap.
+
+- **macOS** : un bouton applique la recommandation. Docker Desktop est arrêté (`docker desktop stop`), ses réglages sont écrits dans `~/Library/Group Containers/group.com.docker/settings-store.json` (copie de l'original en `.odoo-manager.bak`), puis il redémarre. Les projets démarrés s'arrêtent avec lui.
+- **Windows** : la mémoire de Docker est celle de WSL ; le panneau donne le contenu de `%UserProfile%\.wslconfig` à recopier.
+- **Linux** : Docker utilise directement toute la machine, rien à régler.
+
+Chaque PostgreSQL de projet est réglé à son démarrage d'après les ressources de Docker (`ALTER SYSTEM`, dans `postgresql.auto.conf` : les réglages survivent à la recréation du conteneur) : cache partagé (1/8 de la mémoire), mémoire des index et des requêtes, journal de 2 Go entre deux points de contrôle, `synchronous_commit = off` (base locale : un arrêt brutal perd au plus la dernière seconde, sans corrompre la base), coûts adaptés aux SSD et requêtes parallèles. Le cache ne change qu'au redémarrage de PostgreSQL, fait seulement quand le serveur Odoo est arrêté. Désactiver **Optimiser PostgreSQL** retire les réglages posés par le gestionnaire.
 
 ### Durée de conservation des bases
 

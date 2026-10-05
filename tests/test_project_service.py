@@ -1,5 +1,7 @@
+import io
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import ANY, patch
 
@@ -10,6 +12,8 @@ from odoo_manager_core.project_service import (
     ODOO_STARTUP_STATUS,
     ODOO_STATE_MARKER,
     PGVECTOR_IMAGE_REQUIRED_MESSAGE,
+    MissingPythonDependency,
+    OdooError,
     ProjectService,
     add_postgres_healthcheck_start_period,
     remove_odoo_container_command,
@@ -1743,6 +1747,135 @@ class ProjectServiceTests(unittest.TestCase):
             self.service.remove_orphan_report_expressions("DEMO", "db1", "l10n_fr'; DROP TABLE x; --")
 
         self.assertEqual([], self.runner.captures)
+
+
+# Journal Odoo d'une base dont un module importe un paquet absent du conteneur (cas réel, Odoo 16).
+MISSING_OPENAI_LOG = """2026-10-05 20:32:44,000 420 INFO ? odoo: Odoo version 16.0
+2026-10-05 20:32:48,288 420 INFO aca odoo.modules.loading: loading 361 modules...
+2026-10-05 20:32:48,358 420 CRITICAL aca odoo.modules.module: Couldn't load module is_chatgpt_integration
+2026-10-05 20:32:48,358 420 CRITICAL aca odoo.modules.module: No module named 'openai'
+2026-10-05 20:32:48,363 420 ERROR aca odoo.modules.registry: Failed to load registry
+Traceback (most recent call last):
+  File "/home/odoo/srv/server/addons/is_chatgpt_integration/models/mail_channel.py", line 4, in <module>
+    from openai import OpenAI
+ModuleNotFoundError: No module named 'openai'
+"""
+BROKEN_REGISTRY_LOG = (
+    "2026-10-05 20:32:44,000 420 INFO ? odoo: Odoo version 16.0\n"
+    + (
+        "2026-10-05 20:32:48,363 420 ERROR aca odoo.modules.registry: Failed to load registry\n"
+        "Traceback (most recent call last):\n"
+        'psycopg2.errors.UndefinedTable: relation "ir_module_module" does not exist\n'
+    )
+    * 3
+)
+
+
+class OdooStartupRepairTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        (self.root / "DEMO" / "init").mkdir(parents=True)
+        (self.root / "DEMO" / "compose.yml").write_text("services: {}\n", encoding="utf-8")
+        (self.root / "DEMO" / "odoo.conf").write_text("[options]\ndb_user = odoo_demo\n", encoding="utf-8")
+        self.runner = FakeRunner()
+        self.service = ProjectService(ManagerSettings.from_dict({}, str(self.root)), self.root, runner=self.runner)
+        self.odoo_log = MISSING_OPENAI_LOG
+        self.http_answers = []
+        original_capture = self.runner.capture
+
+        def capture(command, cwd=None, timeout=10):
+            if "python3" in command and "/web/login" in command[-2]:
+                return self.http_answers.pop(0) if self.http_answers else (0, "HTTP 303")
+            if command[-2:-1] == ["-c"] and "odoo.log" in command[-1] and "tail -n 600" in command[-1]:
+                return 0, self.odoo_log
+            return original_capture(command, cwd, timeout)
+
+        self.runner.capture = capture
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_a_missing_python_package_is_reported_instead_of_waiting_ten_minutes(self):
+        self.http_answers = [(1, "HTTP 500")]
+
+        with self.assertRaises(MissingPythonDependency) as raised:
+            self.service.wait_odoo_http("odoo-DEMO", log=lambda _line: None, sleep=lambda _seconds: None)
+
+        self.assertEqual("openai", raised.exception.package)
+
+    def test_a_database_that_never_loads_stops_the_wait_with_the_odoo_error(self):
+        self.odoo_log = BROKEN_REGISTRY_LOG
+        self.http_answers = [(1, "HTTP 500")]
+
+        with self.assertRaisesRegex(OdooError, r"n'arrive pas à ouvrir la base \(3 essais\).*ir_module_module"):
+            self.service.wait_odoo_http("odoo-DEMO", log=lambda _line: None, sleep=lambda _seconds: None)
+
+    def test_start_installs_the_missing_package_records_it_and_relaunches_odoo(self):
+        self.runner.odoo_server_running = False
+        self.http_answers = [(1, "HTTP 500"), (0, "HTTP 303")]
+        logs = []
+
+        self.service.start_odoo_server("DEMO", log=logs.append, sleep=lambda _seconds: None)
+
+        commands = [command for command, _cwd in self.runner.streams]
+        installs = [command for command in commands if "pip install" in " ".join(command)]
+        self.assertEqual(1, len(installs))
+        self.assertEqual("openai", installs[0][-1])
+        launches = [command for command in commands if "-d" in command and "odoo-DEMO" in command]
+        self.assertEqual(2, len(launches))
+        requirements = (self.root / "DEMO" / "init" / "requirements_pip.txt").read_text(encoding="utf-8")
+        self.assertEqual("openai\n", requirements)
+
+    def test_restore_leftovers_report_the_space_they_freed(self):
+        original_capture = self.runner.capture
+        self.runner.capture = lambda command, cwd=None, timeout=10: (
+            (0, "removed 4470944 /tmp/tmp4ec5auql\nremoved 30408344 /tmp/tmpvyrbvney")
+            if "dump.sql" in command[-1]
+            else original_capture(command, cwd, timeout)
+        )
+        logs = []
+
+        freed = self.service.remove_odoo_restore_leftovers("DEMO", log=logs.append)
+
+        self.assertEqual((4470944 + 30408344) * 1024, freed)
+        self.assertIn("33,3 Go libérés", logs[0])
+
+    def test_dump_is_piped_to_psql_as_the_odoo_role_with_session_options(self):
+        fed = {}
+
+        def feed(command, produce, log=None, on_error_line=None):
+            sink = io.BytesIO()
+            produce(sink)
+            fed["command"] = list(command)
+            fed["data"] = sink.getvalue()
+            on_error_line('psql:<stdin>:3: ERROR:  type "vector" does not exist')
+            return 0
+
+        self.runner.feed = feed
+        buffer = io.BytesIO()
+        dump = b"CREATE TABLE t (id integer);\nCOPY t (id) FROM stdin;\n1\n\\.\n"
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("dump.sql", dump)
+        with zipfile.ZipFile(buffer) as archive:
+            errors = self.service.load_database_dump(
+                "DEMO", "client", archive, archive.getinfo("dump.sql"), options="-c synchronous_commit=off"
+            )
+
+        self.assertEqual(1, errors)
+        self.assertEqual(dump, fed["data"])
+        command = fed["command"]
+        self.assertEqual(["exec", "-i", "-e", "PGOPTIONS=-c synchronous_commit=off", "postgresql-DEMO"], command[1:6])
+        self.assertEqual(["-U", "odoo_demo", "-d", "client"], command[-4:])
+
+    def test_a_psql_crash_fails_the_restoration(self):
+        self.runner.feed = lambda command, produce, log=None, on_error_line=None: 2
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("dump.sql", "SELECT 1;\n")
+        with zipfile.ZipFile(buffer) as archive:
+            with self.assertRaisesRegex(RuntimeError, r"avant la fin \(psql, code 2\)"):
+                self.service.load_database_dump("DEMO", "client", archive, archive.getinfo("dump.sql"))
 
 
 if __name__ == "__main__":

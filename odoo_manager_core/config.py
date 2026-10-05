@@ -111,6 +111,9 @@ class ManagerSettings:
     interface_layout: str = "refined"
     # Petites décorations pendant les fêtes (Halloween, Noël, Nouvel An) : activées tant qu'on ne les coupe pas.
     seasonal_decorations: bool = True
+    # Réglages PostgreSQL de chaque projet calculés d'après la mémoire et les processeurs de Docker
+    # (odoo_manager_core/performance.py). Désactivé, le gestionnaire retire ceux qu'il avait posés.
+    tune_postgres: bool = True
     onboarding_completed: bool = False
     # Ancien dossier de projets Windows, vu depuis la distribution (/mnt/c/...).
     # Renseigné au passage sous WSL : il sert à proposer la migration des projets.
@@ -165,6 +168,7 @@ class ManagerSettings:
             interface_icon=interface_icon,
             interface_layout=interface_layout,
             seasonal_decorations=bool(payload.get("seasonal_decorations", True)),
+            tune_postgres=bool(payload.get("tune_postgres", True)),
             onboarding_completed=bool(payload.get("onboarding_completed", False)),
             legacy_workspace=normalize_legacy_workspace(payload.get("legacy_workspace", "")),
             migration_banner_dismissed=bool(payload.get("migration_banner_dismissed", False)),

@@ -7,7 +7,7 @@ import time
 import unittest
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from unittest.mock import Mock, PropertyMock, call, patch
+from unittest.mock import ANY, Mock, PropertyMock, call, patch
 
 import odoo_manager_web as web
 from odoo_manager_core import command_output, job_progress, job_queue
@@ -502,14 +502,6 @@ class DatabaseRestoreTests(unittest.TestCase):
         web.ensure_backup_matches_project_version("genergies_v15", {"odoo_version": ""})
         web.ensure_backup_matches_project_version("genergies_v15", {"odoo_version": "19.0"})
 
-    def test_restore_error_keeps_only_the_odoo_alert(self):
-        content = (
-            '<div class="alert alert-danger">Database restore error: operator does not exist</div>'
-            "<div>genergies_v15 Backup Duplicate Delete Create Database Albanian / Shqip</div>"
-        )
-
-        self.assertEqual(web.odoo_restore_error(content), "Database restore error: operator does not exist")
-
     def test_rejects_zip_without_database_dump(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = self.make_backup(temporary, include_dump=False)
@@ -562,84 +554,104 @@ class DatabaseRestoreTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "ne répond pas sur dev.demo.localhost"):
             web.post_form_no_redirect("http://dev.demo.localhost/web/database/drop", {})
 
-    @patch("odoo_manager_web.http.client.HTTPConnection")
-    def test_streams_restore_with_official_odoo_form_fields(self, connection_type):
-        connection = Mock()
-        response = Mock(status=303)
-        response.read.return_value = b""
-        connection.getresponse.return_value = response
-        connection_type.return_value = connection
-        job = Mock()
+    def restore_service(self, free_bytes=500 * 1024**3):
+        service = Mock()
+        service.container_free_bytes.return_value = free_bytes
+        service.docker_resources.return_value = (4 * 1024**3, 4)
+        service.postgres_server_version.return_value = 160000
+        service.load_database_dump.return_value = 0
+        service.run_postgres_sql.return_value = ["361"]
+        return service
 
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "backup.zip"
-            path.write_bytes(b"backup-content")
-            status, content = web.post_odoo_database_restore(
-                job,
-                "http://dev.demo.localhost/web/database/restore",
-                path,
-                "backup.zip",
-                "demo_restore",
-                "odoo",
-                True,
-                True,
-            )
-
-        self.assertEqual((status, content), (303, ""))
-        # Windows ne résout pas dev.demo.localhost : connexion à la boucle locale, nom d'hôte dans Host.
-        self.assertEqual("127.0.0.1", connection_type.call_args.args[0])
-        connection.putrequest.assert_called_once_with("POST", "/web/database/restore", skip_host=True)
-        connection.putheader.assert_any_call("Host", "dev.demo.localhost")
-        transmitted = b"".join(call.args[0] for call in connection.send.call_args_list)
-        self.assertIn(b'name="master_pwd"\r\n\r\nodoo', transmitted)
-        self.assertIn(b'name="name"\r\n\r\ndemo_restore', transmitted)
-        self.assertIn(b'name="copy"\r\n\r\ntrue', transmitted)
-        self.assertIn(b'name="neutralize_database"\r\n\r\non', transmitted)
-        self.assertIn(b'name="backup_file"; filename="backup.zip"', transmitted)
-
-    @patch("odoo_manager_web.project_odoo_version", return_value="15.0")
-    @patch("odoo_manager_web.project_url", return_value="http://dev.demo.localhost/")
-    @patch("odoo_manager_web.post_odoo_database_restore", return_value=(303, ""))
-    @patch("odoo_manager_web.list_databases_for", side_effect=[[], ["demo_restore"]])
-    @patch("odoo_manager_web.project_service")
-    @patch("odoo_manager_web.validate_project", return_value="DEMO")
-    def test_restore_job_removes_temporary_backup(
-        self,
-        _validate_project,
-        project_service,
-        _list_databases,
-        _post_restore,
-        _project_url,
-        _project_version,
-    ):
+    def run_restore(self, service, neutralize=True, databases=((), ("demo_restore",))):
         job = Mock()
         with tempfile.TemporaryDirectory() as temporary:
             path = self.make_backup(temporary)
-            web.restore_database_job(
-                job,
-                "DEMO",
-                path,
-                "backup.zip",
-                "demo_restore",
-                "odoo",
-                True,
-                True,
-            )
-            self.assertFalse(path.exists())
+            with (
+                patch("odoo_manager_web.project_service", return_value=service),
+                patch("odoo_manager_web.validate_project", return_value="DEMO"),
+                patch("odoo_manager_web.project_odoo_version", return_value=""),
+                patch("odoo_manager_web.list_databases_for", side_effect=[list(item) for item in databases]),
+                patch("odoo_manager_web.module_dependency_graph", return_value={}),
+                patch("odoo_manager_web.remember_database_arrival") as arrival,
+                patch("odoo_manager_web.invalidate_overview_databases"),
+                patch("odoo_manager_web.clear_project_module_cache"),
+                patch("odoo_manager_web.drop_partial_database") as drop,
+            ):
+                try:
+                    web.restore_database_job(job, "DEMO", path, "backup.zip", "demo_restore", True, neutralize)
+                    error = None
+                except Exception as exc:
+                    error = exc
+                backup_left = path.exists()
+        return job, error, backup_left, arrival, drop
 
-        project_service.return_value.start_project.assert_called_once()
-        project_service.return_value.stop_odoo_server.assert_called_once_with("DEMO", log=job.add)
-        project_service.return_value.start_odoo_server.assert_called_once_with(
-            "DEMO",
-            log=job.add,
-            disable_cron=True,
-        )
-        self.assertFalse(_post_restore.call_args.args[-1])
-        project_service.return_value.run_odoo_neutralize_command.assert_called_once_with(
-            "DEMO",
-            "demo_restore",
-            log=job.add,
-        )
+    def test_restore_loads_the_dump_in_postgres_without_going_through_odoo(self):
+        service = self.restore_service()
+
+        job, error, backup_left, arrival, drop = self.run_restore(service)
+
+        self.assertIsNone(error)
+        self.assertFalse(backup_left)
+        service.start_project_containers.assert_called_once_with("DEMO", log=job.add)
+        service.stop_odoo_server.assert_called_once_with("DEMO", log=job.add)
+        service.create_restore_database.assert_called_once_with("DEMO", "demo_restore", [], log=job.add)
+        options = service.load_database_dump.call_args.kwargs["options"]
+        self.assertIn("maintenance_work_mem=512MB", options)
+        self.assertIn("max_parallel_maintenance_workers=2", options)
+        service.restore_filestore.assert_called_once()
+        executed = [call.args[2] for call in service.run_postgres_sql.call_args_list]
+        self.assertTrue(any("database.uuid" in sql for sql in executed))
+        self.assertTrue(any("UPDATE ir_cron SET active = false" in sql for sql in executed))
+        service.ensure_python_dependencies.assert_called_once()
+        service.run_odoo_neutralize_command.assert_called_once_with("DEMO", "demo_restore", log=ANY)
+        # La neutralisation redémarre elle-même le serveur Odoo.
+        service.start_odoo_server.assert_not_called()
+        arrival.assert_called_once_with(job, "DEMO", "demo_restore", "restored")
+        drop.assert_not_called()
+
+    def test_restore_without_neutralization_restarts_odoo_normally(self):
+        service = self.restore_service()
+
+        job, error, _backup_left, _arrival, _drop = self.run_restore(service, neutralize=False)
+
+        self.assertIsNone(error)
+        executed = [call.args[2] for call in service.run_postgres_sql.call_args_list]
+        self.assertFalse(any("ir_cron" in sql for sql in executed))
+        service.run_odoo_neutralize_command.assert_not_called()
+        service.start_odoo_server.assert_called_once_with("DEMO", log=job.add)
+
+    def test_restore_is_refused_before_anything_when_the_disk_is_too_small(self):
+        service = self.restore_service(free_bytes=1024**3)
+
+        _job, error, backup_left, _arrival, _drop = self.run_restore(service, databases=((),))
+
+        self.assertRegex(str(error), "Espace disque insuffisant")
+        self.assertFalse(backup_left)
+        service.stop_odoo_server.assert_not_called()
+        service.create_restore_database.assert_not_called()
+
+    def test_an_interrupted_load_removes_the_partial_database_and_restarts_odoo(self):
+        service = self.restore_service()
+        service.load_database_dump.side_effect = RuntimeError("Le chargement de la base s'est arrêté avant la fin")
+
+        job, error, backup_left, arrival, drop = self.run_restore(service, databases=((),))
+
+        self.assertRegex(str(error), "avant la fin")
+        self.assertFalse(backup_left)
+        drop.assert_called_once_with(job, "DEMO", "demo_restore")
+        service.start_odoo_server.assert_called_once_with("DEMO", log=job.add)
+        arrival.assert_not_called()
+
+    def test_a_failed_neutralization_keeps_the_database_but_says_it_is_not_neutralized(self):
+        service = self.restore_service()
+        service.run_odoo_neutralize_command.side_effect = RuntimeError("La neutralisation Odoo a échoué.")
+
+        _job, error, _backup_left, _arrival, drop = self.run_restore(service)
+
+        self.assertIsInstance(error, web.OdooError)
+        self.assertRegex(str(error), "crons métier et serveurs de messagerie désactivés")
+        drop.assert_not_called()
 
     @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo_restore"])
     @patch("odoo_manager_web.project_service")
@@ -1797,6 +1809,9 @@ class ModuleFailureHintTests(unittest.TestCase):
 
     def test_unrelated_errors_yield_no_python_import(self):
         self.assertEqual("", web.missing_python_import("SyntaxError: invalid syntax"))
+        # Code d'un module Odoo absent : rien à installer avec pip.
+        self.assertEqual("", web.missing_python_import("ModuleNotFoundError: No module named 'odoo.addons.sale_x'"))
+        self.assertEqual("PyJWT", web.python_package_for_import("jwt"))
 
 
 class AutomaticPythonDependencyTests(unittest.TestCase):
@@ -2427,6 +2442,26 @@ class DiagnosticModuleTests(unittest.TestCase):
             [issue["title"] for issue in diagnostics["issues"]],
         )
         self.assertEqual([], diagnostics["databases"][1]["issues"], "l'échec de lecture reste au niveau du projet")
+
+    def test_a_database_whose_restore_was_cut_is_reported_as_incomplete(self):
+        def query(project, db_name, sql, timeout=18):
+            if sql == web.RESTORE_COMPLETENESS_SQL:
+                return ["0"] if db_name == "aca_05102026" else ["4812"]
+            return []
+
+        with (
+            patch.object(web, "installed_modules", return_value={"base": {"state": "installed"}}),
+            patch.object(web, "ignored_missing_modules", return_value=set()),
+            patch.object(web, "db_query_lines", side_effect=query),
+            patch.object(web, "filestore_files", side_effect=lambda project, db: (set(), Path("/filestore") / db)),
+        ):
+            _info, cut = web.database_diagnostics("DEMO", "aca_05102026", {"base"})
+            _info, complete = web.database_diagnostics("DEMO", "aca_ok", {"base"})
+
+        self.assertEqual(
+            ["Base aca_05102026 incomplète : sa restauration s'est arrêtée avant la fin"], [i["title"] for i in cut]
+        )
+        self.assertEqual([], complete)
 
     def test_available_update_list_excludes_missing_and_uninstalled_modules(self):
         states = {

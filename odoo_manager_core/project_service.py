@@ -12,7 +12,8 @@ import urllib.parse
 import uuid
 from pathlib import Path
 
-from . import job_progress, jobs
+from . import database_restore, job_progress, jobs, performance
+from .command_output import missing_python_import, python_package_for_import
 from .platform import (
     command_uses_wsl,
     executable_search_path,
@@ -227,6 +228,63 @@ ODOO_SERVER_STATE_SCRIPT = (
 ODOO_PROCESS_GRACE_SECONDS = 10
 # Commande du processus principal du conteneur : `/init.sh` de l'image, puis la commande qu'il lance.
 CONTAINER_MAIN_PROCESS_SCRIPT = "tr '\\000' ' ' </proc/1/cmdline 2>/dev/null || true"
+ODOO_DATA_DIR = "/home/odoo/srv/data"
+# PostgreSQL 18 range ses données sous /var/lib/postgresql/18/docker : $PGDATA suit l'image.
+POSTGRES_DATA_DIR = "${PGDATA:-/var/lib/postgresql/data}"
+# Restes d'une restauration lancée par Odoo puis interrompue (relance du serveur, arrêt du conteneur) :
+# la copie du ZIP (`tmpXXXX`) et le dossier où dump.sql a été décompressé (`tmpXXXX/dump.sql`),
+# soit plusieurs dizaines de Go qu'Odoo n'efface jamais. Rien n'est touché pendant qu'un psql
+# tourne, ni ce qu'un processus garde ouvert, ni ce qui a moins de 10 minutes.
+ODOO_RESTORE_LEFTOVERS_SCRIPT = r"""
+for f in /proc/[0-9]*/cmdline; do tr '\000' ' ' <"$f" 2>/dev/null; echo; done \
+  | grep -Eq '^([^ ]*/)?(psql|pg_restore) ' && exit 0
+find /tmp -maxdepth 1 -name 'tmp*' -mmin +10 2>/dev/null | while IFS= read -r entry; do
+  if [ -d "$entry" ]; then
+    [ -f "$entry/dump.sql" ] || continue
+  elif [ -f "$entry" ]; then
+    [ "$(head -c 2 "$entry" 2>/dev/null)" = "PK" ] || continue
+  else
+    continue
+  fi
+  for fd in /proc/[0-9]*/fd/*; do
+    case "$(readlink "$fd" 2>/dev/null)" in "$entry"|"$entry"/*) continue 2;; esac
+  done
+  size=$(du -sk "$entry" 2>/dev/null | cut -f1)
+  rm -rf -- "$entry" && echo "removed ${size:-0} $entry"
+done
+""".strip()
+# Interpréteur d'Odoo : celui du venv de l'image, sinon python3. `$0` porte le script, `$@` ses arguments.
+ODOO_PYTHON_PREFIX = 'py=/home/_venv/bin/python; [ -x "$py" ] || py=python3; '
+# Noms d'import (ou de distribution) introuvables pour l'interpréteur d'Odoo, un par ligne.
+MISSING_PYTHON_MODULES_SCRIPT = """import importlib.util, sys
+missing = []
+for name in sys.argv[1:]:
+    try:
+        if importlib.util.find_spec(name) is not None:
+            continue
+    except (ImportError, ValueError):
+        pass
+    try:
+        from importlib import metadata
+        metadata.distribution(name)
+        continue
+    except Exception:
+        pass
+    missing.append(name)
+print("\\n".join(missing))
+"""
+# Réglages écrits par ALTER SYSTEM (postgresql.auto.conf, dans le dossier des données : ils
+# survivent à la recréation du conteneur).
+POSTGRES_AUTO_SETTINGS_SQL = (
+    "SELECT name, setting FROM pg_file_settings WHERE sourcefile LIKE '%postgresql.auto.conf' AND error IS NULL;"
+)
+# `docker info` inventorie conteneurs et images : relu au plus toutes les 5 minutes.
+DOCKER_RESOURCES_TTL_SECONDS = 300
+DOCKER_RESOURCES_CACHE = {}
+DOCKER_RESOURCES_LOCK = threading.Lock()
+# Échec répété du chargement d'une base au démarrage : au-delà, attendre ne changera rien.
+REGISTRY_FAILURES_BEFORE_ABORT = 3
+MAX_AUTOMATIC_PYTHON_INSTALLS = 3
 ACTIVE_PROCESSES = set()
 ACTIVE_PROCESSES_LOCK = threading.Lock()
 # `ports: !override` remplace la liste au lieu de la fusionner (Compose >= 2.24.4).
@@ -355,6 +413,17 @@ class OdooError(RuntimeError):
     """
 
 
+class MissingPythonDependency(OdooError):
+    """Odoo ne charge pas une base faute d'un paquet Python dans son conteneur."""
+
+    def __init__(self, import_name, reason=""):
+        self.import_name = import_name
+        self.package = python_package_for_import(import_name)
+        super().__init__(
+            f"Odoo ne charge pas la base : le paquet Python « {self.package} » manque dans le conteneur. {reason}".strip()
+        )
+
+
 def module_command_expected_seconds(modules):
     """Durée habituelle d'une installation ou mise à jour : elle règle la vitesse de la barre quand Odoo se tait."""
     names = [name for name in str(modules).split(",") if name.strip()]
@@ -464,6 +533,63 @@ class ProjectService:
             return 127, str(exc)
         except subprocess.TimeoutExpired as exc:
             return 124, (exc.stdout or "").strip()
+
+    def feed_process(self, command, produce, log=None, on_error_line=None):
+        """Lance `command`, écrit sur son entrée ce que `produce(entrée)` y envoie et retourne son code.
+
+        Sa sortie standard est ignorée : psql y affiche le résultat de chaque SELECT d'un dump.
+        Chaque ligne de sa sortie d'erreur part vers `on_error_line` au fil de l'eau.
+        """
+        if self.runner:
+            return self.runner.feed(command, produce, log=log, on_error_line=on_error_line)
+        command, process_cwd = self.prepare_command(command, self.workspace)
+        jobs.checkpoint()
+        self.log(log, "$ " + " ".join(str(arg) for arg in command))
+        process = subprocess.Popen(
+            command,
+            cwd=str(process_cwd),
+            env=self.env(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            **hidden_process_kwargs(),
+        )
+        with ACTIVE_PROCESSES_LOCK:
+            ACTIVE_PROCESSES.add(process)
+        jobs.track_process(process)
+
+        def read_errors():
+            for raw in process.stderr:
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                if line and on_error_line:
+                    on_error_line(line)
+
+        reader = threading.Thread(target=read_errors, name="process-errors", daemon=True)
+        reader.start()
+        try:
+            try:
+                produce(process.stdin)
+            except BrokenPipeError:
+                # Le processus s'est arrêté avant la fin des données : son code de sortie le dira.
+                pass
+            finally:
+                try:
+                    process.stdin.close()
+                except OSError:
+                    pass
+            code = process.wait()
+            reader.join(timeout=30)
+        except BaseException:
+            process.kill()
+            process.wait()
+            raise
+        finally:
+            jobs.untrack_process(process)
+            with ACTIVE_PROCESSES_LOCK:
+                ACTIVE_PROCESSES.discard(process)
+        self.log(log, f"Code retour: {code}")
+        jobs.checkpoint()
+        return code
 
     def docker(self, *arguments):
         return docker_command(self.settings, *arguments)
@@ -1515,6 +1641,8 @@ class ProjectService:
                 self.log(log, "Chargement d'Odoo : attente de la première réponse HTTP dans le conteneur...")
             self.log(log, f"Chargement d'Odoo... {waited}s/{max_wait}s ({detail[0]})")
             attempt += 1
+            if detail[0].startswith("HTTP 5"):
+                self.raise_for_registry_failure(container, log=log)
             state = self.odoo_server_state(container)
             if state in {"running", "unknown"}:
                 missing_since = None
@@ -1529,6 +1657,37 @@ class ProjectService:
                     "le chargement des modules n'aboutit pas. Consulte les logs Odoo affichés ci-dessus."
                 )
             sleep(3)
+
+    def odoo_current_run_lines(self, container, tail=600):
+        """Lignes du journal Odoo écrites depuis le dernier lancement du serveur."""
+        code, output = self.capture(
+            self.docker("exec", container, "sh", "-c", f"tail -n {tail} {ODOO_LOG_FILE} 2>/dev/null || true"),
+            timeout=12,
+        )
+        if code != 0:
+            return []
+        lines = output.splitlines()
+        banners = [index for index, line in enumerate(lines) if "odoo: Odoo version" in line]
+        return lines[banners[-1] :] if banners else lines
+
+    def raise_for_registry_failure(self, container, log=None):
+        """Arrête l'attente quand Odoo échoue à charger la base à chaque requête.
+
+        Une erreur 500 répétée n'est pas une lenteur : attendre dix minutes ne la corrige pas. Un
+        paquet Python manquant est signalé à part, pour être installé automatiquement.
+        """
+        lines = self.odoo_current_run_lines(container)
+        failures = [index for index, line in enumerate(lines) if "Failed to load registry" in line]
+        if not failures:
+            return
+        last_failure = lines[max(failures[-1] - 60, 0) :]
+        reason = self.odoo_command_failure_reason(last_failure)
+        import_name = missing_python_import("\n".join(last_failure))
+        if import_name:
+            raise MissingPythonDependency(import_name, reason)
+        if len(failures) >= REGISTRY_FAILURES_BEFORE_ABORT:
+            self.odoo_startup_diagnostics(container, log=log)
+            raise OdooError(f"Odoo n'arrive pas à ouvrir la base ({len(failures)} essais). {reason}")
 
     @staticmethod
     def http_probe_result(url, timeout=10):
@@ -1760,7 +1919,20 @@ class ProjectService:
         else:
             launch()
             self.wait_odoo_port(container, log=log, sleep=sleep)
-        self.wait_odoo_http(container, log=log, sleep=sleep)
+        installed = []
+        while True:
+            try:
+                self.wait_odoo_http(container, log=log, sleep=sleep)
+                return
+            except MissingPythonDependency as exc:
+                if exc.package in installed or len(installed) >= MAX_AUTOMATIC_PYTHON_INSTALLS:
+                    raise
+                installed.append(exc.package)
+                self.log(log, f"Un module de la base a besoin du paquet Python {exc.package}, absent du conteneur.")
+                self.install_python_package(project, exc.package, log=log)
+                self.stop_odoo_server(project, log=log, sleep=sleep)
+                launch()
+                self.wait_odoo_port(container, log=log, sleep=sleep)
 
     def restart_odoo_server_after_failure(self, project, log=None):
         """Relance Odoo sans masquer l'erreur de l'opération qui a échoué."""
@@ -1896,6 +2068,323 @@ class ProjectService:
         separator = "" if not content or content.endswith("\n") else "\n"
         requirements.write_text(f"{content}{separator}{package}\n", encoding="utf-8")
         self.log(log, f"{package} ajouté à init/requirements_pip.txt")
+
+    def missing_python_modules(self, project, names):
+        """Parmi `names`, ceux que l'interpréteur d'Odoo ne trouve pas."""
+        names = [name for name in names if re.fullmatch(r"[\w.\-]+", name)]
+        if not names:
+            return []
+        code, output = self.capture(
+            self.docker(
+                "exec",
+                f"odoo-{project}",
+                "sh",
+                "-c",
+                ODOO_PYTHON_PREFIX + 'exec "$py" -c "$0" "$@"',
+                MISSING_PYTHON_MODULES_SCRIPT,
+                *names,
+            ),
+            timeout=60,
+        )
+        if code != 0:
+            raise RuntimeError(f"Vérification des paquets Python impossible dans odoo-{project} : {output[-300:]}")
+        found = {line.strip() for line in output.splitlines() if line.strip()}
+        return [name for name in names if name in found]
+
+    def install_python_package(self, project, package, log=None):
+        """Installe `package` pour l'interpréteur d'Odoo et le note dans init/requirements_pip.txt."""
+        if not re.fullmatch(r"[A-Za-z0-9][\w.\-]*", package):
+            raise ValueError(f"Nom de paquet Python invalide : {package}")
+        self.log(log, f"Installation du paquet Python {package} dans odoo-{project}...")
+        code = self.stream(
+            self.docker(
+                "exec",
+                f"odoo-{project}",
+                "sh",
+                "-c",
+                ODOO_PYTHON_PREFIX + 'exec "$py" -m pip install --disable-pip-version-check "$0"',
+                package,
+            ),
+            log=log,
+        )
+        if code != 0:
+            raise RuntimeError(
+                f"Le paquet Python « {package} » n'a pas pu être installé dans le conteneur Odoo (réseau, nom de "
+                "paquet différent…). Ajoute-le à init/requirements_pip.txt à la racine du projet, puis redémarre."
+            )
+        self.record_python_requirement(project, package, log=log)
+
+    def ensure_python_dependencies(self, project, db_name, graph, log=None):
+        """Installe les paquets Python déclarés par les modules installés de la base et absents du conteneur.
+
+        Sans eux, Odoo n'ouvre pas la base : chaque page répond en erreur 500.
+        Retourne les paquets installés.
+        """
+        installed = [line for line in self._postgres_lines(project, db_name, database_restore.INSTALLED_MODULES_SQL)]
+        wanted = sorted(
+            {
+                dependency
+                for module in installed
+                for dependency in (graph.get(module) or {}).get("python_dependencies", ())
+            }
+        )
+        missing = self.missing_python_modules(project, wanted)
+        packages = []
+        for name in missing:
+            package = python_package_for_import(name)
+            self.log(log, f"Paquet Python demandé par les modules de {db_name} et absent : {package}")
+            self.install_python_package(project, package, log=log)
+            packages.append(package)
+        return packages
+
+    def _postgres_lines(self, project, db_name, query, timeout=30):
+        code, output = self.capture(
+            self.docker(
+                "exec",
+                f"postgresql-{project}",
+                "psql",
+                "-X",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "postgres",
+                "-d",
+                db_name,
+                "-Atc",
+                query,
+            ),
+            timeout=timeout,
+        )
+        if code != 0:
+            raise RuntimeError(output.strip()[-500:] or f"Requête PostgreSQL refusée sur {db_name}.")
+        return [line.strip() for line in output.splitlines() if line.strip()]
+
+    def run_postgres_sql(self, project, db_name, sql, timeout=120):
+        """Exécute `sql` en superutilisateur, d'un seul bloc ; échoue à la première erreur."""
+        return self._postgres_lines(project, db_name, sql, timeout=timeout)
+
+    def odoo_database_user(self, project):
+        """Rôle PostgreSQL d'Odoo (db_user de odoo.conf) : les tables du dump doivent lui appartenir."""
+        try:
+            content = (self.project_path(project) / "odoo.conf").read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return "odoo"
+        match = re.search(r"(?m)^\s*db_user\s*=\s*([^\s#;]+)", content)
+        return match.group(1) if match else "odoo"
+
+    def container_free_bytes(self, container, path):
+        """Espace libre vu depuis le conteneur (dossier monté ou volume Docker), None s'il est illisible."""
+        code, output = self.capture(self.docker("exec", container, "sh", "-c", f'df -Pk "{path}"'), timeout=15)
+        return database_restore.parse_df_available(output) if code == 0 else None
+
+    def docker_resources(self, refresh=False):
+        """(mémoire en octets, processeurs) dont dispose Docker ; (0, 0) s'il ne répond pas."""
+        key = tuple(self.docker())
+        with DOCKER_RESOURCES_LOCK:
+            cached = DOCKER_RESOURCES_CACHE.get(key)
+        if cached and not refresh and time.monotonic() - cached[0] < DOCKER_RESOURCES_TTL_SECONDS:
+            return cached[1]
+        code, output = self.capture(self.docker("info", "--format", "{{.MemTotal}} {{.NCPU}}"), timeout=20)
+        parts = output.split() if code == 0 else []
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            resources = int(parts[0]), int(parts[1])
+            with DOCKER_RESOURCES_LOCK:
+                DOCKER_RESOURCES_CACHE[key] = (time.monotonic(), resources)
+            return resources
+        return 0, 0
+
+    def tune_postgres(self, project, log=None):
+        """Règle le PostgreSQL du projet d'après la mémoire et les processeurs de Docker.
+
+        Les réglages sont écrits par ALTER SYSTEM et rechargés à chaud ; la mémoire partagée exige
+        un redémarrage de PostgreSQL, fait seulement quand le serveur Odoo est arrêté. Réglage
+        désactivé dans les paramètres : les valeurs posées par le gestionnaire sont retirées.
+        Retourne True si quelque chose a changé.
+        """
+        rows = self._postgres_lines(project, "postgres", POSTGRES_AUTO_SETTINGS_SQL)
+        current = dict(row.split("|", 1) for row in rows if "|" in row)
+        wanted = {}
+        if getattr(self.settings, "tune_postgres", True):
+            memory, cpus = self.docker_resources()
+            wanted = performance.postgres_settings(memory, cpus, self.postgres_server_version(project))
+        changes = [(name, value) for name, value in wanted.items() if current.get(name) != value]
+        resets = [name for name in performance.POSTGRES_TUNED_SETTINGS if name in current and name not in wanted]
+        if changes or resets:
+            statements = [
+                *(f"ALTER SYSTEM SET {name} = {database_restore.sql_literal(value)};" for name, value in changes),
+                *(f"ALTER SYSTEM RESET {name};" for name in resets),
+                "SELECT pg_reload_conf();",
+            ]
+            arguments = []
+            for statement in statements:
+                # ALTER SYSTEM refuse de s'exécuter dans une transaction : une commande -c chacun.
+                arguments.extend(["-c", statement])
+            code, output = self.capture(
+                self.docker(
+                    "exec",
+                    f"postgresql-{project}",
+                    "psql",
+                    "-X",
+                    "-q",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-U",
+                    "postgres",
+                    *arguments,
+                ),
+                timeout=30,
+            )
+            if code != 0:
+                raise RuntimeError(output.strip()[-400:] or "Réglages PostgreSQL refusés.")
+            if wanted:
+                self.log(
+                    log, "PostgreSQL réglé pour cet ordinateur : " + performance.describe_postgres_settings(wanted)
+                )
+            else:
+                self.log(log, "Réglages PostgreSQL du gestionnaire retirés : valeurs par défaut rétablies.")
+        pending = self._postgres_lines(project, "postgres", "SELECT count(*) FROM pg_settings WHERE pending_restart;")
+        if pending and pending[0] != "0":
+            if self.odoo_server_state(f"odoo-{project}") in {"running", "unknown"}:
+                self.log(log, "Le nouveau cache de PostgreSQL s'appliquera au prochain démarrage du projet.")
+            else:
+                self.log(log, "Redémarrage de PostgreSQL pour appliquer son nouveau cache...")
+                if self.stream(self.docker("restart", f"postgresql-{project}"), log=log) != 0:
+                    raise RuntimeError("Redémarrage de PostgreSQL impossible.")
+                self.wait_for_postgres(project, log=log)
+        return bool(changes or resets)
+
+    def postgres_server_version(self, project):
+        lines = self._postgres_lines(project, "postgres", "SHOW server_version_num;")
+        return int(lines[0]) if lines and lines[0].isdigit() else 0
+
+    def create_restore_database(self, project, db_name, extensions=(), log=None):
+        """Crée la base vide qui reçoit le dump, comme Odoo, avec les extensions qu'il demande.
+
+        Les extensions sont créées par le superutilisateur : le rôle d'Odoo n'en a pas le droit
+        (pgvector notamment), et sans elles psql perd les tables qui en dépendent.
+        """
+        owner = self.odoo_database_user(project)
+        self.log(log, f"Création de la base vide {db_name} (propriétaire {owner})...")
+        self.run_postgres_sql(project, "postgres", database_restore.create_database_sql(db_name, owner))
+        for extension in database_restore.ODOO_BASE_EXTENSIONS:
+            self.create_postgres_extension(project, db_name, extension, log=log)
+        for extension in extensions:
+            if extension in database_restore.ODOO_BASE_EXTENSIONS:
+                continue
+            try:
+                self.create_postgres_extension(project, db_name, extension, log=log)
+            except RuntimeError as exc:
+                # Odoo poursuivrait sans elle : seules les tables qui en dépendent manqueront.
+                self.log(log, f"Attention : {exc} Les tables qui en dépendent ne seront pas restaurées.")
+        try:
+            # Odoo rend unaccent immuable pour l'utiliser dans ses index ; seul le superutilisateur le peut.
+            self.run_postgres_sql(project, db_name, "ALTER FUNCTION unaccent(text) IMMUTABLE;")
+        except RuntimeError:
+            pass
+
+    def load_database_dump(self, project, db_name, archive, entry, options="", log=None, on_post_data=None):
+        """Envoie dump.sql du ZIP à psql dans le conteneur PostgreSQL, sans rien décompresser sur disque.
+
+        Retourne le nombre d'erreurs signalées par psql (Odoo les ignore aussi).
+        """
+        errors = database_restore.PsqlErrors(log=log)
+        total = entry.file_size
+
+        def progress(sent, size, step):
+            if tracker.post_data:
+                # Les index se construisent sur quelques Mo de texte : la barre avance alors avec le temps.
+                return
+            job_progress.measure(sent, size)
+            if step is not None:
+                self.log(
+                    log,
+                    f"Chargement des données... {step} % ({database_restore.format_bytes(sent)} "
+                    f"sur {database_restore.format_bytes(size)})",
+                )
+
+        tracker = database_restore.DumpProgress(total, on_progress=progress, on_post_data=on_post_data)
+        command = self.docker(
+            "exec",
+            "-i",
+            "-e",
+            f"PGOPTIONS={options}",
+            f"postgresql-{project}",
+            "psql",
+            "-X",
+            "-q",
+            "-U",
+            self.odoo_database_user(project),
+            "-d",
+            db_name,
+        )
+
+        def produce(stdin):
+            database_restore.stream_dump(archive, entry, stdin.write, tracker)
+
+        code = self.feed_process(command, produce, log=log, on_error_line=errors.add)
+        if code != 0:
+            detail = f" Dernière erreur : {errors.lines[-1]}" if errors.lines else ""
+            raise RuntimeError(
+                f"Le chargement de la base s'est arrêté avant la fin (psql, code {code}).{detail} "
+                "Vérifie l'espace disque et la mémoire allouée à Docker, puis relance la restauration."
+            )
+        if errors.count > errors.LIMIT:
+            self.log(log, f"... {errors.count - errors.LIMIT} autre(s) erreur(s) psql non affichée(s).")
+        return errors.count
+
+    def restore_filestore(self, project, db_name, archive, entries, log=None):
+        """Copie le filestore de l'archive dans le conteneur Odoo, en flux tar."""
+        target = f"{ODOO_DATA_DIR}/filestore/{db_name}"
+        total = len(entries)
+        step = max(total // 10, 1)
+
+        def on_file(index, count):
+            job_progress.measure(index, count)
+            if index % step == 0 or index == count:
+                self.log(log, f"Copie du filestore... {index}/{count} fichier(s)")
+
+        command = self.docker(
+            "exec",
+            "-i",
+            "-e",
+            f"TARGET={target}",
+            f"odoo-{project}",
+            "sh",
+            "-c",
+            'mkdir -p "$TARGET" && exec tar -x -m -C "$TARGET"',
+        )
+        lines = []
+        code = self.feed_process(
+            command,
+            lambda stdin: database_restore.write_filestore_tar(archive, entries, stdin, on_file=on_file),
+            log=log,
+            on_error_line=lines.append,
+        )
+        if code != 0:
+            raise RuntimeError(
+                f"Copie du filestore ({total} fichier(s)) interrompue : {' '.join(lines)[-300:] or f'code {code}'}"
+            )
+
+    def remove_odoo_restore_leftovers(self, project, log=None):
+        """Supprime du conteneur Odoo les restes d'une restauration interrompue. Retourne les octets libérés."""
+        container = f"odoo-{project}"
+        code, output = self.capture(
+            self.docker("exec", container, "sh", "-c", ODOO_RESTORE_LEFTOVERS_SCRIPT), timeout=300
+        )
+        if code != 0:
+            return 0
+        freed = 0
+        for line in output.splitlines():
+            parts = line.split(" ", 2)
+            if len(parts) == 3 and parts[0] == "removed" and parts[1].isdigit():
+                freed += int(parts[1]) * 1024
+        if freed:
+            self.log(
+                log,
+                "Fichiers temporaires d'une ancienne restauration interrompue supprimés du conteneur Odoo "
+                f"({database_restore.format_bytes(freed)} libérés).",
+            )
+        return freed
 
     def create_postgres_extension(self, project, db_name, extension, log=None):
         """Installe une extension PostgreSQL manquante via le rôle `postgres`, superuser du conteneur.
@@ -2851,7 +3340,8 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
         self.log(log, "Neutralisation terminée et contrôlée.")
         self.log(log, f"URL Odoo: {self.project_url(project)}")
 
-    def start_project(self, project, log=None):
+    def start_project_containers(self, project, log=None):
+        """Démarre les conteneurs du projet, prêts à recevoir le serveur Odoo, sans lancer ce dernier."""
         path = self.project_path(project)
         compose = self.compose_file(project)
         if not compose:
@@ -2866,6 +3356,15 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
         self.detach_odoo_from_container_command(project, log=log)
         self.wait_for_container(container, log=log)
         self.wait_for_odoo_container_initialization(container, log=log)
+        self.remove_odoo_restore_leftovers(project, log=log)
+        try:
+            self.tune_postgres(project, log=log)
+        except RuntimeError as exc:
+            # Un projet doit démarrer même avec les réglages d'origine de PostgreSQL.
+            self.log(log, f"Réglages PostgreSQL non appliqués : {exc}")
+
+    def start_project(self, project, log=None):
+        self.start_project_containers(project, log=log)
         self.start_odoo_server(project, log=log)
         self.wait_project_http(project, log=log)
         self.log(log, "")

@@ -8,8 +8,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FilePicker } from "@/components/ui/file-picker";
 import { Input } from "@/components/ui/input";
-import { DefaultPasswordInput } from "@/components/common/default-password-input";
-import { DEFAULT_MASTER_PASSWORD } from "@/lib/odoo-defaults";
 import { SimplifiedNeutralizationNotice } from "@/components/databases/simplified-neutralization-notice";
 
 export function RestoreDatabaseDialog({
@@ -24,7 +22,6 @@ export function RestoreDatabaseDialog({
   onSubmit: (payload: RestoreDatabasePayload, onProgress: (progress: number) => void) => Promise<boolean>;
 }) {
   const [db, setDb] = useState("");
-  const [masterPwd, setMasterPwd] = useState(DEFAULT_MASTER_PASSWORD);
   const [neutralize, setNeutralize] = useState(true);
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -37,14 +34,13 @@ export function RestoreDatabaseDialog({
   }, [project?.name]);
 
   async function submit() {
-    if (!project || !file || !db.trim() || !masterPwd) return;
+    if (!project || !file || !db.trim()) return;
     setSubmitting(true);
     setProgress(0);
     const successful = await onSubmit(
       {
         project: project.name,
         db: db.trim(),
-        masterPwd,
         copy: true,
         neutralize,
         file,
@@ -66,7 +62,7 @@ export function RestoreDatabaseDialog({
           <DialogTitle>Restaurer une sauvegarde Odoo</DialogTitle>
           <DialogDescription>
             {project
-              ? `Le ZIP sera restauré dans le projet ${project.name} sans ouvrir le gestionnaire de bases Odoo.`
+              ? `Le ZIP sera restauré dans le projet ${project.name}. Les grosses bases sont acceptées : seule la place libre sur le disque compte.`
               : "Sélectionne un projet."}
           </DialogDescription>
         </DialogHeader>
@@ -89,26 +85,15 @@ export function RestoreDatabaseDialog({
             )}
           </div>
 
-          <div className="grid items-start gap-3 md:grid-cols-2">
-            <label className="grid gap-1.5 text-sm font-medium">
-              Nom de la nouvelle base
-              <Input
-                value={db}
-                disabled={submitting}
-                onChange={(event) => setDb(event.target.value)}
-                placeholder="client_recette"
-              />
-            </label>
-            <label className="grid gap-1.5 text-sm font-medium">
-              Master password
-              <DefaultPasswordInput
-                value={masterPwd}
-                disabled={submitting}
-                onChange={setMasterPwd}
-                defaultValue={DEFAULT_MASTER_PASSWORD}
-              />
-            </label>
-          </div>
+          <label className="grid gap-1.5 text-sm font-medium">
+            Nom de la nouvelle base
+            <Input
+              value={db}
+              disabled={submitting}
+              onChange={(event) => setDb(event.target.value)}
+              placeholder="client_recette"
+            />
+          </label>
 
           <label className="flex items-start gap-3 rounded-md border bg-muted/35 p-3 text-sm">
             <Checkbox
@@ -152,11 +137,7 @@ export function RestoreDatabaseDialog({
             </div>
           )}
 
-          <Button
-            className="w-full"
-            disabled={!project || !file || !db.trim() || !masterPwd || submitting}
-            onClick={submit}
-          >
+          <Button className="w-full" disabled={!project || !file || !db.trim() || submitting} onClick={submit}>
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
             {submitting ? "Préparation de la restauration…" : "Restaurer la base"}
           </Button>
