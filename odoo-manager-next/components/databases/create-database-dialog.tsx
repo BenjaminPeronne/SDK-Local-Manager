@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Database, Info } from "lucide-react";
+import { Database } from "lucide-react";
 import type { Project } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { HintTooltip } from "@/components/common/hint-tooltip";
+import { DefaultPasswordInput } from "@/components/common/default-password-input";
+import { DEFAULT_ADMIN_LOGIN, DEFAULT_ADMIN_PASSWORD, DEFAULT_MASTER_PASSWORD } from "@/lib/odoo-defaults";
 
 export function CreateDatabaseDialog({
   open,
@@ -21,9 +23,9 @@ export function CreateDatabaseDialog({
   onSubmit: (payload: Record<string, unknown>) => Promise<void>;
 }) {
   const [db, setDb] = useState("");
-  const [masterPwd, setMasterPwd] = useState("odoo");
-  const [login, setLogin] = useState("admin");
-  const [password, setPassword] = useState("admin");
+  const [masterPwd, setMasterPwd] = useState(DEFAULT_MASTER_PASSWORD);
+  const [login, setLogin] = useState(DEFAULT_ADMIN_LOGIN);
+  const [password, setPassword] = useState(DEFAULT_ADMIN_PASSWORD);
   const [lang, setLang] = useState("fr_FR");
   const [country, setCountry] = useState("FR");
   const [demo, setDemo] = useState(false);
@@ -43,9 +45,9 @@ export function CreateDatabaseDialog({
           <label className="grid gap-1.5 text-sm font-medium">
             <span className="inline-flex items-center gap-1">
               Master password
-              <HintTooltip text="Mot de passe maître d'Odoo, « odoo » par défaut. Rien à changer : garde-le tel quel ou remplace-le si tu le souhaites." />
+              <HintTooltip text="Mot de passe maître d'Odoo : il autorise la création, la copie et la suppression des bases du projet." />
             </span>
-            <Input value={masterPwd} onChange={(event) => setMasterPwd(event.target.value)} type="password" />
+            <DefaultPasswordInput value={masterPwd} onChange={setMasterPwd} defaultValue={DEFAULT_MASTER_PASSWORD} />
           </label>
           <label className="grid gap-1.5 text-sm font-medium">
             Login admin
@@ -54,9 +56,9 @@ export function CreateDatabaseDialog({
           <label className="grid gap-1.5 text-sm font-medium">
             <span className="inline-flex items-center gap-1">
               Mot de passe admin
-              <HintTooltip text="Mot de passe du compte admin de la nouvelle base, « admin » par défaut. Rien à changer : garde-le tel quel ou remplace-le si tu le souhaites." />
+              <HintTooltip text="Mot de passe du compte admin de la nouvelle base, pour te connecter à Odoo." />
             </span>
-            <Input value={password} onChange={(event) => setPassword(event.target.value)} type="password" />
+            <DefaultPasswordInput value={password} onChange={setPassword} defaultValue={DEFAULT_ADMIN_PASSWORD} />
           </label>
           <label className="grid gap-1.5 text-sm font-medium">
             Langue
@@ -67,11 +69,6 @@ export function CreateDatabaseDialog({
             <Input value={country} onChange={(event) => setCountry(event.target.value.toUpperCase())} />
           </label>
         </div>
-        <p className="flex items-start gap-2 text-xs text-muted-foreground">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Les mots de passe sont pré-remplis avec les valeurs par défaut d’Odoo : rien à changer, mais tu peux les
-          modifier.
-        </p>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={demo} onCheckedChange={(checked) => setDemo(checked === true)} />
           Charger les données de démonstration

@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { DefaultPasswordInput } from "@/components/common/default-password-input";
+import { DEFAULT_MASTER_PASSWORD } from "@/lib/odoo-defaults";
 import { SimplifiedNeutralizationNotice } from "@/components/databases/simplified-neutralization-notice";
 
 export type DuplicateDatabasePayload = { newName: string; masterPwd: string; neutralize: boolean };
@@ -69,7 +71,7 @@ function DuplicateDatabaseForm({
   onSubmit: (payload: DuplicateDatabasePayload) => Promise<void>;
 }) {
   const [newName, setNewName] = useState(database ? `${database}_copie` : "");
-  const [masterPwd, setMasterPwd] = useState("odoo");
+  const [masterPwd, setMasterPwd] = useState(DEFAULT_MASTER_PASSWORD);
   const [neutralize, setNeutralize] = useState(true);
 
   const trimmedName = newName.trim();
@@ -91,7 +93,7 @@ function DuplicateDatabaseForm({
         </label>
         <label className="grid gap-1.5 text-sm font-medium">
           Master password
-          <Input value={masterPwd} onChange={(event) => setMasterPwd(event.target.value)} type="password" />
+          <DefaultPasswordInput value={masterPwd} onChange={setMasterPwd} defaultValue={DEFAULT_MASTER_PASSWORD} />
         </label>
       </div>
 

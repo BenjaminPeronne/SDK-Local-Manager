@@ -6,6 +6,7 @@ import type { Job, Project } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { DEFAULT_ADMIN_PASSWORD } from "@/lib/odoo-defaults";
 
 type AdminPasswordDialogProps = {
   canUseDb: boolean;
@@ -28,7 +29,7 @@ export function AdminPasswordDialog({
   selectedDb,
   selectedProject,
 }: AdminPasswordDialogProps) {
-  const [adminPassword, setAdminPassword] = useState("admin");
+  const [adminPassword, setAdminPassword] = useState(DEFAULT_ADMIN_PASSWORD);
   async function confirmAdminPasswordReset() {
     const db = selectedDatabaseOrNotify("la réinitialisation du mot de passe admin");
     if (!db || !selectedProject || !adminPassword.trim()) return;

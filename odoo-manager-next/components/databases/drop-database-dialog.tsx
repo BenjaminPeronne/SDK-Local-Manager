@@ -6,6 +6,8 @@ import type { Project } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { DefaultPasswordInput } from "@/components/common/default-password-input";
+import { DEFAULT_MASTER_PASSWORD } from "@/lib/odoo-defaults";
 
 export function DropDatabaseDialog({
   open,
@@ -23,7 +25,7 @@ export function DropDatabaseDialog({
   onSubmit: (masterPwd: string) => Promise<void>;
 }) {
   const [confirm, setConfirm] = useState("");
-  const [masterPwd, setMasterPwd] = useState("odoo");
+  const [masterPwd, setMasterPwd] = useState(DEFAULT_MASTER_PASSWORD);
 
   useEffect(() => {
     if (!open) setConfirm("");
@@ -55,7 +57,7 @@ export function DropDatabaseDialog({
           </label>
           <label className="grid gap-1.5 text-sm font-medium">
             Master password
-            <Input value={masterPwd} onChange={(event) => setMasterPwd(event.target.value)} type="password" />
+            <DefaultPasswordInput value={masterPwd} onChange={setMasterPwd} defaultValue={DEFAULT_MASTER_PASSWORD} />
           </label>
         </div>
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
