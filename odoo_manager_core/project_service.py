@@ -135,6 +135,61 @@ def use_pgvector_postgres_image(content):
     return updated, image, service
 
 
+def remove_odoo_container_command(content, container):
+    """Retire le `command:` qui fait d'Odoo le processus principal du conteneur `container`.
+
+    Le gestionnaire lance et arrête Odoo dans un conteneur que l'image garde en vie (`/bin/bash`).
+    Lancé par `command:`, Odoo ne peut plus être arrêté (restauration neutralisée, commande module)
+    sans arrêter tout le conteneur, où plus rien ne peut ensuite être lancé.
+    Retourne (contenu, service) ; service vide si le service Odoo n'a pas un tel `command:`.
+    """
+
+    def indent(line):
+        return len(line) - len(line.lstrip())
+
+    lines = content.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        header = COMPOSE_KEY_RE.match(line)
+        if not header or not header.group("indent"):
+            continue
+        end = next(
+            (
+                position
+                for position in range(index + 1, len(lines))
+                if lines[position].strip()
+                and not lines[position].lstrip().startswith("#")
+                and indent(lines[position]) <= indent(line)
+            ),
+            len(lines),
+        )
+        block = range(index + 1, end)
+        container_name = re.compile(rf"\s*container_name:\s*[\"']?{re.escape(container)}[\"']?\s*(#.*)?$")
+        if header.group("key") != container and not any(container_name.match(lines[i]) for i in block):
+            continue
+        properties = [i for i in block if lines[i].strip() and not lines[i].lstrip().startswith("#")]
+        level = indent(lines[properties[0]]) if properties else 0
+        for start in properties:
+            if indent(lines[start]) != level or not re.match(r"\s*command:(\s|$)", lines[start]):
+                continue
+            stop = start + 1
+            while (
+                stop < end
+                and lines[stop].strip()
+                and (indent(lines[stop]) > level or lines[stop].lstrip().startswith("-"))
+            ):
+                stop += 1
+            text = " ".join(
+                re.sub(r"(^|\s)#.*", "", re.sub(r"^\s*-\s+", "", item))
+                for item in [lines[start].split("command:", 1)[1], *lines[start + 1 : stop]]
+            )
+            words = " ".join("".join(parts) for parts in re.findall(r"\"([^\"]*)\"|'([^']*)'|([^\s,\[\]\"']+)", text))
+            if not re.match(ODOO_SERVER_PROCESS_PATTERN, words) or re.search(ODOO_NON_SERVER_PROCESS_PATTERN, words):
+                return content, ""
+            return "".join(lines[:start] + lines[stop:]), header.group("key")
+        return content, ""
+    return content, ""
+
+
 HTTP_FAILURE_LABELS = {
     "refused": "connexion refusée sur le port {port}",
     "reset": "connexion coupée sur le port {port}",
@@ -170,6 +225,8 @@ ODOO_SERVER_STATE_SCRIPT = (
 )
 # Sans processus ni code de sortie, le lanceur vient de démarrer ou a été tué : délai avant de conclure.
 ODOO_PROCESS_GRACE_SECONDS = 10
+# Commande du processus principal du conteneur : `/init.sh` de l'image, puis la commande qu'il lance.
+CONTAINER_MAIN_PROCESS_SCRIPT = "tr '\\000' ' ' </proc/1/cmdline 2>/dev/null || true"
 ACTIVE_PROCESSES = set()
 ACTIVE_PROCESSES_LOCK = threading.Lock()
 # `ports: !override` remplace la liste au lieu de la fusionner (Compose >= 2.24.4).
@@ -1247,7 +1304,6 @@ class ProjectService:
         """Wait until the image entrypoint has installed project dependencies."""
         sleep = sleep or jobs.sleep
         waited = 0
-        init_command = "tr '\\000' ' ' </proc/1/cmdline 2>/dev/null || true"
         announced = False
 
         while waited <= max_wait:
@@ -1257,7 +1313,7 @@ class ProjectService:
                 raise RuntimeError(f"Le conteneur {container} s'est arrêté pendant sa préparation ({status}).")
 
             code, command = self.capture(
-                self.docker("exec", container, "sh", "-lc", init_command),
+                self.docker("exec", container, "sh", "-lc", CONTAINER_MAIN_PROCESS_SCRIPT),
                 timeout=8,
             )
             initializing = code != 0 or "/init.sh" in command
@@ -1720,6 +1776,18 @@ class ProjectService:
         # État inconnu (Docker lent) : l'arrêt est tenté, une commande module ne doit pas croiser un serveur actif.
         if self.odoo_server_state(container) not in {"running", "unknown"}:
             return
+        if self.odoo_is_container_command(container):
+            # Tuer ce processus arrêterait tout le conteneur : il est recréé sans lancer Odoo.
+            if self.detach_odoo_from_container_command(project, log=log):
+                self.wait_for_container(container, log=log, sleep=sleep)
+                self.wait_for_odoo_container_initialization(container, log=log, sleep=sleep)
+            if self.odoo_is_container_command(container):
+                raise RuntimeError(
+                    "Odoo est lancé par le conteneur du projet lui-même : l'arrêter arrêterait tout le projet. "
+                    f"Retire la ligne « command: » du service {container} dans les fichiers compose du projet, "
+                    "puis redémarre le projet."
+                )
+            return
         self.log(log, f"Arrêt du serveur Odoo dans {container}...")
         code = self.stream(
             self.docker(
@@ -1740,6 +1808,48 @@ class ProjectService:
             sleep(1)
             waited += 1
         raise RuntimeError("Le serveur Odoo ne s'est pas arrêté dans le délai prévu.")
+
+    def odoo_is_container_command(self, container):
+        """Vrai quand Odoo est le processus principal du conteneur : l'arrêter arrête le conteneur."""
+        code, command = self.capture(
+            self.docker("exec", container, "sh", "-lc", CONTAINER_MAIN_PROCESS_SCRIPT), timeout=8
+        )
+        return code == 0 and re.match(ODOO_SERVER_PROCESS_PATTERN, command.strip()) is not None
+
+    def detach_odoo_from_container_command(self, project, log=None):
+        """Retire du compose le `command:` qui lance Odoo et recrée le conteneur Odoo sans lui.
+
+        Le gestionnaire lance ensuite Odoo lui-même, et peut l'arrêter sans arrêter le conteneur.
+        Retourne False si le compose n'a pas ce `command:`.
+        """
+        compose = self.compose_file(project)
+        if not compose:
+            return False
+        try:
+            content = compose.read_text(encoding="utf-8")
+        except OSError:
+            return False
+        updated, service = remove_odoo_container_command(content, f"odoo-{project}")
+        if not service:
+            return False
+        backup = compose.with_name(f"{compose.name}.command.bak.{time.strftime('%Y%m%d_%H%M%S')}")
+        shutil.copy2(compose, backup)
+        compose.write_text(updated, encoding="utf-8")
+        self.log(
+            log,
+            f"Odoo était lancé par le conteneur lui-même (« command: » de {service} dans {compose.name}) : "
+            "l'arrêter arrêtait tout le conteneur. Ligne retirée, le gestionnaire lance désormais Odoo.",
+        )
+        self.log(log, f"Sauvegarde: {backup}")
+        self.log(log, "Recréation du conteneur Odoo (bases, filestores et code conservés)...")
+        code = self.stream(
+            self.docker("compose", "up", "-d", "--no-deps", service), cwd=self.project_path(project), log=log
+        )
+        if code != 0:
+            # Le conteneur d'origine tourne toujours : le compose doit continuer de le décrire.
+            compose.write_text(content, encoding="utf-8")
+            raise RuntimeError("Impossible de recréer le conteneur Odoo du projet.")
+        return True
 
     def install_project_pip_requirements(self, project, log=None):
         requirements = self.project_path(project) / "init" / "requirements_pip.txt"
@@ -2753,6 +2863,7 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
         self.log(log, f"Démarrage du projet {project}...")
         self.compose_up_project(project, path, log=log)
         container = f"odoo-{project}"
+        self.detach_odoo_from_container_command(project, log=log)
         self.wait_for_container(container, log=log)
         self.wait_for_odoo_container_initialization(container, log=log)
         self.start_odoo_server(project, log=log)

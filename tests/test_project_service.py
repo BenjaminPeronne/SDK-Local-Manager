@@ -12,9 +12,24 @@ from odoo_manager_core.project_service import (
     PGVECTOR_IMAGE_REQUIRED_MESSAGE,
     ProjectService,
     add_postgres_healthcheck_start_period,
+    remove_odoo_container_command,
     use_pgvector_postgres_image,
 )
 from odoo_manager_core.traefik import reset_traefik_entrypoint_cache
+
+# Compose d'un projet où Odoo a été lancé comme commande du conteneur (ajout local au modèle).
+ODOO_COMMAND_COMPOSE = (
+    "services:\n"
+    "  postgresql-DEMO:\n"
+    "    image: postgres:16\n"
+    "    # command: postgres\n"
+    "  odoo-DEMO:\n"
+    "    container_name: odoo-DEMO\n"
+    "    tty: true\n"
+    '    command: ["odoo", "-c", "/home/odoo/srv/conf/odoo.conf"]\n'
+    "    stop_grace_period: 1s\n"
+)
+ODOO_AS_CONTAINER_COMMAND = "/bin/bash /usr/local/bin/odoo -c /home/odoo/srv/conf/odoo.conf"
 
 TRAEFIK_MIDDLEWARE_LABELS = (
     "traefik.http.middlewares.odoo-forward.headers.customrequestheaders.X-Forwarded-Proto=http,"
@@ -535,6 +550,62 @@ class ProjectServiceTests(unittest.TestCase):
         self.service.stop_odoo_server("DEMO", log=lambda _line: None, sleep=lambda _seconds: None)
 
         self.assertTrue(any("pkill" in command[-1] for command, _cwd in self.runner.streams))
+
+    def test_odoo_container_command_is_removed_only_when_it_launches_odoo(self):
+        updated, service = remove_odoo_container_command(ODOO_COMMAND_COMPOSE, "odoo-DEMO")
+
+        self.assertEqual("odoo-DEMO", service)
+        self.assertEqual(
+            ODOO_COMMAND_COMPOSE.replace('    command: ["odoo", "-c", "/home/odoo/srv/conf/odoo.conf"]\n', ""), updated
+        )
+        self.assertEqual((updated, ""), remove_odoo_container_command(updated, "odoo-DEMO"))
+
+        block_list = (
+            "services:\n  odoo:\n    container_name: odoo-DEMO\n    command:\n      - odoo-bin\n    tty: true\n"
+        )
+        self.assertEqual(
+            ("services:\n  odoo:\n    container_name: odoo-DEMO\n    tty: true\n", "odoo"),
+            remove_odoo_container_command(block_list, "odoo-DEMO"),
+        )
+        for kept in (
+            "services:\n  odoo-DEMO:\n    command: sleep infinity\n",
+            "services:\n  web:\n    command: odoo\n  odoo-DEMO:\n    tty: true\n",
+        ):
+            self.assertEqual((kept, ""), remove_odoo_container_command(kept, "odoo-DEMO"))
+
+    def test_stopping_odoo_run_by_the_container_recreates_it_instead_of_killing_it(self):
+        compose = self.project_path / "compose.yml"
+        compose.write_text(ODOO_COMMAND_COMPOSE, encoding="utf-8")
+        self.runner.statuses["odoo-DEMO"] = "running"
+        self.runner.odoo_init_commands = [ODOO_AS_CONTAINER_COMMAND]
+
+        self.service.stop_odoo_server("DEMO", log=lambda _line: None, sleep=lambda _seconds: None)
+
+        commands = [command for command, _cwd in self.runner.streams]
+        self.assertFalse(any("pkill" in command[-1] for command in commands))
+        self.assertTrue(has_command_tail(commands, ["compose", "up", "-d", "--no-deps", "odoo-DEMO"]))
+        self.assertNotIn("command:", compose.read_text(encoding="utf-8").split("odoo-DEMO:", 1)[1])
+        self.assertEqual(1, len(list(self.project_path.glob("compose.yml.command.bak.*"))))
+
+    def test_stopping_odoo_run_by_the_container_fails_clearly_when_compose_cannot_change(self):
+        self.runner.odoo_init_commands = [ODOO_AS_CONTAINER_COMMAND, ODOO_AS_CONTAINER_COMMAND]
+
+        with self.assertRaisesRegex(RuntimeError, "lancé par le conteneur du projet lui-même"):
+            self.service.stop_odoo_server("DEMO", log=lambda _line: None, sleep=lambda _seconds: None)
+
+        self.assertFalse(any("pkill" in command[-1] for command, _cwd in self.runner.streams))
+
+    def test_start_project_recreates_odoo_container_launched_by_compose_command(self):
+        (self.project_path / "compose.yml").write_text(ODOO_COMMAND_COMPOSE, encoding="utf-8")
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+
+        self.service.start_project("DEMO", log=lambda _line: None)
+
+        project_commands = [command[-4:] for command, cwd in self.runner.streams if cwd == self.project_path]
+        self.assertEqual(
+            [["compose", "up", "-d", "--no-recreate"], ["up", "-d", "--no-deps", "odoo-DEMO"]], project_commands[:2]
+        )
+        self.assertNotIn('command: ["odoo"', (self.project_path / "compose.yml").read_text(encoding="utf-8"))
 
     def test_view_parse_error_reason_includes_odoo_explanation(self):
         lines = [
