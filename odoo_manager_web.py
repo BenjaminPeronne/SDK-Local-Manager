@@ -49,9 +49,9 @@ from odoo_manager_core.archives import (
 )
 from odoo_manager_core.command_output import (
     MISSING_CODE_ERROR_RE,
-    MISSING_POSTGRES_EXTENSION_RE,
     external_dependency_failure_hint,
     extract_odoo_page_error,
+    missing_postgres_extension,
     missing_python_import,
     odoo_restore_error,
     python_package_for_import,
@@ -5318,8 +5318,7 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
             message = str(exc)
             import_name = missing_python_import(message)
             package = python_package_for_import(import_name) if import_name else ""
-            extension_match = MISSING_POSTGRES_EXTENSION_RE.search(message)
-            extension = extension_match.group("extension") if extension_match else ""
+            extension = missing_postgres_extension(message)
 
             if package and f"pip:{package}" not in attempted_fixes and len(attempted_fixes) < MAX_AUTO_DEPENDENCY_FIXES:
                 attempted_fixes.add(f"pip:{package}")
@@ -5352,7 +5351,10 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
                 if project_service().remove_orphan_report_expressions(project, db_name, report_module, log=job.add):
                     continue
 
-            hint = missing_code_failure_hint(project, db_name, message) or external_dependency_failure_hint(message)
+            # « type "vector" does not exist » ressemble à un modèle sans code : ne pas accuser les
+            # modules absents d'un échec qui vient de l'extension.
+            hint = "" if extension else missing_code_failure_hint(project, db_name, message)
+            hint = hint or external_dependency_failure_hint(message)
             if hint:
                 job.add(hint)
                 raise (OdooError if isinstance(exc, OdooError) else RuntimeError)(f"{exc} {hint}") from exc

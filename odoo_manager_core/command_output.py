@@ -138,6 +138,22 @@ PIP_PACKAGE_ALIASES = {
 MISSING_POSTGRES_EXTENSION_RE = re.compile(r'permission denied to create extension "(?P<extension>[\w-]+)"')
 
 
+# Une base restaurée par Odoo arrive sans l'extension que ses modules utilisent (ex. pgvector pour
+# le module ai) : psql poursuit la restauration sans elle ni les tables qui en dépendent, et Odoo
+# bute sur le type en les recréant à la mise à jour. Seuls les types connus désignent leur extension.
+UNDEFINED_POSTGRES_TYPE_RE = re.compile(r'type "(?:\w+\.)?(?P<type>\w+)" does not exist')
+POSTGRES_TYPE_EXTENSIONS = {"vector": "vector", "halfvec": "vector", "sparsevec": "vector"}
+
+
+def missing_postgres_extension(message):
+    """Extension PostgreSQL dont l'absence explique l'échec Odoo ; "" sinon."""
+    match = MISSING_POSTGRES_EXTENSION_RE.search(message)
+    if match:
+        return match.group("extension")
+    match = UNDEFINED_POSTGRES_TYPE_RE.search(message)
+    return POSTGRES_TYPE_EXTENSIONS.get(match.group("type"), "") if match else ""
+
+
 # Doublon d'expression de rapport comptable : une base créée avec une version plus ancienne d'un
 # module de localisation porte des expressions « balance » sans identifiant XML, que la version
 # actuelle déclare explicitement. Odoo ne les reconnaît pas et tente d'en créer une seconde.

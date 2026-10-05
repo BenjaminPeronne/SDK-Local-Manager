@@ -9,8 +9,10 @@ from odoo_manager_core.project_service import (
     ODOO_STARTUP_LOG,
     ODOO_STARTUP_STATUS,
     ODOO_STATE_MARKER,
+    PGVECTOR_IMAGE_REQUIRED_MESSAGE,
     ProjectService,
     add_postgres_healthcheck_start_period,
+    use_pgvector_postgres_image,
 )
 from odoo_manager_core.traefik import reset_traefik_entrypoint_cache
 
@@ -1563,6 +1565,91 @@ class ProjectServiceTests(unittest.TestCase):
             self.service.create_postgres_extension("DEMO", "test_compare", "vector; DROP TABLE x", log=lambda _l: None)
 
         self.assertEqual([], self.runner.captures)
+
+    POSTGRES_16_COMPOSE = (
+        "services:\n"
+        "  postgresql-DEMO:\n"
+        "    # Build information\n"
+        "    container_name: postgresql-DEMO\n"
+        "    image: postgres:16\n"
+        "    shm_size: 256m\n"
+        "  odoo-DEMO:\n"
+        "    image: sudokeys/docker-odoo-local:19.0\n"
+    )
+    PGVECTOR_UNAVAILABLE = (
+        'ERROR:  extension "vector" is not available\n'
+        'DETAIL:  Could not open extension control file "/usr/share/postgresql/16/extension/vector.control": '
+        "No such file or directory.\n"
+    )
+
+    def capture_extension_attempts(self, outputs):
+        attempts = []
+
+        def capture(command, cwd=None, timeout=10):
+            if "psql" in command:
+                attempts.append(list(command))
+                return outputs[min(len(attempts), len(outputs)) - 1]
+            return self.runner.capture(command, cwd, timeout)
+
+        return attempts, patch.object(self.service, "capture", side_effect=capture)
+
+    def test_missing_pgvector_switches_postgres_to_the_pgvector_image_then_creates_the_extension(self):
+        compose = self.project_path / "compose.yml"
+        compose.write_text(self.POSTGRES_16_COMPOSE, encoding="utf-8")
+        attempts, capture = self.capture_extension_attempts([(1, self.PGVECTOR_UNAVAILABLE), (0, "CREATE EXTENSION")])
+
+        with capture, patch.object(self.service, "wait_for_postgres") as wait_for_postgres:
+            self.service.create_postgres_extension("DEMO", "test_compare", "vector", log=lambda _line: None)
+
+        self.assertEqual(2, len(attempts))
+        content = compose.read_text(encoding="utf-8")
+        self.assertIn("    image: pgvector/pgvector:pg16\n", content)
+        self.assertIn("    image: sudokeys/docker-odoo-local:19.0\n", content)
+        commands = [command for command, _cwd in self.runner.streams]
+        # Seul PostgreSQL est recréé : le conteneur Odoo et son serveur restent en place.
+        self.assertTrue(has_command_tail(commands, ["compose", "up", "-d", "--no-deps", "postgresql-DEMO"]))
+        wait_for_postgres.assert_called_once_with("DEMO", log=ANY)
+        backups = list(self.project_path.glob("compose.yml.pgvector.bak.*"))
+        self.assertEqual([self.POSTGRES_16_COMPOSE], [backup.read_text(encoding="utf-8") for backup in backups])
+
+    def test_failed_pgvector_container_recreation_restores_the_compose(self):
+        compose = self.project_path / "compose.yml"
+        compose.write_text(self.POSTGRES_16_COMPOSE, encoding="utf-8")
+        self.runner.stream_codes = [1]
+        _attempts, capture = self.capture_extension_attempts([(1, self.PGVECTOR_UNAVAILABLE)])
+
+        with capture, self.assertRaisesRegex(RuntimeError, "pgvector/pgvector:pg16"):
+            self.service.create_postgres_extension("DEMO", "test_compare", "vector", log=lambda _line: None)
+
+        self.assertEqual(self.POSTGRES_16_COMPOSE, compose.read_text(encoding="utf-8"))
+
+    def test_missing_pgvector_with_an_unrecognized_image_asks_to_change_it(self):
+        compose = self.project_path / "compose.yml"
+        custom = self.POSTGRES_16_COMPOSE.replace("postgres:16", "postgres:16-alpine")
+        compose.write_text(custom, encoding="utf-8")
+        attempts, capture = self.capture_extension_attempts([(1, self.PGVECTOR_UNAVAILABLE)])
+
+        with capture, self.assertRaises(RuntimeError) as raised:
+            self.service.create_postgres_extension("DEMO", "test_compare", "vector", log=lambda _line: None)
+
+        self.assertEqual(PGVECTOR_IMAGE_REQUIRED_MESSAGE, str(raised.exception))
+        self.assertEqual(1, len(attempts))
+        self.assertEqual(custom, compose.read_text(encoding="utf-8"))
+        self.assertEqual([], self.runner.streams)
+
+    def test_pgvector_image_keeps_quotes_and_comments_of_the_compose_line(self):
+        content = 'services:\n  db:\n    image: "postgres:14"  # base\n'
+
+        updated, image, service = use_pgvector_postgres_image(content)
+
+        self.assertEqual('services:\n  db:\n    image: "pgvector/pgvector:pg14"  # base\n', updated)
+        self.assertEqual(("pgvector/pgvector:pg14", "db"), (image, service))
+
+    def test_pgvector_image_is_not_guessed_for_other_postgres_images(self):
+        for image in ("postgres:16-alpine", "postgres:16.4", "postgres:10", "pgvector/pgvector:pg16"):
+            with self.subTest(image=image):
+                content = f"services:\n  db:\n    image: {image}\n"
+                self.assertEqual((content, "", ""), use_pgvector_postgres_image(content))
 
     def test_orphan_report_expressions_of_the_module_are_deleted_through_the_postgres_role(self):
         def capture(command, cwd=None, timeout=10):

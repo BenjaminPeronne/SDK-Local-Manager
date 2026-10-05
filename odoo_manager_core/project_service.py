@@ -101,6 +101,40 @@ def add_postgres_healthcheck_start_period(content):
     return "".join(result), changed
 
 
+# Image officielle `postgres:<majeure>` des projets créés avant que le modèle ne passe à pgvector.
+# L'image pgvector de même majeure est construite sur elle : le dossier de données reste lisible.
+OFFICIAL_POSTGRES_IMAGE_RE = re.compile(
+    r"^(?P<prefix>(?P<indent>[ \t]*)image:[ \t]*[\"']?)postgres:(?P<major>1[3-8])"
+    r"(?P<suffix>[\"']?[ \t]*(?:#[^\r\n]*)?\r?)$",
+    re.MULTILINE,
+)
+COMPOSE_KEY_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<key>[\w.-]+):[ \t]*(?:#.*)?$")
+
+
+def use_pgvector_postgres_image(content):
+    """Passe l'unique image `postgres:<majeure>` du compose sur `pgvector/pgvector:pg<majeure>`.
+
+    Retourne (contenu, image, service) ; image et service vides si le compose n'a pas exactement
+    une image officielle sous cette forme (variante alpine ou version mineure : rien n'est touché).
+    """
+    matches = list(OFFICIAL_POSTGRES_IMAGE_RE.finditer(content))
+    if len(matches) != 1:
+        return content, "", ""
+    match = matches[0]
+    # Le service est la première clé moins indentée que `image:` en remontant le fichier.
+    service = ""
+    for line in reversed(content[: match.start()].splitlines()):
+        key = COMPOSE_KEY_RE.match(line)
+        if key and len(key.group("indent")) < len(match.group("indent")):
+            service = key.group("key")
+            break
+    if not service:
+        return content, "", ""
+    image = f"pgvector/pgvector:pg{match.group('major')}"
+    updated = content[: match.start()] + match.group("prefix") + image + match.group("suffix") + content[match.end() :]
+    return updated, image, service
+
+
 HTTP_FAILURE_LABELS = {
     "refused": "connexion refusée sur le port {port}",
     "reset": "connexion coupée sur le port {port}",
@@ -214,6 +248,15 @@ def terminate_active_processes(wait_seconds=0.5):
 # « manifest for img:tag not found » (tag absent) et « pull access denied for img » (dépôt absent).
 MISSING_IMAGE_RE = re.compile(r"(?:manifest for|pull access denied for) ([^\s,]+?)(?: not found|,|$)")
 PYTHON_EXCEPTION_LINE_RE = re.compile(r"\b[A-Za-z_][\w.]*(?:Error|Exception|Fault):\s*\S|^[A-Za-z_]\w*(?:\.\w+)+:\s*\S")
+# Extension que l'image PostgreSQL n'embarque pas (l'image officielle `postgres` n'a pas pgvector).
+POSTGRES_EXTENSION_UNAVAILABLE_RE = re.compile(
+    r'extension "[\w-]+" is not available|could not open extension control file', re.IGNORECASE
+)
+PGVECTOR_IMAGE_REQUIRED_MESSAGE = (
+    "L'IA d'Odoo a besoin de l'extension « vector », absente du serveur de bases PostgreSQL de ce projet. "
+    "Dans le docker-compose.yml du projet, remplace l'image PostgreSQL par pgvector/pgvector de la même version "
+    "(ex. postgres:16 → pgvector/pgvector:pg16), recrée le conteneur PostgreSQL, puis relance."
+)
 
 
 class TracebackChain:
@@ -1754,11 +1797,23 @@ class ProjectService:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", extension):
             raise ValueError(f"Nom d'extension PostgreSQL invalide : {extension}")
         self.log(log, f"Installation de l'extension PostgreSQL {extension} (rôle postgres)...")
-        container = f"postgresql-{project}"
-        code, output = self.capture(
+        code, output = self.run_create_postgres_extension(project, db_name, extension)
+        if code != 0 and extension == "vector" and POSTGRES_EXTENSION_UNAVAILABLE_RE.search(output):
+            # Projet créé avant que son modèle ne passe à l'image pgvector : l'image officielle
+            # n'a pas l'extension, aucun droit ne la fera apparaître.
+            self.log(log, output.strip())
+            if not self.switch_postgres_to_pgvector_image(project, log=log):
+                raise RuntimeError(PGVECTOR_IMAGE_REQUIRED_MESSAGE)
+            code, output = self.run_create_postgres_extension(project, db_name, extension)
+        if code != 0:
+            raise RuntimeError(f"Installation de l'extension PostgreSQL {extension} impossible : {output.strip()}")
+        self.log(log, f"Extension PostgreSQL {extension} installée.")
+
+    def run_create_postgres_extension(self, project, db_name, extension):
+        return self.capture(
             self.docker(
                 "exec",
-                container,
+                f"postgresql-{project}",
                 "psql",
                 "-v",
                 "ON_ERROR_STOP=1",
@@ -1771,9 +1826,39 @@ class ProjectService:
             ),
             timeout=20,
         )
+
+    def switch_postgres_to_pgvector_image(self, project, log=None):
+        """Passe le PostgreSQL du projet sur l'image pgvector de même version et recrée son conteneur.
+
+        Les données vivent dans un dossier monté : le nouveau conteneur les reprend telles quelles.
+        Un simple redémarrage ne suffirait pas, le démarrage réutilise les conteneurs existants.
+        Retourne False si le compose n'utilise pas l'image officielle sous une forme reconnue.
+        """
+        compose = self.compose_file(project)
+        if not compose:
+            return False
+        try:
+            content = compose.read_text(encoding="utf-8")
+        except OSError:
+            return False
+        updated, image, service = use_pgvector_postgres_image(content)
+        if not image:
+            return False
+        backup = compose.with_name(f"{compose.name}.pgvector.bak.{time.strftime('%Y%m%d_%H%M%S')}")
+        shutil.copy2(compose, backup)
+        compose.write_text(updated, encoding="utf-8")
+        self.log(log, f"Image PostgreSQL remplacée par {image} dans {compose.name} (les bases sont conservées).")
+        self.log(log, f"Sauvegarde: {backup}")
+        code = self.stream(
+            self.docker("compose", "up", "-d", "--no-deps", service), cwd=self.project_path(project), log=log
+        )
         if code != 0:
-            raise RuntimeError(f"Installation de l'extension PostgreSQL {extension} impossible : {output.strip()}")
-        self.log(log, f"Extension PostgreSQL {extension} installée.")
+            # Image introuvable ou réseau coupé : le conteneur d'origine tourne toujours, le compose
+            # doit continuer de le décrire.
+            compose.write_text(content, encoding="utf-8")
+            raise RuntimeError(f"Impossible de recréer le conteneur PostgreSQL sur l'image {image}.")
+        self.wait_for_postgres(project, log=log)
+        return True
 
     def remove_orphan_report_expressions(self, project, db_name, module, log=None):
         """Supprime les expressions de rapport `balance` d'un module que sa version actuelle recrée.

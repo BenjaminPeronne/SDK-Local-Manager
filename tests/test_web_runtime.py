@@ -1862,6 +1862,46 @@ class AutomaticPythonDependencyTests(unittest.TestCase):
         service.create_postgres_extension.assert_called_once_with("demo", "test_compare", "vector", log=job.add)
         self.assertTrue(any("vector" in line for line in job.lines))
 
+    @patch("odoo_manager_web.normalize_module_layout_for_action")
+    @patch("odoo_manager_web.project_dirs", return_value=["demo"])
+    @patch("odoo_manager_web.project_service")
+    def test_restored_database_missing_its_vector_type_gets_the_extension(self, project_service, _dirs, _normalize):
+        # Restauration via Odoo : psql saute CREATE EXTENSION vector et les tables du module ai,
+        # la mise à jour bute ensuite sur le type en les recréant.
+        service = project_service.return_value
+        service.run_odoo_module_command.side_effect = [
+            RuntimeError('psycopg2.errors.UndefinedObject: type "vector" does not exist'),
+            None,
+        ]
+        job = self.LogJob()
+
+        web.module_command_job(job, "--update-module", "demo", "domotec_old", "ai")
+
+        self.assertEqual(2, service.run_odoo_module_command.call_count)
+        service.create_postgres_extension.assert_called_once_with("demo", "domotec_old", "vector", log=job.add)
+
+    @patch("odoo_manager_web.missing_code_failure_hint")
+    @patch("odoo_manager_web.normalize_module_layout_for_action")
+    @patch("odoo_manager_web.project_dirs", return_value=["demo"])
+    @patch("odoo_manager_web.project_service")
+    def test_persistent_vector_type_error_does_not_blame_modules_without_code(
+        self, project_service, _dirs, _normalize, missing_code_failure_hint
+    ):
+        service = project_service.return_value
+        service.run_odoo_module_command.side_effect = RuntimeError(
+            'psycopg2.errors.UndefinedObject: type "vector" does not exist'
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "vector"):
+            web.module_command_job(self.LogJob(), "--update-module", "demo", "domotec_old", "ai")
+
+        missing_code_failure_hint.assert_not_called()
+
+    def test_only_known_postgres_types_name_their_extension(self):
+        self.assertEqual("vector", command_output.missing_postgres_extension('type "public.vector" does not exist'))
+        self.assertEqual("vector", command_output.missing_postgres_extension('type "halfvec" does not exist'))
+        self.assertEqual("", command_output.missing_postgres_extension('type "mood" does not exist'))
+
     REPORT_DUPLICATE_ERROR = (
         "La commande Odoo a échoué avec le code 255. Dernière erreur Odoo : odoo.tools.convert.ParseError: "
         "while parsing /home/odoo/srv/server/odoo/addons/l10n_fr/data/tax_report_data.xml:3, somewhere inside "
