@@ -40,6 +40,7 @@ import localIcon from "@/app/local-icon.png";
 import { MigrationProposal } from "@/components/projects/migration-proposal";
 import { AllowedOriginsPanel } from "@/components/settings/allowed-origins-panel";
 import { DiskUsagePanel } from "@/components/settings/disk-usage-panel";
+import { PerformancePanel } from "@/components/settings/performance-panel";
 import {
   SETTINGS_SAVED_KEYS,
   SETTINGS_SECTIONS,
@@ -882,6 +883,16 @@ export function SettingsDialog({
                       <div className="mt-1 break-all">Configuration : {settingsDraft.config_file || "-"}</div>
                     </div>
                   </SettingsSection>
+                )}
+
+                {settingsSection === "performance" && (
+                  <PerformancePanel
+                    createJob={createJob}
+                    jobs={jobs}
+                    settingsDraft={settingsDraft}
+                    setSettingsDraft={setSettingsDraft}
+                    pushToast={pushToast}
+                  />
                 )}
 
                 {settingsSection === "disk" && <DiskUsagePanel createJob={createJob} jobs={jobs} />}

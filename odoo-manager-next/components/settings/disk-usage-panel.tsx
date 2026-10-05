@@ -37,7 +37,7 @@ function trashNote(bytes: number, apparentBytes = bytes) {
 }
 
 /** Deux temps : le premier clic arme le bouton, le second confirme. Désarmé après 5 s. */
-function ConfirmButton({
+export function ConfirmButton({
   label,
   confirmLabel,
   disabled,
