@@ -89,7 +89,7 @@ export function RestoreDatabaseDialog({
             )}
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid items-start gap-3 md:grid-cols-2">
             <label className="grid gap-1.5 text-sm font-medium">
               Nom de la nouvelle base
               <Input

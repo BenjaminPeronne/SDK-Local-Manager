@@ -37,7 +37,7 @@ export function CreateDatabaseDialog({
           <DialogTitle>Créer une base Odoo</DialogTitle>
           <DialogDescription>{project ? `Projet cible : ${project.name}` : "Sélectionne un projet."}</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-x-4 gap-y-4 md:grid-cols-2">
+        <div className="grid items-start gap-x-4 gap-y-4 md:grid-cols-2">
           <label className="grid gap-1.5 text-sm font-medium">
             Nom de base
             <Input value={db} onChange={(event) => setDb(event.target.value)} placeholder="ma_base_locale" />

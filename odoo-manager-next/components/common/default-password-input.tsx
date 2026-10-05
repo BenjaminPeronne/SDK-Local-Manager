@@ -18,9 +18,12 @@ type DefaultPasswordInputProps = {
 /**
  * Mot de passe pré-rempli avec une valeur par défaut d'Odoo.
  *
- * Masqué, un champ pré-rempli ressemble à un champ vide à remplir : des utilisateurs effaçaient la
- * bonne valeur pour en taper une autre. La valeur s'affiche donc en clair (l'œil la masque), avec
- * une ligne qui dit qu'il n'y a rien à changer, ou, une fois modifiée, un lien pour la rétablir.
+ * Masqué sans explication, un champ pré-rempli ressemble à un champ à remplir : des utilisateurs
+ * effaçaient la bonne valeur pour en taper une autre. Le mot de passe reste masqué (l'œil
+ * l'affiche), mais une ligne dit qu'il n'y a rien à changer, ou, une fois modifié, offre de le rétablir.
+ *
+ * À côté d'un autre champ dans une grille, celle-ci doit aligner ses cellules en haut (`items-start`) :
+ * la ligne sous le champ allonge la colonne.
  */
 export function DefaultPasswordInput({
   value,
@@ -29,7 +32,7 @@ export function DefaultPasswordInput({
   defaultHint = "Valeur par défaut d’Odoo : rien à changer.",
   disabled = false,
 }: DefaultPasswordInputProps) {
-  const [visible, setVisible] = useState(true);
+  const [visible, setVisible] = useState(false);
   return (
     <span className="grid gap-1.5">
       <Input
