@@ -66,11 +66,14 @@ function parseLsblkTypes(output) {
   return types.includes("disk") ? "off" : "unknown";
 }
 
-/** Dossier existant le plus proche : le dossier des projets n'existe pas forcément encore. */
+/**
+ * Dossier existant le plus proche : le dossier des projets n'existe pas forcément encore.
+ * Chemins Linux : `path.posix` explicitement, pour que les tests tournent aussi sous Windows.
+ */
 function existingAncestor(directory, exists) {
-  let current = path.resolve(directory);
+  let current = path.posix.resolve(directory);
   while (!exists(current)) {
-    const parent = path.dirname(current);
+    const parent = path.posix.dirname(current);
     if (parent === current) return current;
     current = parent;
   }
@@ -105,7 +108,7 @@ async function diskEncryptionStatus({
       );
     }
     if (platform === "linux") {
-      const directory = path.isAbsolute(String(workspace || "")) ? workspace : home;
+      const directory = path.posix.isAbsolute(String(workspace || "")) ? workspace : home;
       return await linuxState(existingAncestor(directory, exists), run);
     }
   } catch {
