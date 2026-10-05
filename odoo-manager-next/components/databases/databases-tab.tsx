@@ -17,12 +17,13 @@ import {
   PlusCircle,
   ShieldCheck,
   Terminal,
+  Timer,
   Trash2,
   Upload,
   UserCheck,
 } from "lucide-react";
 import { statusVariant } from "@/lib/format";
-import { deletionLabel } from "@/lib/retention";
+import { deletionLabel, deletionMoment, type RetentionTone } from "@/lib/retention";
 import type { DatabaseMenuAction, DependencyReport, PendingDatabaseAction, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +40,13 @@ import {
 import { Notice } from "@/components/common/notice";
 import { dependencySummary } from "@/components/databases/dependencies-dialog";
 import { FirstDatabaseCallout } from "@/components/databases/first-database-callout";
+
+// Couleur de l'échéance : grise au loin, orange dans les deux semaines, rouge dans les trois jours.
+const DELETION_BADGE_VARIANTS: Record<RetentionTone, "secondary" | "warning" | "danger"> = {
+  muted: "secondary",
+  warning: "warning",
+  danger: "danger",
+};
 
 type DatabasesTabProps = {
   chooseDatabase: (db: string, projectName?: string | undefined) => void;
@@ -168,17 +176,15 @@ export function DatabasesTab({
                     >
                       {db === selectedDb ? "Base de travail" : selectedProject?.database_versions?.[db] || "Base Odoo"}
                     </div>
-                    {deletion && (
-                      <div
-                        className={cn(
-                          "mt-1 text-xs",
-                          deletion.tone === "danger" && "font-medium text-red-600 dark:text-red-400",
-                          deletion.tone === "warning" && "font-medium text-amber-700 dark:text-amber-400",
-                          deletion.tone === "muted" && "text-muted-foreground",
-                        )}
+                    {deletion && expiresAt !== null && (
+                      <Badge
+                        variant={DELETION_BADGE_VARIANTS[deletion.tone]}
+                        className="mt-2 gap-1"
+                        title={`Suppression automatique le ${deletionMoment(expiresAt)}. Pour la garder plus longtemps : menu « ⋯ », Garder 30 jours de plus.`}
                       >
+                        <Timer className="h-3.5 w-3.5 shrink-0" />
                         {deletion.text}
-                      </div>
+                      </Badge>
                     )}
                   </InteractiveCard>
                   <DropdownMenu.Root modal={false}>

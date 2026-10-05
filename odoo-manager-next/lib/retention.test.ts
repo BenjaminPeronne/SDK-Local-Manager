@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { daysUntil, deletionLabel, notificationKey, upcomingDeletions } from "./retention.ts";
+import { daysUntil, deletionLabel, deletionMoment, notificationKey, upcomingDeletions } from "./retention.ts";
 import type { Project } from "./types.ts";
 
 const NOW = new Date(2026, 9, 4, 10, 0);
@@ -29,7 +29,10 @@ test("each database card says when it will be deleted", () => {
   assert.deepEqual(deletionLabel(at(3), NOW), { text: "Supprimée dès que possible", tone: "danger" });
   assert.deepEqual(deletionLabel(at(4, 20), NOW), { text: "Supprimée aujourd’hui", tone: "danger" });
   assert.deepEqual(deletionLabel(at(5), NOW), { text: "Supprimée demain", tone: "danger" });
+  assert.deepEqual(deletionLabel(at(7), NOW), { text: "Supprimée dans 3 jours", tone: "danger" });
   assert.deepEqual(deletionLabel(at(9), NOW), { text: "Supprimée dans 5 jours", tone: "warning" });
+  assert.deepEqual(deletionLabel(at(18), NOW), { text: "Supprimée dans 14 jours", tone: "warning" });
+  assert.deepEqual(deletionLabel(at(19), NOW), { text: "Supprimée le 19 octobre", tone: "muted" });
   assert.deepEqual(deletionLabel(at(30), NOW), { text: "Supprimée le 30 octobre", tone: "muted" });
 });
 
@@ -56,4 +59,8 @@ test("a notification is sent once per step and per deadline", () => {
   assert.equal(notificationKey({ ...deletion, days: 1 }), `retention-notified:A/prod/${at(9)}/1`);
   // Échéance repoussée : nouvelle clé, nouvel avertissement le moment venu.
   assert.notEqual(notificationKey({ ...deletion, expiresAt: at(20) }), notificationKey(deletion));
+});
+
+test("the tooltip gives the exact moment of the deletion", () => {
+  assert.equal(deletionMoment(at(4, 9)), "4 octobre 2026 à 09:00");
 });
