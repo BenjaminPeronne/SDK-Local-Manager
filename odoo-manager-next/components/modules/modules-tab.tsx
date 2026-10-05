@@ -342,6 +342,11 @@ export function ModulesTab({
                             )}
                           >
                             {moduleTitle}
+                            {module.application && (
+                              <Badge variant="outline" className="ml-2 align-middle">
+                                Application
+                              </Badge>
+                            )}
                           </span>
                           {showTechnicalName && (
                             <span className="mt-0.5 block break-all font-mono text-xs text-muted-foreground">

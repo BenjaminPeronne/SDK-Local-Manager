@@ -2293,9 +2293,11 @@ def module_removal_info(project, path, layout=None):
 def installed_modules(project, db_name, check_container=True):
     if not db_name or (check_container and container_status(f"postgresql-{project}") != "running"):
         return {}
-    # Le titre (shortdesc) sert à la recherche : texte jusqu'à Odoo 15, JSON traduit ensuite.
+    # Le titre (shortdesc) sert à la recherche : texte jusqu'à Odoo 15, JSON traduit ensuite. Il vient
+    # en dernier, car il peut contenir le séparateur. `application` marque les applications d'Odoo
+    # (Inventaire, Ventes), que la recherche fait passer avant leurs modules complémentaires.
     query = (
-        "select name,state,coalesce(latest_version,''),"
+        "select name,state,coalesce(latest_version,''),coalesce(application,false),"
         "replace(coalesce(shortdesc::text,''),E'\\n',' ') from ir_module_module order by name;"
     )
     code, output = run_capture(
@@ -2308,12 +2310,13 @@ def installed_modules(project, db_name, check_container=True):
     if code != 0:
         return states
     for line in output.splitlines():
-        parts = line.split("|", 3)
+        parts = line.split("|", 4)
         if len(parts) >= 2:
             states[parts[0]] = {
                 "state": parts[1],
                 "installed_version": parts[2] if len(parts) > 2 else "",
-                "title": module_title_from_shortdesc(parts[3]) if len(parts) > 3 else "",
+                "application": len(parts) > 3 and parts[3] == "t",
+                "title": module_title_from_shortdesc(parts[4]) if len(parts) > 4 else "",
             }
     return states
 
@@ -2357,6 +2360,7 @@ def modules_for(project, db_name=None):
         module["state"] = state.get("state", "disponible")
         module["installed_version"] = state.get("installed_version", "")
         module["title"] = state.get("title") or module["name"]
+        module["application"] = state.get("application", False)
         module.update(module_removal_info(project, Path(module["path"]), layout))
         modules.append(module)
     return modules

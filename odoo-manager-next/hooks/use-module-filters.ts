@@ -1,6 +1,7 @@
 "use client";
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { searchModules } from "@/lib/module-search";
 import { normalizedModuleOrigin } from "@/lib/modules";
 import type { ModuleInfo } from "@/lib/types";
 
@@ -15,12 +16,9 @@ export function useModuleFilters(modules: ModuleInfo[], projectName: string | un
 
   const deferredSearch = useDeferredValue(search);
   const filtered = useMemo(() => {
-    const query = deferredSearch.trim().toLowerCase();
-    // Le titre affiché (« Sales », « Ventes ») compte autant que le nom technique (sale_management).
-    const matchesQuery = (module: ModuleInfo) =>
-      !query || module.name.toLowerCase().includes(query) || Boolean(module.title?.toLowerCase().includes(query));
-    return modules
-      .filter(matchesQuery)
+    // Le titre affiché (« Ventes ») compte autant que le nom technique (sale_management), et les
+    // résultats arrivent du plus pertinent au moins pertinent : l'application d'abord.
+    return searchModules(modules, deferredSearch)
       .filter(
         (module) =>
           status === "all" || module.state === status || (status === "uninstalled" && module.state === "disponible"),

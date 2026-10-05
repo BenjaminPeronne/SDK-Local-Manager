@@ -430,10 +430,10 @@ class DatabaseNameValidationTests(unittest.TestCase):
     def test_module_titles_come_from_the_database_in_french_when_translated(self, _status, run_capture):
         run_capture.return_value = (
             0,
-            'sale|installed|18.0.1.2|{"en_US": "Sales", "fr_FR": "Ventes"}\n'
-            'crm|uninstalled||{"en_US": "CRM"}\n'
-            "account|installed|15.0.1.2|Invoicing | Billing\n"
-            "base|installed|15.0.1.3\n",
+            'sale|installed|18.0.1.2|f|{"en_US": "Sales", "fr_FR": "Ventes"}\n'
+            'crm|uninstalled||t|{"en_US": "CRM"}\n'
+            "account|installed|15.0.1.2|t|Invoicing | Billing\n"
+            "base|installed|15.0.1.3|f\n",
         )
 
         states = web.installed_modules("demo", "demo")
@@ -442,6 +442,8 @@ class DatabaseNameValidationTests(unittest.TestCase):
         self.assertEqual("CRM", states["crm"]["title"])
         self.assertEqual("Invoicing | Billing", states["account"]["title"])
         self.assertEqual("", states["base"]["title"])
+        # Applications d'Odoo : la recherche les fait passer avant leurs modules complémentaires.
+        self.assertEqual([True, False], [states["crm"]["application"], states["sale"]["application"]])
 
     def test_extracts_database_manager_error_from_html(self):
         content = """
