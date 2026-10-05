@@ -58,6 +58,13 @@ from odoo_manager_core.command_output import (
     report_expression_duplicate_module,
 )
 from odoo_manager_core.config import normalize_browser_origin
+from odoo_manager_core.database_retention import (
+    RetentionStore,
+    expired_databases,
+    expired_trash_entries,
+    needs_inventory,
+    retention_summary,
+)
 from odoo_manager_core.disk_usage import (
     compose_image_references,
     parse_docker_size,
@@ -213,6 +220,7 @@ API_ENDPOINTS = {
         "/api/system/ssh-key/generate",
         "/api/projects/{project}/postgresql/open",
         "/api/projects/{project}/database-restore",
+        "/api/projects/{project}/database-retention",
         "/api/projects/{project}/repository/inspect",
         "/api/projects/{project}/module-zip/inspect",
         "/api/projects/{project}/module-zip",
@@ -287,6 +295,8 @@ SETTINGS_STORE = SettingsStore(DEFAULT_WORKSPACE)
 SETTINGS = SETTINGS_STORE.load()
 WORKSPACE = Path(SETTINGS.workspace).resolve()
 LOCAL_MODULE_OVERRIDES = SETTINGS_STORE.path.with_name("local_module_overrides.json")
+# Arrivée et échéance de chaque base : voir odoo_manager_core/database_retention.py.
+DATABASE_RETENTION = RetentionStore(SETTINGS_STORE.path.with_name("database_retention.json"))
 DELETED_PROJECTS = WORKSPACE / ".odoo_manager_deleted"
 DELETED_MODULES = WORKSPACE / ".odoo_manager_deleted_modules"
 HOST = os.environ.get("ODOO_GUI_HOST", "127.0.0.1")
@@ -1579,6 +1589,46 @@ def list_databases_for(project, check_container=True):
     return [line.strip() for line in output.splitlines() if line.strip()]
 
 
+def database_oids_for(project, check_container=True):
+    """{base: oid} des bases du projet, ou None si PostgreSQL ne répond pas.
+
+    None n'est pas « aucune base » : le registre des échéances ne doit rien oublier sur un échec.
+    """
+    if check_container and container_status(f"postgresql-{project}") != "running":
+        return None
+    query = "select oid, datname from pg_database where datistemplate = false;"
+    code, output = run_capture(
+        docker_command(SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-Atc", query),
+        timeout=12,
+    )
+    if code != 0:
+        return None
+    databases = {}
+    for line in output.splitlines():
+        oid, separator, name = line.strip().partition("|")
+        if separator and oid.isdigit() and name:
+            databases[name] = int(oid)
+    return databases
+
+
+def remember_database_arrival(job, project, db_name, origin, source=None):
+    """Note l'arrivée d'une base ; un échec ne fait pas échouer l'action qui l'a créée.
+
+    Sans fiche, la base serait de toute façon découverte au prochain relevé, avec 30 jours.
+    """
+    try:
+        oids = database_oids_for(project, check_container=False) or {}
+        if db_name not in oids:
+            return
+        record = DATABASE_RETENTION.record_arrival(str(WORKSPACE), project, db_name, oids[db_name], origin, source)
+    except (OSError, RuntimeError, ValueError) as exc:
+        job.add(f"Date d'arrivée de la base non enregistrée : {exc}")
+        return
+    if record["expires_at"] is not None:
+        deadline = time.strftime("%d/%m/%Y", time.localtime(record["expires_at"]))
+        job.add(f"Cette base sera supprimée automatiquement le {deadline}, sauf si tu la gardes plus longtemps.")
+
+
 def open_postgresql_console(project, db_name):
     project = validate_project(project)
     db_name = validate_odoo_db(db_name)
@@ -2665,6 +2715,8 @@ def overview(docker=None, databases_max_age=None):
                 "database_manager_url": urllib.parse.urljoin(url, "web/database/manager"),
                 "databases": databases,
                 "database_versions": {},
+                # Lu en mémoire, sans PostgreSQL : l'échéance reste affichée projet arrêté.
+                "database_retention": retention_summary(DATABASE_RETENTION.project_state(str(WORKSPACE), project)),
             }
         )
     return {
@@ -2846,6 +2898,11 @@ JOB_CANCEL_POLICIES = {
         "Possible entre deux projets ; un projet en cours de suppression va à son terme.",
     ),
     "restore_deleted_project_job": (False, "déplacement court d'un dossier."),
+    "database_retention_job": (
+        True,
+        "Le contrôle s'arrête ; une base en cours de suppression va à son terme, et les conteneurs "
+        "démarrés pour le contrôle sont arrêtés.",
+    ),
     "purge_manager_folder_job": (
         True,
         "Possible entre deux dossiers ; un dossier en cours de suppression va à son terme.",
@@ -2891,6 +2948,7 @@ JOB_EXPECTED_DURATIONS = {
     "start_mailpit_job": 40,
     "stop_mailpit_job": 10,
     "purge_deleted_projects_job": 60,
+    "database_retention_job": 60,
     "remove_docker_images_job": 60,
     "convert_wsl_addon_links_job": 60,
 }
@@ -3678,6 +3736,7 @@ def restore_database_job(job, project, backup_path, filename, db_name, master_pw
         for waited in range(0, 122, 2):
             if db_name in set(list_databases_for(project)):
                 job.add(f"Base restaurée: {db_name}")
+                remember_database_arrival(job, project, db_name, "restored")
                 if neutralize:
                     job.add("Seconde passe de neutralisation et contrôles de sécurité...")
                     # Cette méthode arrête le serveur sans cron et redémarre le serveur normal,
@@ -3771,6 +3830,7 @@ def create_database_job(job, project, db_name, master_pwd, login, password, lang
         databases = set(list_databases_for(project))
         if db_name in databases:
             job.add(f"Base créée : {db_name}")
+            remember_database_arrival(job, project, db_name, "created")
             clear_project_module_cache(project)
             job.result = {"kind": "database_creation", "database": db_name}
             return
@@ -3842,6 +3902,7 @@ def duplicate_database_job(job, project, db_name, new_name, master_pwd, neutrali
         for waited in range(0, 122, 2):
             if new_name in set(list_databases_for(project)):
                 job.add(f"Base dupliquée (filestore inclus) : {new_name}")
+                remember_database_arrival(job, project, new_name, "duplicated", source=db_name)
                 if neutralize:
                     job.add("Seconde passe de neutralisation et contrôles de sécurité...")
                     # Cette méthode arrête le serveur sans cron et redémarre le serveur normal,
@@ -3893,6 +3954,7 @@ def drop_database_job(job, project, db_name, master_pwd):
             if db_name not in set(list_databases_for(project)):
                 invalidate_overview_databases(project)
                 clear_project_module_cache(project)
+                DATABASE_RETENTION.forget(str(WORKSPACE), project, db_name)
                 job.add(f"Base supprimée (filestore inclus) : {db_name}")
                 return
             job_control.sleep(2)
@@ -3951,6 +4013,176 @@ def drop_partial_database(job, project, db_name):
 def restart_odoo_server(job, service, project):
     service.stop_odoo_server(project, log=job.add)
     service.start_odoo_server(project, log=job.add)
+
+
+# --- Durée de conservation des bases ------------------------------------------------
+# Règle et registre : odoo_manager_core/database_retention.py. Ici, le relevé dans PostgreSQL,
+# la suppression et la planification des actions qui s'en chargent.
+
+RETENTION_CHECK_SECONDS = 60 * 60
+# Premier passage peu après le lancement : l'application et Docker ont le temps de démarrer.
+RETENTION_FIRST_CHECK_SECONDS = 90
+# Un projet dont le contrôle échoue (image introuvable, projet cassé) n'est retenté qu'une fois par
+# jour : sinon chaque heure ajouterait une erreur au journal.
+RETENTION_FAILURE_BACKOFF_SECONDS = 24 * 60 * 60
+RETENTION_FAILURES = {}
+# Les contrôles passent un par un : au premier lancement, chaque projet arrêté démarre ses
+# conteneurs le temps d'être relevé.
+RETENTION_RESOURCE = "database-retention"
+RETENTION_LIST_ATTEMPTS = 15
+RETENTION_RULE_MESSAGE = (
+    "Pour protéger les données des clients, une base est supprimée 30 jours après son arrivée sur "
+    "cet ordinateur. Une base vide créée ici est conservée."
+)
+
+
+def project_filestore_path(project, db_name):
+    return WORKSPACE / project / "odoo_data" / "filestore" / db_name
+
+
+def drop_expired_database(job, project, db_name):
+    if container_status(f"postgresql-{project}") != "running":
+        raise RuntimeError(f"PostgreSQL n'est pas démarré : la base {db_name} n'a pas été supprimée.")
+    job.add(f"Suppression de la base {db_name} et de son filestore...")
+    with job_control.protected(f"suppression de la base {db_name}", irreversible=True):
+        drop_partial_database(job, project, db_name)
+    filestore = project_filestore_path(project, db_name)
+    if safe_path_exists(filestore):
+        raise RuntimeError(f"La base {db_name} est supprimée, mais pas son filestore : {filestore}")
+    DATABASE_RETENTION.forget(str(WORKSPACE), project, db_name)
+
+
+def database_retention_job(job, project):
+    """Relève les bases du projet, puis supprime celles arrivées à échéance.
+
+    Un projet arrêté démarre ses conteneurs sans lancer Odoo, le temps du contrôle, puis
+    s'arrête de nouveau.
+    """
+    project = validate_project(project)
+    service = project_service()
+    containers = (f"postgresql-{project}", f"odoo-{project}")
+    running_before = {name for name in containers if container_status(name) == "running"}
+    job.add(RETENTION_RULE_MESSAGE)
+    try:
+        try:
+            if len(running_before) < len(containers):
+                job.add("Démarrage des conteneurs du projet, sans lancer Odoo...")
+                job_progress.span("Démarrage des conteneurs", end=40, expected=20)
+                service.start_traefik(log=job.add)
+                service.compose_up_project(project, WORKSPACE / project, log=job.add)
+                service.wait_for_postgres(project, log=job.add)
+            job_progress.span("Relevé des bases", end=50, expected=5)
+            # Juste après son démarrage, PostgreSQL peut refuser les connexions quelques secondes.
+            live = database_oids_for(project)
+            for _ in range(RETENTION_LIST_ATTEMPTS - 1):
+                if live is not None:
+                    break
+                job_control.sleep(2)
+                live = database_oids_for(project)
+            if live is None:
+                raise RuntimeError("PostgreSQL ne donne pas la liste des bases du projet.")
+            state = DATABASE_RETENTION.reconcile(str(WORKSPACE), project, live)
+            due = expired_databases(state, time.time())
+            job.add(f"{len(state['databases'])} base(s) relevée(s).")
+            if not due:
+                job.add("Aucune base n'est arrivée à échéance.")
+            for index, db_name in enumerate(due, start=1):
+                job_progress.span(f"Suppression de {db_name}", end=50 + 45 * index / len(due), expected=15)
+                drop_expired_database(job, project, db_name)
+            if due:
+                invalidate_overview_databases(project)
+                clear_project_module_cache(project)
+                job.add(f"{len(due)} base(s) supprimée(s) : {', '.join(due)}.")
+            job.result = {"kind": "database_retention", "deleted": due}
+        finally:
+            # Projet arrêté avant le contrôle : il le redevient, même si le contrôle a échoué.
+            if not running_before:
+                job.add("Arrêt des conteneurs démarrés pour ce contrôle...")
+                try:
+                    service.stop_project(project, log=job.add)
+                except RuntimeError as exc:
+                    job.add(f"Arrêt des conteneurs impossible : {exc}")
+    except Exception:
+        RETENTION_FAILURES[project] = time.monotonic()
+        raise
+    RETENTION_FAILURES.pop(project, None)
+
+
+def schedule_database_retention(now=None):
+    """Relève les bases des projets démarrés et confie le reste à des actions.
+
+    Le relevé d'un projet démarré ne coûte qu'une requête psql. Ce qui demande de démarrer un
+    projet ou de supprimer une base passe par la file des actions : il attend la fin des actions
+    en cours sur le projet et apparaît dans l'historique.
+    """
+    now = time.time() if now is None else now
+    if not docker_available()[0]:
+        return []
+    workspace = str(WORKSPACE)
+    projects = project_dirs()
+    trash = trash_entries()
+    DATABASE_RETENTION.prune_projects(workspace, set(projects) | {entry["project"] for entry in trash})
+    statuses = container_statuses([f"postgresql-{project}" for project in projects])
+    with JOBS_LOCK:
+        unfinished = [job for job in JOBS.values() if job.status in JOB_UNFINISHED_STATUSES]
+    pending = {job.project for job in unfinished if job.target is database_retention_job}
+    trash_pending = any(job.target is purge_deleted_projects_job for job in unfinished)
+
+    created = []
+    for project in projects:
+        state = None
+        if statuses.get(f"postgresql-{project}") == "running":
+            live = database_oids_for(project, check_container=False)
+            if live is not None:
+                state = DATABASE_RETENTION.reconcile(workspace, project, live)
+        if state is None:
+            state = DATABASE_RETENTION.project_state(workspace, project)
+        failed_at = RETENTION_FAILURES.get(project)
+        if project in pending or (
+            failed_at is not None and time.monotonic() - failed_at < RETENTION_FAILURE_BACKOFF_SECONDS
+        ):
+            continue
+        if expired_databases(state, now):
+            title = f"Supprimer les bases arrivées à échéance dans {project}"
+        elif needs_inventory(state, now):
+            title = f"Relever les bases de {project}"
+        else:
+            continue
+        resources = {f"project:{project}", RETENTION_RESOURCE}
+        created.append(Job(title, database_retention_job, (project,), project=project, resources=resources))
+
+    due_trash = expired_trash_entries(trash, now)
+    if due_trash and not trash_pending:
+        names = [entry["name"] for entry in due_trash]
+        created.append(
+            Job(
+                "Vider la corbeille des projets supprimés il y a plus de 30 jours",
+                purge_deleted_projects_job,
+                (names,),
+                resources={"disk"},
+            )
+        )
+    return created
+
+
+def database_retention_loop():
+    time.sleep(RETENTION_FIRST_CHECK_SECONDS)
+    while True:
+        try:
+            schedule_database_retention()
+        except Exception:
+            traceback.print_exc()
+        time.sleep(RETENTION_CHECK_SECONDS)
+
+
+def extend_database_retention_view(request):
+    """« Garder 30 jours de plus » : repousse l'échéance d'une base, autant de fois que voulu."""
+    project = validate_project(request.param("project"))
+    db_name = validate_odoo_db(request.handler.read_json().get("db"))
+    expires_at = DATABASE_RETENTION.extend(str(WORKSPACE), project, db_name)
+    # L'aperçu des projets porte les échéances : l'interface la voit sans attendre.
+    EVENT_WAKE.set()
+    return {"database": db_name, "expires_at": expires_at}
 
 
 # --- Espace disque ------------------------------------------------------------
@@ -4335,7 +4567,7 @@ def delete_project_job(job, project):
         shutil.move(str(path), str(destination))
     clear_project_module_cache(project)
     job.add(f"Projet deplace dans: {destination}")
-    job.add("Suppression terminee. Le dossier reste recuperable a cet emplacement.")
+    job.add("Suppression terminée. Le dossier reste récupérable à cet emplacement pendant 30 jours.")
 
 
 def prune_empty_dirs(path, stop_at):
@@ -7016,6 +7248,7 @@ ROUTER = Router(
         api_route("POST", "/api/system/ssh-key/generate", generate_ssh_key_view),
         api_route("POST", "/api/projects/{project}/postgresql/open", open_postgresql_console_view),
         api_route("POST", "/api/projects/{project}/database-restore", restore_database_upload),
+        api_route("POST", "/api/projects/{project}/database-retention", extend_database_retention_view),
         api_route("POST", "/api/projects/{project}/repository/inspect", inspect_repository_view),
         api_route("POST", "/api/projects/{project}/module-zip/inspect", inspect_module_zip_view),
         api_route("POST", "/api/projects/{project}/module-zip", import_module_zip_view),
@@ -7052,6 +7285,7 @@ def main():
     # Avant tout clone : GitLab devient un hôte connu, un faux serveur est refusé.
     ensure_pinned_host_keys()
     ensure_event_watch_thread_started()
+    threading.Thread(target=database_retention_loop, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
