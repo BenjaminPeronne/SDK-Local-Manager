@@ -15,6 +15,7 @@ import { useModuleFilters } from "@/hooks/use-module-filters";
 import { useScheduledTimeouts } from "@/hooks/use-scheduled-timeouts";
 import { useStickyProjectHeader } from "@/hooks/use-sticky-project-header";
 import { useToasts } from "@/hooks/use-toasts";
+import { useDismissedNotice } from "@/hooks/use-dismissed-notice";
 import { api, API_BASE, ApiUnavailableError, isProjectGone, uploadDatabaseBackup } from "@/lib/api";
 import { databaseToKeep, readRememberedDatabases, writeRememberedDatabases } from "@/lib/database-selection";
 import {
@@ -595,6 +596,8 @@ export default function Home() {
 
   // Disque qui porte le dossier des projets : relu quand ce dossier change.
   const workspacePath = systemStatus?.workspace ?? "";
+  // Bandeau iCloud masqué pour ce dossier des projets : il revient si le dossier change.
+  const [icloudNoticeDismissedFor, dismissICloudNotice] = useDismissedNotice("icloud");
   useEffect(() => {
     const bridge = desktopBridge();
     if (initializing || !workspacePath || !bridge?.diskEncryption) return;
@@ -1632,7 +1635,12 @@ export default function Home() {
                   setMigrationBannerClosed={setMigrationBannerClosed}
                 />
               )}
-              {systemStatus?.workspace_icloud_synced && <ICloudNotice openSettingsDialog={openSettingsDialog} />}
+              {systemStatus?.workspace_icloud_synced && icloudNoticeDismissedFor !== workspacePath && (
+                <ICloudNotice
+                  openSettingsDialog={openSettingsDialog}
+                  onDismiss={() => dismissICloudNotice(workspacePath)}
+                />
+              )}
               {diskEncryption?.state === "off" && <DiskEncryptionNotice platform={diskEncryption.platform} />}
               {retentionDeletions.length > 0 && (
                 <RetentionNotice

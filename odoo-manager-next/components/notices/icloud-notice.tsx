@@ -6,14 +6,17 @@ import { Notice } from "@/components/common/notice";
 
 type ICloudNoticeProps = {
   openSettingsDialog: () => void;
+  onDismiss: () => void;
 };
 
-export function ICloudNotice({ openSettingsDialog }: ICloudNoticeProps) {
+export function ICloudNotice({ openSettingsDialog, onDismiss }: ICloudNoticeProps) {
   return (
     <Notice
       tone="warning"
       icon={Cloud}
       title="Tes projets sont copiés dans iCloud"
+      onDismiss={onDismiss}
+      dismissLabel="Ne plus afficher"
       actions={
         <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={openSettingsDialog}>
           <Settings className="h-4 w-4" />
