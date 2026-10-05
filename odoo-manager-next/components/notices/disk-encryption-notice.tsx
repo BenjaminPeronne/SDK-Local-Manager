@@ -14,11 +14,18 @@ const HOW_TO_ENCRYPT: Record<string, string> = {
 
 type DiskEncryptionNoticeProps = {
   platform: string;
+  onDismiss: () => void;
 };
 
-export function DiskEncryptionNotice({ platform }: DiskEncryptionNoticeProps) {
+export function DiskEncryptionNotice({ platform, onDismiss }: DiskEncryptionNoticeProps) {
   return (
-    <Notice tone="warning" icon={ShieldAlert} title="Le disque de cet ordinateur n’est pas chiffré">
+    <Notice
+      tone="warning"
+      icon={ShieldAlert}
+      title="Le disque de cet ordinateur n’est pas chiffré"
+      onDismiss={onDismiss}
+      dismissLabel="Masquer pendant 30 jours"
+    >
       Si l’ordinateur est perdu ou volé, les bases de tes clients peuvent être lues sans ton mot de passe.{" "}
       {HOW_TO_ENCRYPT[platform] ?? "Active le chiffrement du disque dans les réglages du système."} En cas de doute,
       demande au support informatique.

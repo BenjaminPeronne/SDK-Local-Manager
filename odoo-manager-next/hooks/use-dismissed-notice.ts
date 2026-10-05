@@ -12,8 +12,9 @@ function readDismissed(storageKey: string) {
 }
 
 /**
- * Bandeau masqué par l'utilisateur pour une valeur précise, le dossier des projets par exemple :
- * il revient quand cette valeur change. Le choix est mémorisé sur ce poste.
+ * Bandeau masqué par l'utilisateur pour une valeur précise : le dossier des projets (il revient
+ * quand le dossier change), ou l'heure du masquage (il revient au bout d'un temps, voir
+ * lib/notice-snooze.ts). Le choix est mémorisé sur ce poste.
  */
 export function useDismissedNotice(name: string) {
   const storageKey = `sdk-local-manager.dismissed-notice.${name}`;

@@ -37,6 +37,7 @@ import {
 } from "@/lib/desktop-runtime";
 import { isJobActive, isJobUnfinished, PROJECT_ARRIVAL_PREFIXES } from "@/lib/jobs";
 import { moduleRepositoryUrlError, socleAppInstalled } from "@/lib/modules";
+import { noticeSnoozed } from "@/lib/notice-snooze";
 import { fallbackManagerSettings, firstOdooDatabase } from "@/lib/projects";
 import { deletionDate, deletionLabel, notificationKey, upcomingDeletions } from "@/lib/retention";
 import type {
@@ -598,6 +599,8 @@ export default function Home() {
   const workspacePath = systemStatus?.workspace ?? "";
   // Bandeau iCloud masqué pour ce dossier des projets : il revient si le dossier change.
   const [icloudNoticeDismissedFor, dismissICloudNotice] = useDismissedNotice("icloud");
+  // Bandeau du chiffrement masqué pour 30 jours seulement : c'est le risque le plus grave, il revient.
+  const [encryptionNoticeDismissedAt, dismissEncryptionNotice] = useDismissedNotice("disk-encryption");
   useEffect(() => {
     const bridge = desktopBridge();
     if (initializing || !workspacePath || !bridge?.diskEncryption) return;
@@ -1641,7 +1644,12 @@ export default function Home() {
                   onDismiss={() => dismissICloudNotice(workspacePath)}
                 />
               )}
-              {diskEncryption?.state === "off" && <DiskEncryptionNotice platform={diskEncryption.platform} />}
+              {diskEncryption?.state === "off" && !noticeSnoozed(encryptionNoticeDismissedAt) && (
+                <DiskEncryptionNotice
+                  platform={diskEncryption.platform}
+                  onDismiss={() => dismissEncryptionNotice(String(Date.now()))}
+                />
+              )}
               {retentionDeletions.length > 0 && (
                 <RetentionNotice
                   deletions={retentionDeletions}
