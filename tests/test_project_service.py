@@ -367,6 +367,34 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertTrue(service.ensure_traefik_port_reachable(log=lambda _line: None, sleep=lambda _seconds: None))
         self.assertFalse(any("restart" in command for command, _cwd in self.runner.streams))
 
+    def test_traefik_blind_to_a_correct_project_is_restarted_once(self):
+        # Traefik 3.6 : son fournisseur Docker peut cesser de suivre les démarrages sans rien journaliser.
+        restarted = []
+        results = iter([(404, "")] * 12 + [(303, "")] * 5)
+
+        def probe(_url):
+            return next(results) if not restarted else (303, "")
+
+        self.runner.statuses = {"traefik": "running"}
+        original_stream = self.runner.stream
+
+        def stream(command, cwd=None, log=None):
+            if command[-2:] == ["restart", "traefik"]:
+                restarted.append(command)
+            return original_stream(command, cwd, log)
+
+        self.runner.stream = stream
+        service = ProjectService(self.settings, self.root, runner=self.runner, http_probe=probe)
+        logs = []
+        with (
+            patch.object(service, "traefik_route_problems", return_value=[]),
+            patch.object(service, "traefik_container_name", return_value="traefik"),
+        ):
+            service.wait_project_http("DEMO", log=logs.append, sleep=lambda _seconds: None)
+
+        self.assertEqual(1, len(restarted))
+        self.assertTrue(any("redémarrage de traefik" in line for line in logs))
+
     def test_odoo_http_readiness_waits_for_first_page_instead_of_open_port(self):
         answers = iter([(2, "sans réponse : TimeoutError"), (1, "HTTP 500"), (0, "HTTP 303")])
         calls = []

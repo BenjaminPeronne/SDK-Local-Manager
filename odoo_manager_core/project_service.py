@@ -1758,6 +1758,24 @@ class ProjectService:
             )
         return f"Odoo répond dans son conteneur, mais {host} reste inaccessible via Traefik ({reason or status})."
 
+    def refresh_traefik_routes(self, log=None):
+        """Redémarre Traefik quand il ne voit plus les conteneurs démarrés après lui.
+
+        Son fournisseur Docker suit les démarrages de conteneurs ; il peut cesser de les recevoir
+        sans rien journaliser (constaté avec Traefik 3.6 et Docker Desktop) : toute route ajoutée
+        ensuite répond 404, configuration correcte ou non. Au redémarrage, Traefik relit tous les
+        conteneurs. Retourne True s'il a eu lieu.
+        """
+        name = self.traefik_container_name()
+        if self.container_status(name) != "running":
+            return False
+        self.log(
+            log,
+            "Traefik ne connaît pas ce projet alors que sa configuration est correcte : "
+            f"redémarrage de {name} pour qu'il relise les projets démarrés...",
+        )
+        return self.stream(self.docker("restart", name), log=log) == 0
+
     def traefik_route_problems(self, project, port):
         """Causes certaines d'un 404 persistant : attendre plus longtemps ne les corrigera pas."""
         instances = self.traefik_instances()
@@ -1818,6 +1836,7 @@ class ProjectService:
         port_repair_attempted = False
         route_diagnosed = False
         port_rechecked = False
+        traefik_restarted = False
         problems = None
         while waited <= max_wait:
             result = self.http_probe(url) if self.http_probe else self.http_probe_result(url)
@@ -1844,6 +1863,8 @@ class ProjectService:
                 route_diagnosed = True
                 problems = self.traefik_route_problems(project, port)
                 certain_failure = bool(problems)
+                if not problems and not traefik_restarted:
+                    traefik_restarted = self.refresh_traefik_routes(log=log)
             if certain_failure:
                 # Traefik a pu être démarré sur un autre port que celui de l'URL : une seule nouvelle détection.
                 detected = urllib.parse.urljoin(self.project_url(project, refresh_traefik=True), "web/login")
