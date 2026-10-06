@@ -9,6 +9,7 @@ from odoo_manager_core.config import ManagerSettings
 from odoo_manager_core.project_creator import (
     ProjectCreator,
     abandoned_staging_entries,
+    normalize_project_name,
     staging_directory,
     validate_git_ref,
     validate_gitlab_repository,
@@ -531,3 +532,21 @@ class AbandonedStagingTests(unittest.TestCase):
     def test_workspace_without_staging_directory_reports_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual([], abandoned_staging_entries(Path(tmp)))
+
+
+class ProjectNameNormalizationTests(unittest.TestCase):
+    def test_names_typed_in_capitals_become_valid_addresses(self):
+        # Même règle que lib/project-name.ts dans l'interface.
+        cases = {
+            "MABONNEETOILE": "mabonneetoile",
+            "CLIENT V19": "client_v19",
+            "Société Générale  v16": "societe_generale_v16",
+            "Cœur d'Alène": "coeur_d_alene",
+            "__-.client.v19-test_2__": "client.v19-test_2",
+        }
+        for typed, expected in cases.items():
+            with self.subTest(typed=typed):
+                self.assertEqual(expected, normalize_project_name(typed))
+                self.assertEqual(expected, validate_new_project_name(normalize_project_name(typed)))
+        self.assertEqual("", normalize_project_name("  "))
+        self.assertEqual(63, len(normalize_project_name("x" * 80)))

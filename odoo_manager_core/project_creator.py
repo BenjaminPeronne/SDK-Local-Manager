@@ -5,6 +5,7 @@ import shutil
 import ssl
 import tempfile
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -94,6 +95,25 @@ def format_size(size):
         if value < 1024 or unit == "Go":
             return f"{value:.0f} {unit}" if unit == "o" else f"{value:.1f} {unit}"
         value /= 1024
+
+
+PROJECT_NAME_LIGATURES = {"æ": "ae", "œ": "oe", "ß": "ss"}
+
+
+def normalize_project_name(name):
+    """Met en forme un nom saisi (« CLIENT V19 » → « client_v19 »), comme l'interface pendant la saisie.
+
+    Même règle que odoo-manager-next/lib/project-name.ts : minuscules, accents retirés, un underscore
+    par groupe de caractères refusés, ni séparateur au début ni à la fin. Le résultat passe ensuite
+    par validate_new_project_name : seul un nom vide reste refusé.
+    """
+    name = str(name or "").lower()
+    for letter, replacement in PROJECT_NAME_LIGATURES.items():
+        name = name.replace(letter, replacement)
+    name = re.sub(r"[\u0300-\u036f]", "", unicodedata.normalize("NFD", name))
+    name = re.sub(r"[^a-z0-9._-]+", "_", name)
+    name = re.sub(r"^[._-]+|[._-]+$", "", name)
+    return name[:63]
 
 
 def validate_new_project_name(name):

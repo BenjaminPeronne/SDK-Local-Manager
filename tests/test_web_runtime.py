@@ -2762,6 +2762,19 @@ class DatabaseNeutralizationTests(unittest.TestCase):
         clear_cache.assert_called_once_with("DEMO")
         self.assertIn("Base supprimée (filestore inclus) : demo", job.lines)
 
+    def test_project_creation_formats_the_name_and_refuses_a_homonym_in_another_case(self):
+        with (
+            patch.object(web, "project_dirs", return_value=["AKAAZ"]),
+            patch.object(web, "WORKSPACE", Path("/nowhere")),
+        ):
+            job = web.create_project_action({"name": "Client V19", "version": "19.0"})
+            self.assertEqual("client_v19", job.project)
+            self.assertEqual("Créer le projet client_v19", job.title)
+            with self.assertRaisesRegex(ValueError, "Le projet AKAAZ existe déjà"):
+                web.create_project_action({"name": "akaaz", "version": "19.0"})
+        with web.JOBS_LOCK:
+            web.JOBS.pop(job.id, None)
+
     @patch("odoo_manager_web.job_control.sleep")
     @patch("odoo_manager_web.drop_partial_database")
     @patch(
@@ -2945,7 +2958,8 @@ class DatabaseNeutralizationTests(unittest.TestCase):
             "demo",
             "sale_custom,stock_custom",
             option="-u",
-            log=job.add,
+            # Journal relayé vers l'action en gardant les lignes de la commande (collisions de données).
+            log=ANY,
             overwrite_translations=True,
         )
 

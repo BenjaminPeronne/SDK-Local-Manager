@@ -12,7 +12,7 @@ import urllib.parse
 import uuid
 from pathlib import Path
 
-from . import database_restore, job_progress, jobs, performance
+from . import data_conflicts, database_restore, job_progress, jobs, performance
 from .command_output import missing_python_import, python_package_for_import
 from .platform import (
     command_uses_wsl,
@@ -2473,6 +2473,63 @@ class ProjectService:
             raise RuntimeError(f"Impossible de recréer le conteneur PostgreSQL sur l'image {image}.")
         self.wait_for_postgres(project, log=log)
         return True
+
+    def odoo_addons_paths(self, project):
+        """Chemins des addons dans le conteneur, lus dans odoo.conf (le module base y est toujours)."""
+        try:
+            content = (self.project_path(project) / "odoo.conf").read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return []
+        match = re.search(r"(?m)^\s*addons_path\s*=\s*(.+)$", content)
+        return [path.strip() for path in match.group(1).split(",") if path.strip()] if match else []
+
+    def read_module_data_file(self, project, module, path, addons_paths):
+        """Contenu d'un fichier de données d'un module, cherché dans les chemins des addons du conteneur."""
+        if not re.fullmatch(r"\w+", module) or not re.fullmatch(r"[\w./-]+", path) or ".." in path.split("/"):
+            return None
+        script = 'for d in "$@"; do if [ -f "$d/$0" ]; then cat "$d/$0"; exit 0; fi; done; exit 1'
+        code, output = self.capture(
+            self.docker("exec", f"odoo-{project}", "sh", "-c", script, f"{module}/{path}", *addons_paths),
+            timeout=30,
+        )
+        return output if code == 0 else None
+
+    def adopt_conflicting_records(self, project, db_name, conflict, addons_paths=(), log=None):
+        """Rattache au module les enregistrements existants qui bloquent le chargement de ses données.
+
+        Voir odoo_manager_core/data_conflicts.py. Retourne le nombre d'identifiants XML créés.
+        """
+        paths = list(dict.fromkeys([*addons_paths, *self.odoo_addons_paths(project)]))
+        content = self.read_module_data_file(project, conflict.module, conflict.path, paths)
+        if content is None:
+            self.log(log, f"Fichier {conflict.key} introuvable dans le conteneur : rapprochement impossible.")
+            return 0
+        model, records = data_conflicts.data_records(conflict, content)
+        if not model or not records:
+            return 0
+        names = ", ".join(data_conflicts.sql_literal(column) for column in conflict.columns)
+        types = {}
+        for line in self._postgres_lines(
+            project,
+            db_name,
+            "SELECT column_name || '|' || data_type FROM information_schema.columns "
+            f"WHERE table_schema = 'public' AND table_name = {data_conflicts.sql_literal(conflict.table)} "
+            f"AND column_name IN ({names});",
+        ):
+            column, _separator, data_type = line.partition("|")
+            types[column] = data_type
+        if set(types) != set(conflict.columns):
+            return 0
+        sql = data_conflicts.adoption_sql(conflict, model, records, types)
+        if not sql:
+            return 0
+        adopted = [line for line in self.run_postgres_sql(project, db_name, sql) if "." in line]
+        if adopted:
+            shown = ", ".join(adopted[:6]) + (f" et {len(adopted) - 6} autre(s)" if len(adopted) > 6 else "")
+            self.log(
+                log, f"{len(adopted)} enregistrement(s) existant(s) rattaché(s) au module {conflict.module} : {shown}"
+            )
+        return len(adopted)
 
     def remove_orphan_report_expressions(self, project, db_name, module, log=None):
         """Supprime les expressions de rapport `balance` d'un module que sa version actuelle recrée.

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import collections
 import errno
 import hmac
 import http.client
@@ -33,6 +34,7 @@ from odoo_manager_core import (
     ProjectCreator,
     ProjectService,
     SettingsStore,
+    data_conflicts,
     database_restore,
     docker_status,
     job_progress,
@@ -143,6 +145,7 @@ from odoo_manager_core.platform import (
 from odoo_manager_core.project_creator import (
     SUPPORTED_ODOO_VERSIONS,
     abandoned_staging_entries,
+    normalize_project_name,
     validate_git_ref,
     validate_gitlab_repository,
     validate_new_project_name,
@@ -5572,19 +5575,42 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
         raise ValueError("Action module Odoo inconnue.")
 
     attempted_fixes = set()
+    adopted_files = set()
+    # Le message d'erreur ne garde que la dernière ligne d'Odoo : la collision de données se lit
+    # dans le journal complet de la commande (fichier chargé, table, clé en double).
+    command_lines = collections.deque(maxlen=MODULE_COMMAND_LOG_LINES)
+
+    def log(line):
+        command_lines.append(str(line))
+        job.add(line)
+
     while True:
+        command_lines.clear()
         try:
             project_service().run_odoo_module_command(
                 project,
                 db_name,
                 ",".join(module_names),
                 option="-i" if flag == "--install-module" else "-u",
-                log=job.add,
+                log=log,
                 overwrite_translations=overwrite_translations,
             )
             return
         except RuntimeError as exc:
             message = str(exc)
+            command_log = "\n".join(command_lines)
+            conflict = data_conflicts.find_data_conflict(command_log)
+            if conflict and conflict.key not in adopted_files and len(adopted_files) < MAX_DATA_ADOPTIONS:
+                adopted_files.add(conflict.key)
+                job.add(
+                    f"Le module {conflict.module} veut créer des données qui existent déjà dans la base, sans lien "
+                    f"avec lui ({conflict.describe()}), souvent créées à la main. Rattachement au module puis "
+                    "nouvelle tentative..."
+                )
+                if project_service().adopt_conflicting_records(
+                    project, db_name, conflict, data_conflicts.addons_paths(command_log), log=job.add
+                ):
+                    continue
             import_name = missing_python_import(message)
             package = python_package_for_import(import_name) if import_name else ""
             extension = missing_postgres_extension(message)
@@ -5655,6 +5681,9 @@ def missing_code_failure_hint(project, db_name, message):
 # Filet de sécurité contre une boucle infinie si l'erreur est mal interprétée en rafale : chaque
 # réessai refait tourner la commande Odoo en entier, le plafond doit donc rester bas.
 MAX_AUTO_DEPENDENCY_FIXES = 3
+# Un fichier de données en conflit par essai : -u all peut en rencontrer plusieurs, base en tête.
+MAX_DATA_ADOPTIONS = 8
+MODULE_COMMAND_LOG_LINES = 6000
 
 
 def update_imported_modules_job(job, project, db_name, modules):
@@ -7222,7 +7251,11 @@ def update_local_modules_action(payload):
 
 
 def create_project_action(payload):
-    name = validate_new_project_name(payload.get("name", ""))
+    name = validate_new_project_name(normalize_project_name(payload.get("name", "")))
+    # Traefik ignore la casse : dev.AKAAZ.localhost et dev.akaaz.localhost seraient la même adresse.
+    homonym = next((project for project in project_dirs() if project.lower() == name), None)
+    if homonym:
+        raise ValueError(f"Le projet {homonym.upper()} existe déjà : choisis un autre nom.")
     source_type = str(payload.get("source_type", "standard") or "standard").strip()
     version = str(payload.get("version", "") or "").strip()
     repository_url = str(payload.get("repository_url", "") or "").strip()
