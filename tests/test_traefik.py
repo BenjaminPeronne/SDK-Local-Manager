@@ -1,6 +1,6 @@
 import unittest
 
-from odoo_manager_core.project_service import traefik_loopback_override
+from odoo_manager_core.project_service import traefik_runtime_compose
 from odoo_manager_core.traefik import (
     PublishedPort,
     TraefikInstance,
@@ -12,6 +12,7 @@ from odoo_manager_core.traefik import (
     entrypoints_from_environment,
     parse_docker_ports,
     recorded_substitute_ports,
+    replace_compose_service_ports,
     reset_traefik_entrypoint_cache,
     same_directory,
     select_traefik_instance,
@@ -157,17 +158,60 @@ class SubstitutePortTests(unittest.TestCase):
         self.assertEqual(8081, substitute_port_candidates(8080)[0])
         self.assertEqual(65535, substitute_port_candidates(65530)[-1])
 
-    def test_replacement_ports_are_read_back_from_the_generated_override(self):
-        override = traefik_loopback_override(
-            "traefik",
+    def test_replacement_ports_are_read_back_from_the_generated_copy(self):
+        base = "services:\n  traefik:\n    ports:\n      - 80:80\n      - 8443:443\n      - 9000:9000/udp\n"
+        copy = traefik_runtime_compose(
+            base,
+            "/home/demo/docker-local-tools/traefik/docker-compose.yml",
             [PublishedPort("", 8080, 80), PublishedPort("", 8443, 443), PublishedPort("", 9000, 9000, "udp")],
             {8080: 80},
         )
 
-        self.assertIn('"127.0.0.1:8080:80"  # à la place du port 80, déjà utilisé sur cette machine', override)
-        self.assertIn('      - "127.0.0.1:8443:443"\n', override)
-        self.assertEqual({(80, 80, "tcp"): 8080}, recorded_substitute_ports(override))
+        self.assertTrue(copy.startswith("# Généré par Odoo Manager à partir de /home/demo/docker-local-tools/"))
+        self.assertIn('"127.0.0.1:8080:80"  # à la place du port 80, déjà utilisé sur cette machine', copy)
+        self.assertIn('      - "127.0.0.1:8443:443"\n', copy)
+        self.assertEqual({(80, 80, "tcp"): 8080}, recorded_substitute_ports(copy))
         self.assertEqual({}, recorded_substitute_ports(""))
+        self.assertIsNone(traefik_runtime_compose("services:\n  proxy:\n    image: traefik\n", "x", [], {}))
+
+
+class ComposePortsReplacementTests(unittest.TestCase):
+    def test_only_the_ports_list_of_the_service_changes(self):
+        compose = (
+            "services:\n"
+            "  whoami:\n"
+            "    ports:\n"
+            "      - 81:80\n"
+            "  traefik:\n"
+            "    image: traefik:3.6\n"
+            "    ports:   # accès aux projets\n"
+            '      - "80:80"   # port 80 occupé par Apache\n'
+            "\n"
+            "      - 443:443\n"
+            "\n"
+            "    labels:\n"
+            "      - traefik.enable=true\n"
+            "networks:\n"
+            "  traefik-local:\n"
+        )
+
+        self.assertEqual(
+            compose.replace(
+                '    ports:   # accès aux projets\n      - "80:80"   # port 80 occupé par Apache\n\n      - 443:443\n',
+                '    ports:\n      - "127.0.0.1:8080:80"\n',
+            ),
+            replace_compose_service_ports(compose, "traefik", ['"127.0.0.1:8080:80"']),
+        )
+
+    def test_ports_listed_at_the_key_indentation_and_last_in_the_file(self):
+        compose = "services:\n  traefik:\n    ports:\n    - 80:80\n"
+
+        self.assertEqual(
+            "services:\n  traefik:\n    ports:\n      - x\n",
+            replace_compose_service_ports(compose, "traefik", ["x"]),
+        )
+        self.assertIsNone(replace_compose_service_ports("services:\n  traefik:\n    image: t\n", "traefik", ["x"]))
+        self.assertIsNone(replace_compose_service_ports(compose, "proxy", ["x"]))
 
 
 class TraefikDetectionTests(unittest.TestCase):

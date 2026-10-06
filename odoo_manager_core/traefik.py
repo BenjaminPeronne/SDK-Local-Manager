@@ -281,6 +281,46 @@ def compose_service_ports(text, service="traefik"):
     return ports
 
 
+def replace_compose_service_ports(text, service, items):
+    """Compose dont la liste `ports` du service est remplacée par `items` ; None si elle est introuvable.
+
+    Le reste du fichier est recopié à l'identique, commentaires compris.
+    """
+    lines = (text or "").splitlines()
+
+    def indent_of(line):
+        return len(line) - len(line.lstrip())
+
+    service_index = next(
+        (index for index, line in enumerate(lines) if re.match(rf"^(\s+){re.escape(service)}:\s*(#.*)?$", line)),
+        None,
+    )
+    if service_index is None:
+        return None
+    service_indent = indent_of(lines[service_index])
+    start = end = ports_indent = None
+    for index in range(service_index + 1, len(lines)):
+        line = lines[index]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if indent_of(line) <= service_indent:
+            break
+        if start is None:
+            if re.match(r"^\s*ports:\s*(!override\s*)?(#.*)?$", line):
+                start = end = index
+                ports_indent = indent_of(line)
+            continue
+        if indent_of(line) <= ports_indent and not stripped.startswith("-"):
+            break
+        end = index
+    if start is None:
+        return None
+    item_indent = " " * (ports_indent + 2)
+    block = [" " * ports_indent + "ports:", *(f"{item_indent}- {item}" for item in items)]
+    return "\n".join(lines[:start] + block + lines[end + 1 :]) + "\n"
+
+
 def substitute_port_candidates(port):
     """Ports essayés à la place d'un port déjà pris : 8080, 8081… pour 80 ; 8443, 8444… pour 443."""
     start = port + 8000 if port < 1024 else port + 1

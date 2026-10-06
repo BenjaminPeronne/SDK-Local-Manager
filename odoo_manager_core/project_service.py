@@ -39,6 +39,7 @@ from .traefik import (
     detect_traefik_instances,
     entrypoints_from_config,
     recorded_substitute_ports,
+    replace_compose_service_ports,
     same_directory,
     select_traefik_instance,
     substitute_key,
@@ -292,27 +293,29 @@ REGISTRY_FAILURES_BEFORE_ABORT = 3
 MAX_AUTOMATIC_PYTHON_INSTALLS = 3
 ACTIVE_PROCESSES = set()
 ACTIVE_PROCESSES_LOCK = threading.Lock()
-# `ports: !override` remplace la liste au lieu de la fusionner (Compose >= 2.24.4).
-COMPOSE_OVERRIDE_TAG_MIN_VERSION = (2, 24, 4)
-TRAEFIK_LOOPBACK_HEADER = """# Généré par Odoo Manager.
-# Traefik publie ses ports sur toutes les interfaces : les instances Odoo locales et leur
-# gestionnaire de bases (sauvegarde incluse) seraient joignables depuis le réseau.
-# Les ports de la machine choisis dans le compose de Traefik sont conservés, sauf ceux qu'un autre
-# service occupe au démarrage : un port libre les remplace (8080 pour 80, par exemple).
+TRAEFIK_RUNTIME_HEADER = """# Généré par Odoo Manager à partir de {base}
+# et réécrit à chaque démarrage de Traefik : seuls les ports diffèrent.
+# Traefik les publierait sur toutes les interfaces : les instances Odoo locales et leur
+# gestionnaire de bases (sauvegarde incluse) seraient joignables depuis le réseau. Ils sont
+# limités à cette machine, et un port qu'un autre service occupe au démarrage est remplacé
+# par un port libre (8080 pour 80, par exemple).
 """
+# Surcharge `ports: !override` des versions précédentes, réservée à Compose 2.24.4 et suivants.
+LEGACY_TRAEFIK_OVERRIDE = "traefik-loopback.compose.yml"
 TRAEFIK_PORT_WAIT_SECONDS = 15
 # Délai laissé au fournisseur Docker de Traefik pour publier une route avant de chercher une cause certaine.
 TRAEFIK_ROUTE_DIAGNOSIS_SECONDS = 20
 
 
-def traefik_loopback_override(service, ports, replaced=None):
-    """Surcharge compose qui limite les ports publiés à 127.0.0.1.
+def traefik_runtime_compose(base_text, base_name, ports, replaced=None):
+    """Copie du compose de Traefik dont seuls les ports changent ; None si sa liste est introuvable.
 
-    `replaced` : port du compose remplacé, par port publié à sa place ; noté en commentaire pour
-    que le port de remplacement soit repris au démarrage suivant.
+    Les ports sont publiés sur 127.0.0.1 sans changer leurs numéros, sauf ceux de `replaced`
+    (port du compose remplacé, par port publié à sa place), notés en commentaire pour que le
+    port de remplacement soit repris au démarrage suivant.
     """
     replaced = replaced or {}
-    lines = [TRAEFIK_LOOPBACK_HEADER.rstrip("\n"), "services:", f"  {service}:", "    ports: !override"]
+    items = []
     seen = set()
     for port in ports:
         # Les publications toutes interfaces (IPv4 ou IPv6) deviennent une seule publication locale.
@@ -324,8 +327,9 @@ def traefik_loopback_override(service, ports, replaced=None):
             seen.add(entry)
             configured = replaced.get(port.host_port)
             comment = f"  {SUBSTITUTE_PORT_COMMENT.format(port=configured)}" if configured else ""
-            lines.append(f'      - "{entry}"{comment}')
-    return "\n".join(lines) + "\n"
+            items.append(f'"{entry}"{comment}')
+    content = replace_compose_service_ports(base_text, "traefik", items)
+    return TRAEFIK_RUNTIME_HEADER.format(base=base_name) + content if content else None
 
 
 def host_port_in_use(port, timeout=0.5):
@@ -1001,7 +1005,7 @@ class ProjectService:
         ports, replaced = self.free_traefik_ports(ports, foreign, managed=managed, log=log)
 
         self.log(log, "Démarrage de Traefik...")
-        compose_files = self.traefik_loopback_compose_files(ports, replaced, log=log)
+        compose_files = self.traefik_compose_files(ports, replaced, log=log)
         code = self.stream(self.docker("compose", *compose_files, "up", "-d"), cwd=self.traefik_dir, log=log)
         if code != 0:
             raise RuntimeError("Impossible de démarrer Traefik.")
@@ -1107,12 +1111,6 @@ class ProjectService:
 
     def substitute_traefik_port(self, port, owner, recorded, reserved, own, log=None):
         """Port libre publié à la place de `port`, occupé par `owner`."""
-        if not self.compose_supports_override():
-            raise RuntimeError(
-                f"Le port {port.host_port} de cette machine est déjà utilisé par {owner}. Ta version de Docker est "
-                "trop ancienne pour que le gestionnaire démarre Traefik sur un autre port : mets Docker à jour, "
-                f"ou libère le port {port.host_port}, puis relance."
-            )
         previous = recorded.get(substitute_key(port))
         for candidate in dict.fromkeys([previous, *substitute_port_candidates(port.host_port)]):
             if not candidate or candidate in reserved:
@@ -1165,12 +1163,12 @@ class ProjectService:
             return self.port_owner(port.host_port) or "un autre service"
         return ""
 
-    def traefik_override_path(self):
-        return self.workspace / ".odoo_manager_runtime" / "traefik-loopback.compose.yml"
+    def traefik_runtime_compose_path(self):
+        return self.workspace / ".odoo_manager_runtime" / "traefik.compose.yml"
 
     def recorded_traefik_substitutes(self):
         try:
-            return recorded_substitute_ports(self.traefik_override_path().read_text(encoding="utf-8"))
+            return recorded_substitute_ports(self.traefik_runtime_compose_path().read_text(encoding="utf-8"))
         except OSError:
             return {}
 
@@ -1290,18 +1288,12 @@ class ProjectService:
                 return True
         return False
 
-    def compose_version(self):
-        code, output = self.capture(self.docker("compose", "version", "--short"), timeout=15)
-        match = re.search(r"(\d+)\.(\d+)\.(\d+)", output or "") if code == 0 else None
-        return tuple(int(part) for part in match.groups()) if match else None
+    def traefik_compose_files(self, ports=None, replaced=None, log=None):
+        """Options compose qui démarrent Traefik sur ses ports, sans modifier le dépôt docker-local-tools.
 
-    def compose_supports_override(self):
-        version = self.compose_version()
-        return bool(version) and version >= COMPOSE_OVERRIDE_TAG_MIN_VERSION
-
-    def traefik_loopback_compose_files(self, ports=None, replaced=None, log=None):
-        """Restreint Traefik à 127.0.0.1 sans modifier le dépôt docker-local-tools.
-
+        Traefik est lancé depuis une copie de son compose, avec son dossier pour dossier de projet :
+        mêmes chemins relatifs, même projet compose, donc même conteneur. Contrairement à une
+        surcharge `ports: !override`, cela fonctionne avec toutes les versions de Docker Compose.
         `ports` : ports à publier, ceux du compose par défaut ; `replaced` : voir free_traefik_ports.
         """
         base = self.traefik_compose_path()
@@ -1310,35 +1302,32 @@ class ProjectService:
             self.log(log, "Service traefik introuvable dans le compose : ports laissés tels quels.")
             return []
         ports = ports or compose_service_ports(base_text, "traefik")
-        if not ports:
+        content = traefik_runtime_compose(base_text, base, ports, replaced) if ports else None
+        if not content:
             self.log(
                 log,
                 "Ports de Traefik non reconnus dans le compose (variables, syntaxe longue ou aucun port) : "
                 "ports laissés tels quels.",
             )
             return []
-        if not self.compose_supports_override():
-            self.log(
-                log,
-                "Docker Compose trop ancien pour restreindre Traefik à cette machine "
-                "(2.24.4 requis) : Traefik reste joignable depuis le réseau.",
-            )
-            return []
-        override = self.traefik_override_path()
-        content = traefik_loopback_override("traefik", ports, replaced)
+        runtime = self.traefik_runtime_compose_path()
         try:
-            override.parent.mkdir(parents=True, exist_ok=True)
-            if not override.is_file() or override.read_text(encoding="utf-8") != content:
-                override.write_text(content, encoding="utf-8")
+            runtime.parent.mkdir(parents=True, exist_ok=True)
+            if not runtime.is_file() or runtime.read_text(encoding="utf-8") != content:
+                runtime.write_text(content, encoding="utf-8")
         except OSError as exc:
-            self.log(log, f"Surcharge Traefik impossible à écrire ({exc}) : ports laissés tels quels.")
+            self.log(log, f"Copie du compose de Traefik impossible à écrire ({exc}) : ports laissés tels quels.")
             return []
+        try:
+            (runtime.parent / LEGACY_TRAEFIK_OVERRIDE).unlink(missing_ok=True)
+        except OSError:
+            pass
         docker_prefix = self.docker()
         return [
             "-f",
-            self.command_path(docker_prefix, base),
-            "-f",
-            self.command_path(docker_prefix, override),
+            self.command_path(docker_prefix, runtime),
+            "--project-directory",
+            self.command_path(docker_prefix, self.traefik_dir),
         ]
 
     def install_traefik(self, repository, log=None):

@@ -741,34 +741,47 @@ class ProjectServiceTests(unittest.TestCase):
         (traefik / "docker-compose.yml").write_text(compose_text, encoding="utf-8")
         return ProjectService(self.settings, self.root, traefik_dir=traefik, runner=self.runner), traefik
 
-    def test_traefik_is_started_bound_to_loopback_without_touching_its_repository(self):
-        service, traefik = self.make_traefik_service("services:\n  traefik:\n    ports:\n      - 80:80\n")
+    def traefik_runtime_compose(self):
+        return (self.root / ".odoo_manager_runtime" / "traefik.compose.yml").read_text(encoding="utf-8")
 
-        with patch.object(service, "compose_version", return_value=(2, 29, 1)):
-            service.start_traefik(log=lambda _line: None)
+    def test_traefik_is_started_from_a_copy_bound_to_loopback_without_touching_its_repository(self):
+        service, traefik = self.make_traefik_service(
+            "services:\n  traefik:\n    image: traefik:3.6\n    ports:\n      - 80:80   # HTTP\n"
+            "    volumes:\n      - ./traefik.yml:/etc/traefik/traefik.yml:ro\n"
+        )
+        # Surcharge `ports: !override` des versions précédentes : remplacée par la copie.
+        legacy = self.root / ".odoo_manager_runtime" / "traefik-loopback.compose.yml"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("services: {}\n", encoding="utf-8")
+
+        service.start_traefik(log=lambda _line: None)
 
         command = next(command for command, _cwd in self.runner.streams if "up" in command)
-        override = self.root / ".odoo_manager_runtime" / "traefik-loopback.compose.yml"
-        self.assertEqual(command[-2:], ["up", "-d"])
-        self.assertIn(str(override), command)
-        self.assertIn(str(traefik / "docker-compose.yml"), command)
-        self.assertIn('ports: !override\n      - "127.0.0.1:80:80"', override.read_text(encoding="utf-8"))
+        runtime = self.root / ".odoo_manager_runtime" / "traefik.compose.yml"
+        self.assertEqual(["compose", "-f", str(runtime), "--project-directory", str(traefik), "up", "-d"], command[1:])
+        self.assertIn(
+            '    ports:\n      - "127.0.0.1:80:80"\n    volumes:\n      - ./traefik.yml:',
+            self.traefik_runtime_compose(),
+        )
+        self.assertIn("    image: traefik:3.6\n", self.traefik_runtime_compose())
+        self.assertFalse(legacy.exists())
+        # Aucune version de Docker Compose n'est exigée.
+        self.assertFalse(any("version" in command for command, _cwd, _timeout in self.runner.captures))
         self.assertEqual(["docker-compose.yml"], sorted(path.name for path in traefik.iterdir()))
 
-    def test_traefik_ports_are_left_unchanged_when_override_is_unsupported(self):
-        for version, compose_text in (
-            ((2, 20, 0), "services:\n  traefik:\n    image: traefik\n"),
-            ((2, 29, 1), "services:\n  proxy:\n    image: traefik\n"),
+    def test_traefik_ports_are_left_unchanged_when_they_cannot_be_read(self):
+        for compose_text in (
+            "services:\n  proxy:\n    image: traefik\n",
+            "services:\n  traefik:\n    ports:\n      - ${HTTP_PORT:-80}:80\n",
         ):
-            with self.subTest(version=version):
+            with self.subTest(compose_text=compose_text):
                 self.runner.streams.clear()
                 service, traefik = self.make_traefik_service(compose_text)
                 logs = []
-                with patch.object(service, "compose_version", return_value=version):
-                    service.start_traefik(log=logs.append)
+                service.start_traefik(log=logs.append)
                 command = next(command for command, _cwd in self.runner.streams if "up" in command)
                 self.assertNotIn("-f", command)
-                self.assertTrue(any("laissés tels quels" in line or "trop ancien" in line for line in logs))
+                self.assertTrue(any("laissés tels quels" in line for line in logs))
                 (traefik / "docker-compose.yml").unlink()
                 traefik.rmdir()
                 traefik.parent.rmdir()
@@ -788,12 +801,10 @@ class ProjectServiceTests(unittest.TestCase):
         logs = []
 
         self.assertEqual("http://dev.DEMO.localhost:8080/", service.project_url("DEMO"))
-        with patch.object(service, "compose_version", return_value=(2, 29, 1)):
-            service.start_traefik(log=logs.append)
+        service.start_traefik(log=logs.append)
 
-        override = self.root / ".odoo_manager_runtime" / "traefik-loopback.compose.yml"
-        self.assertIn('ports: !override\n      - "127.0.0.1:8080:80"', override.read_text(encoding="utf-8"))
-        self.assertNotIn("127.0.0.1:80:80", override.read_text(encoding="utf-8"))
+        self.assertIn('    ports:\n      - "127.0.0.1:8080:80"\n', self.traefik_runtime_compose())
+        self.assertNotIn("127.0.0.1:80:80", self.traefik_runtime_compose())
         self.assertTrue(any("port HTTP 8080 (port personnalisé)" in line for line in logs))
         self.assertEqual("http://dev.DEMO.localhost:8080/", service.project_url("DEMO"))
 
@@ -815,7 +826,7 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertEqual("http://dev.DEMO.localhost:8000/", service.project_url("DEMO"))
 
     def test_incompatible_traefik_holding_the_port_leaves_traefik_another_port(self):
-        service, traefik = self.make_traefik_service(
+        service, _traefik = self.make_traefik_service(
             "services:\n  traefik:\n    container_name: traefik\n    ports:\n      - 80:80\n"
         )
         self.runner.traefik_containers = [
@@ -824,11 +835,12 @@ class ProjectServiceTests(unittest.TestCase):
         self.runner.traefik_arguments = {"id-edge": '["--entrypoints.http.address=:80"]\t[]'}
         logs = []
 
-        with patch.object(service, "compose_version", return_value=(2, 29, 1)):
-            service.start_traefik(log=logs.append)
+        service.start_traefik(log=logs.append)
 
-        override = (self.root / ".odoo_manager_runtime" / "traefik-loopback.compose.yml").read_text(encoding="utf-8")
-        self.assertIn('"127.0.0.1:8080:80"  # à la place du port 80, déjà utilisé sur cette machine', override)
+        self.assertIn(
+            '"127.0.0.1:8080:80"  # à la place du port 80, déjà utilisé sur cette machine',
+            self.traefik_runtime_compose(),
+        )
         self.assertTrue(any("aucun entrypoint « web »" in line for line in logs))
         self.assertTrue(
             any(
@@ -854,9 +866,6 @@ class ProjectServiceTests(unittest.TestCase):
         )
         return service, traefik
 
-    def traefik_override(self):
-        return (self.root / ".odoo_manager_runtime" / "traefik-loopback.compose.yml").read_text(encoding="utf-8")
-
     def test_port_taken_by_another_service_is_replaced_by_a_free_one(self):
         # 8080 est pris lui aussi, 8081 par le tableau de bord de ce même compose.
         service, traefik = self.make_busy_port_service(
@@ -871,11 +880,10 @@ class ProjectServiceTests(unittest.TestCase):
         ]
         logs = []
 
-        with patch.object(service, "compose_version", return_value=(2, 29, 1)):
-            service.start_traefik(log=logs.append)
+        service.start_traefik(log=logs.append)
 
-        self.assertIn('"127.0.0.1:8082:80"  # à la place du port 80', self.traefik_override())
-        self.assertIn('"127.0.0.1:8081:8081"\n', self.traefik_override())
+        self.assertIn('"127.0.0.1:8082:80"  # à la place du port 80', self.traefik_runtime_compose())
+        self.assertIn('"127.0.0.1:8081:8081"\n', self.traefik_runtime_compose())
         self.assertIn(
             "Le port 80 de cette machine est déjà utilisé par le conteneur Docker nginx-legacy : "
             "Traefik utilise le port 8082 à la place.",
@@ -885,29 +893,42 @@ class ProjectServiceTests(unittest.TestCase):
         # Traefik arrêté, les adresses gardent le port de remplacement jusqu'au prochain démarrage.
         self.assertEqual(8082, service.traefik_http_port_from_config())
 
+    def test_port_set_by_hand_and_taken_too_is_replaced_without_docker_version_check(self):
+        # Poste où le compose avait été passé à "8080:80" sur conseil d'un ancien message, 8080 étant pris lui aussi.
+        service, _traefik = self.make_busy_port_service({80, 8080}, compose_ports='      - "8080:80"\n')
+        logs = []
+
+        service.start_traefik(log=logs.append)
+
+        self.assertIn('"127.0.0.1:8081:80"  # à la place du port 8080', self.traefik_runtime_compose())
+        self.assertIn(
+            "Le port 8080 de cette machine est déjà utilisé par un autre service : Traefik utilise le port 8081 à la place.",
+            logs,
+        )
+        self.assertFalse(any("version" in command for command, _cwd, _timeout in self.runner.captures))
+
     def test_replacement_port_is_kept_while_the_configured_port_stays_taken(self):
         busy = {80}
         service, _traefik = self.make_busy_port_service(busy)
-        override = self.root / ".odoo_manager_runtime" / "traefik-loopback.compose.yml"
-        override.parent.mkdir(parents=True)
-        override.write_text(
-            "services:\n  traefik:\n    ports: !override\n"
+        runtime = self.root / ".odoo_manager_runtime" / "traefik.compose.yml"
+        runtime.parent.mkdir(parents=True)
+        runtime.write_text(
+            "services:\n  traefik:\n    ports:\n"
             '      - "127.0.0.1:8085:80"  # à la place du port 80, déjà utilisé sur cette machine\n',
             encoding="utf-8",
         )
         logs = []
 
-        with patch.object(service, "compose_version", return_value=(2, 29, 1)):
-            service.start_traefik(log=logs.append)
-            self.assertIn('"127.0.0.1:8085:80"  # à la place du port 80', self.traefik_override())
-            self.assertTrue(any("Traefik garde le port 8085" in line for line in logs))
+        service.start_traefik(log=logs.append)
+        self.assertIn('"127.0.0.1:8085:80"  # à la place du port 80', self.traefik_runtime_compose())
+        self.assertTrue(any("Traefik garde le port 8085" in line for line in logs))
 
-            # Le port 80 libéré redevient celui de Traefik.
-            busy.clear()
-            service.start_traefik(log=logs.append)
+        # Le port 80 libéré redevient celui de Traefik.
+        busy.clear()
+        service.start_traefik(log=logs.append)
 
-        self.assertIn('      - "127.0.0.1:80:80"\n', self.traefik_override())
-        self.assertNotIn("à la place", self.traefik_override())
+        self.assertIn('      - "127.0.0.1:80:80"\n', self.traefik_runtime_compose())
+        self.assertNotIn("à la place du port", self.traefik_runtime_compose())
         self.assertEqual(80, service.traefik_http_port_from_config())
 
     def test_running_traefik_keeps_its_replacement_port(self):
@@ -915,22 +936,9 @@ class ProjectServiceTests(unittest.TestCase):
         service, traefik = self.make_busy_port_service({80, 8080})
         self.runner.traefik_containers = [traefik_container(ports="127.0.0.1:8080->80/tcp", working_dir=str(traefik))]
 
-        with patch.object(service, "compose_version", return_value=(2, 29, 1)):
-            service.start_traefik(log=lambda _line: None)
+        service.start_traefik(log=lambda _line: None)
 
-        self.assertIn('"127.0.0.1:8080:80"  # à la place du port 80', self.traefik_override())
-
-    def test_old_compose_cannot_move_traefik_off_a_taken_port(self):
-        service, _traefik = self.make_busy_port_service({80})
-        self.runner.published_port_owners = {"80": "nginx-legacy"}
-
-        with patch.object(service, "compose_version", return_value=(2, 20, 0)):
-            with self.assertRaises(RuntimeError) as raised:
-                service.start_traefik(log=lambda _line: None)
-
-        self.assertIn("déjà utilisé par le conteneur Docker nginx-legacy", str(raised.exception))
-        self.assertIn("mets Docker à jour", str(raised.exception))
-        self.assertFalse(self.runner.streams)
+        self.assertIn('"127.0.0.1:8080:80"  # à la place du port 80', self.traefik_runtime_compose())
 
     def test_foreign_stopped_container_with_traefik_name_is_reported_before_compose(self):
         service, traefik = self.make_traefik_service(
