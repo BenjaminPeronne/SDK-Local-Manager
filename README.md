@@ -354,6 +354,12 @@ Une restauration faite par Odoo et coupée en route (version précédente du ges
 
 Quand Odoo répond en erreur 500 pendant son chargement, le journal du lancement en cours est lu : un paquet Python manquant (`No module named 'openai'`) est installé dans le conteneur, noté dans `init/requirements_pip.txt`, puis le serveur est relancé. Une base qui échoue trois fois à se charger pour une autre raison arrête l'attente avec l'erreur d'Odoo, au lieu d'attendre dix minutes.
 
+Traefik 3.6 peut cesser de suivre les démarrages de conteneurs sans rien journaliser : la route de tout projet démarré ensuite répond `404 page not found`, configuration correcte ou non. Quand la route d'un projet reste en 404 sans cause trouvée (labels, réseau, port, middlewares), le gestionnaire redémarre Traefik une fois, ce qui lui fait relire tous les conteneurs.
+
+### Supprimer une base
+
+La base est supprimée directement dans PostgreSQL (connexions coupées, `DROP DATABASE`), puis son filestore, par le conteneur Odoo ou sur le disque si le projet est arrêté. Le gestionnaire de bases d'Odoo n'intervient plus : il exigeait Odoo joignable via Traefik et capable d'ouvrir la base, si bien qu'une base cassée ou un Traefik qui ne voit plus le projet empêchaient la suppression. Le master password n'est plus demandé.
+
 ### Données d'un module déjà présentes dans la base
 
 Une mise à jour (`-u`) échoue quand une nouvelle version d'un module apporte des données qu'un utilisateur a déjà créées à la main, sans identifiant XML : Odoo tente de les créer une seconde fois (`duplicate key value violates unique constraint "res_country_state_name_code_uniq"`, cantons suisses ajoutés à `base` en 16.0). Le gestionnaire lit alors dans le journal le fichier en cours de chargement (`loading base/data/res.country.state.csv`) et la clé en double, relit ce fichier (CSV ou XML) dans le conteneur, rapproche chacune de ses lignes de l'enregistrement existant de même clé et lui attribue l'identifiant XML manquant, comme le fait la migration d'Odoo, puis relance la mise à jour (`odoo_manager_core/data_conflicts.py`, huit fichiers au plus par action). Les enregistrements déjà rattachés au module ne sont pas touchés.

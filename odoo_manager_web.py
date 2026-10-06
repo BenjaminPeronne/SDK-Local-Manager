@@ -2949,7 +2949,7 @@ JOB_CANCEL_POLICIES = {
     ),
     "drop_database_job": (
         True,
-        "Possible tant que la suppression n'a pas été envoyée à Odoo ; ensuite elle va à son terme.",
+        "Possible tant que la suppression n'a pas commencé dans PostgreSQL ; ensuite elle va à son terme.",
     ),
     "delete_project_job": (
         True,
@@ -4042,56 +4042,25 @@ def duplicate_database_job(job, project, db_name, new_name, master_pwd, neutrali
                 job.add(f"Erreur pendant le rétablissement du serveur Odoo: {exc}")
 
 
-def drop_database_job(job, project, db_name, master_pwd):
+def drop_database_job(job, project, db_name, master_pwd=""):
+    """Supprime une base et son filestore directement dans PostgreSQL.
+
+    Le gestionnaire de bases d'Odoo exigeait Odoo démarré, joignable via Traefik et capable d'ouvrir
+    la base : une base cassée (restauration interrompue, module manquant) ou un Traefik qui ne voit
+    plus le projet (HTTP 404) la rendaient impossible à supprimer. Le master password, protection
+    de ce gestionnaire de bases, n'a plus d'usage ; il reste accepté pour les anciennes interfaces.
+    """
     project, db_name = existing_odoo_database(project, db_name)
-    master_pwd = validate_required_text(master_pwd, "Master password")
-
-    url = urllib.parse.urljoin(project_url(project), "web/database/drop")
     job.add(f"Suppression de la base {db_name} dans {project}")
-    job.add(f"Appel Odoo: {url}")
-    with job_control.protected(f"suppression de la base {db_name} par Odoo", irreversible=True):
-        request_error = None
-        try:
-            status, content = post_form_no_redirect(url, {"master_pwd": master_pwd, "name": db_name})
-        except RuntimeError as exc:
-            # Odoo répond parfois HTTP 500 alors que la base est bien supprimée : la requête rouvre
-            # le registre de la base qui vient de disparaître (session, cookies UTM...). Seul
-            # l'état réel de PostgreSQL dit si la suppression a eu lieu.
-            request_error = exc
-            job.add(f"Odoo a répondu par une erreur : {exc}")
-            job.add("Vérification de la suppression dans PostgreSQL...")
-        else:
-            job.add(f"Réponse Odoo: HTTP {status}")
-            odoo_error = extract_odoo_page_error(content) if status == 200 else ""
-            if odoo_error:
-                raise RuntimeError(f"Odoo a refusé la suppression de la base : {odoo_error}")
-
-        for _ in range(0, 32, 2):
-            if db_name not in set(list_databases_for(project)):
-                invalidate_overview_databases(project)
-                clear_project_module_cache(project)
-                DATABASE_RETENTION.forget(str(WORKSPACE), project, db_name)
-                job.add(f"Base supprimée (filestore inclus) : {db_name}")
-                return
-            job_control.sleep(2)
-        if request_error is not None and odoo_could_not_serve(request_error):
-            # Base cassée (restauration interrompue, module manquant) : Odoo échoue à l'ouvrir pour
-            # la supprimer, alors que c'est justement ce qu'il faut faire. Un refus d'Odoo
-            # (master password erroné) n'arrive pas ici.
-            job.add("Odoo n'arrive pas à ouvrir cette base pour la supprimer : suppression directe dans PostgreSQL...")
-            drop_partial_database(job, project, db_name)
-            DATABASE_RETENTION.forget(str(WORKSPACE), project, db_name)
-            job.add(f"Base supprimée (filestore inclus) : {db_name}")
-            return
-    if request_error is not None:
-        raise request_error
-    raise RuntimeError("La suppression a été envoyée, mais la base est toujours présente dans PostgreSQL.")
-
-
-def odoo_could_not_serve(error):
-    """Odoo injoignable ou en erreur interne (5xx), par opposition à un refus de la demande (4xx)."""
-    status = getattr(error, "status", None)
-    return status is None or status >= 500
+    with job_control.protected(f"suppression de la base {db_name}", irreversible=True):
+        drop_partial_database(job, project, db_name)
+    DATABASE_RETENTION.forget(str(WORKSPACE), project, db_name)
+    filestore = project_filestore_path(project, db_name)
+    if safe_path_exists(filestore):
+        # Projet arrêté : le conteneur Odoo n'a pas pu retirer le filestore, le dossier est supprimé ici.
+        shutil.rmtree(filestore, ignore_errors=True)
+    if safe_path_exists(filestore):
+        job.add(f"Attention : le filestore n'a pas pu être supprimé, retire-le à la main : {filestore}")
 
 
 def drop_partial_database(job, project, db_name):

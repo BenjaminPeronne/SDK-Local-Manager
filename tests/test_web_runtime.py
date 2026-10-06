@@ -2720,47 +2720,36 @@ class DatabaseNeutralizationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "n'existe plus"):
             web.neutralize_database_job(job, "DEMO", "demo")
 
-    @patch("odoo_manager_web.time.sleep")
-    @patch("odoo_manager_web.clear_project_module_cache")
-    @patch("odoo_manager_web.post_form_no_redirect", return_value=(303, ""))
-    @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
-    @patch("odoo_manager_web.list_databases_for", side_effect=[["postgres", "demo"], ["postgres"]])
+    @patch("odoo_manager_web.post_form_no_redirect")
+    @patch("odoo_manager_web.drop_partial_database")
+    @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
     @patch("odoo_manager_web.validate_project", return_value="DEMO")
-    def test_drop_database_posts_to_odoo_and_waits_for_removal(
-        self,
-        _validate_project,
-        _list_databases,
-        _project_url,
-        post_form,
-        clear_cache,
-        _sleep,
+    def test_drop_database_goes_straight_to_postgres_without_odoo(
+        self, _validate_project, _list_databases, drop_partial, post_form
+    ):
+        # Base cassée ou Traefik qui ne voit plus le projet (HTTP 404) : la suppression ne dépend plus d'Odoo.
+        job = self.LogJob()
+        with tempfile.TemporaryDirectory() as temporary, patch.object(web, "WORKSPACE", Path(temporary)):
+            web.drop_database_job(job, "DEMO", "demo")
+
+        drop_partial.assert_called_once_with(job, "DEMO", "demo")
+        post_form.assert_not_called()
+
+    @patch("odoo_manager_web.drop_partial_database")
+    @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
+    @patch("odoo_manager_web.validate_project", return_value="DEMO")
+    def test_drop_database_removes_the_filestore_left_by_a_stopped_project(
+        self, _validate_project, _list_databases, _drop_partial
     ):
         job = self.LogJob()
+        with tempfile.TemporaryDirectory() as temporary, patch.object(web, "WORKSPACE", Path(temporary)):
+            filestore = Path(temporary) / "DEMO" / "odoo_data" / "filestore" / "demo" / "ab"
+            filestore.mkdir(parents=True)
+            (filestore / "abcdef").write_bytes(b"attachment")
 
-        web.drop_database_job(job, "DEMO", "demo", "secret")
+            web.drop_database_job(job, "DEMO", "demo", "ancien master password ignoré")
 
-        post_form.assert_called_once_with(
-            "http://demo.localhost/web/database/drop",
-            {"master_pwd": "secret", "name": "demo"},
-        )
-        clear_cache.assert_called_once_with("DEMO")
-        self.assertIn("Base supprimée (filestore inclus) : demo", job.lines)
-
-    @patch("odoo_manager_web.time.sleep")
-    @patch("odoo_manager_web.clear_project_module_cache")
-    @patch("odoo_manager_web.post_form_no_redirect", side_effect=RuntimeError("Odoo a retourne HTTP 500: boom"))
-    @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
-    @patch("odoo_manager_web.list_databases_for", side_effect=[["postgres", "demo"], ["postgres"]])
-    @patch("odoo_manager_web.validate_project", return_value="DEMO")
-    def test_drop_database_succeeds_when_odoo_errors_after_the_database_is_gone(
-        self, _validate_project, _list_databases, _project_url, _post_form, clear_cache, _sleep
-    ):
-        job = self.LogJob()
-
-        web.drop_database_job(job, "DEMO", "demo", "secret")
-
-        clear_cache.assert_called_once_with("DEMO")
-        self.assertIn("Base supprimée (filestore inclus) : demo", job.lines)
+            self.assertFalse(filestore.parent.exists())
 
     def test_project_creation_formats_the_name_and_refuses_a_homonym_in_another_case(self):
         with (
@@ -2774,43 +2763,6 @@ class DatabaseNeutralizationTests(unittest.TestCase):
                 web.create_project_action({"name": "akaaz", "version": "19.0"})
         with web.JOBS_LOCK:
             web.JOBS.pop(job.id, None)
-
-    @patch("odoo_manager_web.job_control.sleep")
-    @patch("odoo_manager_web.drop_partial_database")
-    @patch(
-        "odoo_manager_web.post_form_no_redirect",
-        side_effect=web.OdooHttpError("Odoo a refusé la demande (code 500) : boom", 500),
-    )
-    @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
-    @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
-    @patch("odoo_manager_web.validate_project", return_value="DEMO")
-    def test_drop_database_falls_back_to_postgres_when_odoo_cannot_open_the_base(
-        self, _validate_project, _list_databases, _project_url, _post_form, drop_partial, _sleep
-    ):
-        # Base cassée (restauration interrompue) : Odoo échoue à l'ouvrir, y compris pour la supprimer.
-        job = self.LogJob()
-
-        web.drop_database_job(job, "DEMO", "demo", "secret")
-
-        drop_partial.assert_called_once_with(job, "DEMO", "demo")
-        self.assertIn("Base supprimée (filestore inclus) : demo", job.lines)
-
-    @patch("odoo_manager_web.job_control.sleep")
-    @patch("odoo_manager_web.drop_partial_database")
-    @patch(
-        "odoo_manager_web.post_form_no_redirect",
-        side_effect=web.OdooHttpError("Odoo a refusé la demande (code 422) : Access Denied", 422),
-    )
-    @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
-    @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
-    @patch("odoo_manager_web.validate_project", return_value="DEMO")
-    def test_drop_database_refused_by_odoo_is_not_forced(
-        self, _validate_project, _list_databases, _project_url, _post_form, drop_partial, _sleep
-    ):
-        with self.assertRaisesRegex(RuntimeError, "Access Denied"):
-            web.drop_database_job(self.LogJob(), "DEMO", "demo", "wrong")
-
-        drop_partial.assert_not_called()
 
     @patch("odoo_manager_web.job_control.sleep")
     @patch("odoo_manager_web.clear_project_module_cache")
@@ -2828,19 +2780,6 @@ class DatabaseNeutralizationTests(unittest.TestCase):
 
         web.create_database_job(Mock(), "DEMO", "test_v20", "secret", "admin", "admin", "fr_FR", "FR", True)
         self.assertEqual(post_form.call_args.args[1]["demo"], "on")
-
-    @patch(
-        "odoo_manager_web.post_form_no_redirect",
-        return_value=(200, '<div class="alert alert-danger">Access Denied</div>'),
-    )
-    @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
-    @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
-    @patch("odoo_manager_web.validate_project", return_value="DEMO")
-    def test_drop_database_reports_odoo_refusal(self, _validate_project, _list_databases, _project_url, _post_form):
-        job = self.LogJob()
-
-        with self.assertRaisesRegex(RuntimeError, "Access Denied"):
-            web.drop_database_job(job, "DEMO", "demo", "wrong")
 
     @patch("odoo_manager_web.job_control.sleep")
     @patch("odoo_manager_web.clear_project_module_cache")

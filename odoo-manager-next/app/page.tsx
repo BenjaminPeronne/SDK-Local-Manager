@@ -2126,12 +2126,8 @@ export default function Home() {
         project={selectedProject}
         database={selectedDb}
         disabled={!canUseDb || loading}
-        onSubmit={async (masterPwd) => {
-          const job = await createJob("drop_database", {
-            project: selectedProject?.name,
-            db: selectedDb,
-            master_pwd: masterPwd,
-          });
+        onSubmit={async () => {
+          const job = await createJob("drop_database", { project: selectedProject?.name, db: selectedDb });
           if (job && selectedProject)
             droppedDatabase.current = { jobId: job.id, project: selectedProject.name, db: selectedDb };
           if (job) setDropDbOpen(false);
