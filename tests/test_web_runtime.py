@@ -2443,6 +2443,24 @@ class DiagnosticModuleTests(unittest.TestCase):
         )
         self.assertEqual([], diagnostics["databases"][1]["issues"], "l'échec de lecture reste au niveau du projet")
 
+    def test_database_list_flags_cut_restores_but_not_the_one_being_loaded(self):
+        answers = {"aca_05102026": "16.0.1.3|0", "aca_ok": "16.0.1.3|4812", "loading": "16.0.1.3|0", "other": ""}
+
+        def capture(command, timeout=8):
+            return 0, answers[command[command.index("-d") + 1]]
+
+        with (
+            patch.object(web, "container_status", return_value="running"),
+            patch.object(web, "run_capture", side_effect=capture),
+            patch.object(web, "databases_being_restored", return_value={"loading"}),
+        ):
+            versions, incomplete = web.database_base_versions(
+                "DEMO", ["postgres", "aca_05102026", "aca_ok", "loading", "other"]
+            )
+
+        self.assertEqual(["aca_05102026"], incomplete)
+        self.assertEqual({"aca_05102026", "aca_ok", "loading"}, set(versions))
+
     def test_a_database_whose_restore_was_cut_is_reported_as_incomplete(self):
         def query(project, db_name, sql, timeout=18):
             if sql == web.RESTORE_COMPLETENESS_SQL:
@@ -2745,17 +2763,41 @@ class DatabaseNeutralizationTests(unittest.TestCase):
         self.assertIn("Base supprimée (filestore inclus) : demo", job.lines)
 
     @patch("odoo_manager_web.job_control.sleep")
-    @patch("odoo_manager_web.post_form_no_redirect", side_effect=RuntimeError("Odoo a retourne HTTP 500: boom"))
+    @patch("odoo_manager_web.drop_partial_database")
+    @patch(
+        "odoo_manager_web.post_form_no_redirect",
+        side_effect=web.OdooHttpError("Odoo a refusé la demande (code 500) : boom", 500),
+    )
     @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
     @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
     @patch("odoo_manager_web.validate_project", return_value="DEMO")
-    def test_drop_database_reports_odoo_error_when_the_database_is_still_there(
-        self, _validate_project, _list_databases, _project_url, _post_form, _sleep
+    def test_drop_database_falls_back_to_postgres_when_odoo_cannot_open_the_base(
+        self, _validate_project, _list_databases, _project_url, _post_form, drop_partial, _sleep
     ):
+        # Base cassée (restauration interrompue) : Odoo échoue à l'ouvrir, y compris pour la supprimer.
         job = self.LogJob()
 
-        with self.assertRaisesRegex(RuntimeError, "HTTP 500"):
-            web.drop_database_job(job, "DEMO", "demo", "secret")
+        web.drop_database_job(job, "DEMO", "demo", "secret")
+
+        drop_partial.assert_called_once_with(job, "DEMO", "demo")
+        self.assertIn("Base supprimée (filestore inclus) : demo", job.lines)
+
+    @patch("odoo_manager_web.job_control.sleep")
+    @patch("odoo_manager_web.drop_partial_database")
+    @patch(
+        "odoo_manager_web.post_form_no_redirect",
+        side_effect=web.OdooHttpError("Odoo a refusé la demande (code 422) : Access Denied", 422),
+    )
+    @patch("odoo_manager_web.project_url", return_value="http://demo.localhost/")
+    @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])
+    @patch("odoo_manager_web.validate_project", return_value="DEMO")
+    def test_drop_database_refused_by_odoo_is_not_forced(
+        self, _validate_project, _list_databases, _project_url, _post_form, drop_partial, _sleep
+    ):
+        with self.assertRaisesRegex(RuntimeError, "Access Denied"):
+            web.drop_database_job(self.LogJob(), "DEMO", "demo", "wrong")
+
+        drop_partial.assert_not_called()
 
     @patch("odoo_manager_web.job_control.sleep")
     @patch("odoo_manager_web.clear_project_module_cache")

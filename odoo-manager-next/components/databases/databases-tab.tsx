@@ -1,6 +1,6 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 import { DropdownMenu } from "@radix-ui/themes";
 import {
   CalendarClock,
@@ -19,10 +19,12 @@ import {
   Terminal,
   Timer,
   Trash2,
+  TriangleAlert,
   Upload,
   UserCheck,
 } from "lucide-react";
-import { statusVariant } from "@/lib/format";
+import { api } from "@/lib/api";
+import { formatNameList, statusVariant } from "@/lib/format";
 import { deletionLabel, deletionMoment, type RetentionTone } from "@/lib/retention";
 import type { DatabaseMenuAction, DependencyReport, PendingDatabaseAction, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -87,6 +89,32 @@ export function DatabasesTab({
   setPostgresDetailsOpen,
   setRestoreDbOpen,
 }: DatabasesTabProps) {
+  // Bases dont la restauration s'est arrêtée avant la fin : relu à l'ouverture du projet et quand
+  // la liste des bases change (suppression, nouvelle restauration).
+  const [incompleteDatabases, setIncompleteDatabases] = useState<string[]>([]);
+  const projectName = selectedProject?.name;
+  const postgresRunning = selectedProject?.postgres_status === "running";
+  const databasesKey = odooDatabases.join(",");
+  useEffect(() => {
+    if (!projectName || !postgresRunning || !databasesKey) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const payload = await api<{ incomplete?: string[] }>(
+          `/api/projects/${encodeURIComponent(projectName)}/database-versions`,
+        );
+        if (!cancelled) setIncompleteDatabases(payload.incomplete ?? []);
+      } catch {
+        if (!cancelled) setIncompleteDatabases([]);
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [projectName, postgresRunning, databasesKey]);
+  const incomplete = incompleteDatabases.filter((db) => odooDatabases.includes(db));
+
   function runDatabaseAction(db: string, action: DatabaseMenuAction) {
     if (db !== selectedDb) {
       // Les actions lisent la base sélectionnée : on attend que la sélection soit appliquée.
@@ -117,6 +145,22 @@ export function DatabasesTab({
 
   return (
     <TabsContent value="bases">
+      {incomplete.length > 0 && (
+        <div className="mb-5">
+          <Notice
+            tone="danger"
+            icon={TriangleAlert}
+            title={
+              incomplete.length > 1
+                ? `Bases incomplètes : ${formatNameList(incomplete)}`
+                : `Base incomplète : ${incomplete[0]}`
+            }
+          >
+            Sa restauration s’est arrêtée avant la fin : il lui manque une partie de sa structure, elle n’est pas fiable
+            même si Odoo l’ouvre. Supprime-la (menu « ⋯ » de la base), puis restaure de nouveau la sauvegarde.
+          </Notice>
+        </div>
+      )}
       {dependencyNotice && <div className="mb-5">{dependencyNotice}</div>}
       <div className="space-y-5">
         <RefinedSectionHeader
@@ -176,6 +220,12 @@ export function DatabasesTab({
                     >
                       {db === selectedDb ? "Base de travail" : selectedProject?.database_versions?.[db] || "Base Odoo"}
                     </div>
+                    {incomplete.includes(db) && (
+                      <Badge variant="danger" className="mt-2 mr-2 gap-1">
+                        <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+                        Incomplète
+                      </Badge>
+                    )}
                     {deletion && expiresAt !== null && (
                       <Badge
                         variant={DELETION_BADGE_VARIANTS[deletion.tone]}

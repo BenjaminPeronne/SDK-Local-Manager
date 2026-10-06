@@ -1663,23 +1663,60 @@ def open_postgresql_console(project, db_name):
     return {"ok": True, "message": result.message, "database": db_name}
 
 
+# Version de base et nombre de clés étrangères en une seule requête par base.
+DATABASE_STATE_SQL = (
+    "select coalesce((select latest_version from ir_module_module where name='base' limit 1), '') || '|' || "
+    "(select count(*) from pg_constraint c join pg_namespace n on n.oid = c.connamespace "
+    "where c.contype = 'f' and n.nspname = 'public');"
+)
+
+
+def databases_being_restored(project):
+    """Bases en cours de chargement par une restauration : leurs clés étrangères arrivent à la fin."""
+    with JOBS_LOCK:
+        return {
+            str(job.args[3])
+            for job in JOBS.values()
+            if job.status in JOB_UNFINISHED_STATUSES
+            and job.target is restore_database_job
+            and len(job.args) > 3
+            and job.args[0] == project
+        }
+
+
 def database_base_versions(project, databases):
+    """(version de base par base, bases dont la restauration s'est arrêtée avant la fin)."""
     versions = {}
+    incomplete = []
     if container_status(f"postgresql-{project}") != "running":
-        return versions
+        return versions, incomplete
+    restoring = databases_being_restored(project)
     for db_name in databases:
         if db_name == "postgres":
             continue
-        query = "select latest_version from ir_module_module where name='base' limit 1;"
         code, output = run_capture(
             docker_command(
-                SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-d", db_name, "-Atc", query
+                SETTINGS,
+                "exec",
+                f"postgresql-{project}",
+                "psql",
+                "-U",
+                "postgres",
+                "-d",
+                db_name,
+                "-Atc",
+                DATABASE_STATE_SQL,
             ),
             timeout=8,
         )
-        if code == 0 and output.strip():
-            versions[db_name] = output.strip().splitlines()[0]
-    return versions
+        lines = output.strip().splitlines() if code == 0 else []
+        version, _separator, foreign_keys = lines[0].partition("|") if lines else ("", "", "")
+        if version:
+            versions[db_name] = version
+            # pg_dump écrit les clés étrangères en dernier : une base Odoo sans aucune a été coupée en route.
+            if foreign_keys == "0" and db_name not in restoring:
+                incomplete.append(db_name)
+    return versions, incomplete
 
 
 WSL_MODULE_METADATA = {}
@@ -3599,6 +3636,14 @@ def post_form_no_redirect(url, data, timeout=240):
         return send_form_no_redirect(connection, target, host_header, body)
 
 
+class OdooHttpError(RuntimeError):
+    """Réponse d'erreur d'Odoo : `status` distingue un refus (4xx) d'une erreur interne (5xx)."""
+
+    def __init__(self, message, status):
+        super().__init__(message)
+        self.status = status
+
+
 def send_form_no_redirect(connection, target, host_header, body):
     try:
         connection.request(
@@ -3616,11 +3661,13 @@ def send_form_no_redirect(connection, target, host_header, body):
             # l'extraire, seul l'en-tête HTML de la page remontait.
             odoo_error = extract_odoo_page_error(content)
             if odoo_error:
-                raise RuntimeError(f"Odoo a refusé la demande (code {response.status}) : {odoo_error}")
+                raise OdooHttpError(
+                    f"Odoo a refusé la demande (code {response.status}) : {odoo_error}", response.status
+                )
             # Le HTML brut de la page n'aide personne : seul son texte, abrégé, est gardé.
             page_text = " ".join(re.sub(r"<[^>]+>", " ", content).split())[:300]
             detail = f" : {page_text}" if page_text else "."
-            raise RuntimeError(f"Odoo a refusé la demande (code {response.status}){detail}")
+            raise OdooHttpError(f"Odoo a refusé la demande (code {response.status}){detail}", response.status)
         return response.status, response.read(131072).decode("utf-8", errors="replace")
     except (OSError, http.client.HTTPException) as exc:
         raise RuntimeError(f"Odoo ne répond pas sur {host_header} : {exc}") from exc
@@ -4024,9 +4071,24 @@ def drop_database_job(job, project, db_name, master_pwd):
                 job.add(f"Base supprimée (filestore inclus) : {db_name}")
                 return
             job_control.sleep(2)
+        if request_error is not None and odoo_could_not_serve(request_error):
+            # Base cassée (restauration interrompue, module manquant) : Odoo échoue à l'ouvrir pour
+            # la supprimer, alors que c'est justement ce qu'il faut faire. Un refus d'Odoo
+            # (master password erroné) n'arrive pas ici.
+            job.add("Odoo n'arrive pas à ouvrir cette base pour la supprimer : suppression directe dans PostgreSQL...")
+            drop_partial_database(job, project, db_name)
+            DATABASE_RETENTION.forget(str(WORKSPACE), project, db_name)
+            job.add(f"Base supprimée (filestore inclus) : {db_name}")
+            return
     if request_error is not None:
         raise request_error
     raise RuntimeError("La suppression a été envoyée, mais la base est toujours présente dans PostgreSQL.")
+
+
+def odoo_could_not_serve(error):
+    """Odoo injoignable ou en erreur interne (5xx), par opposition à un refus de la demande (4xx)."""
+    status = getattr(error, "status", None)
+    return status is None or status >= 500
 
 
 def drop_partial_database(job, project, db_name):
@@ -6748,7 +6810,8 @@ def project_databases_payload(request):
 
 def project_database_versions_payload(request):
     project = validate_project(request.param("project"))
-    return {"versions": database_base_versions(project, list_databases_for(project))}
+    versions, incomplete = database_base_versions(project, list_databases_for(project))
+    return {"versions": versions, "incomplete": incomplete}
 
 
 def project_logs_payload(request):
