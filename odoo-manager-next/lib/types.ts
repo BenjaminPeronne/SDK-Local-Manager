@@ -293,6 +293,27 @@ export type ModuleInfo = {
   removable?: boolean;
   removal_mode?: string;
   removal_note?: string;
+  /** Identifiant du dépôt d'origine (voir ModuleRepository), vide hors de tout dépôt connu. */
+  repository?: string;
+  /** Odoo charge une copie dans addons-store : mettre le dépôt à jour ne la change pas. */
+  repository_copy?: boolean;
+};
+
+/** Dépôt d'où viennent des modules du projet. */
+export type ModuleRepository = {
+  id: string;
+  name: string;
+  path: string;
+  /** Odoo et Odoo Enterprise, affichés après les dépôts propres au projet. */
+  standard: boolean;
+  /** git : clone ; sdk : téléchargé depuis la plateforme SDK (info.sdk) ; import : copie importée ; odoo : code d'Odoo sans dépôt. */
+  source: "git" | "sdk" | "import" | "odoo";
+  branch: string;
+  tag: string;
+  commit: string;
+  remote: string;
+  remote_label: string;
+  imported_at?: string;
 };
 
 export type SocleApp = {

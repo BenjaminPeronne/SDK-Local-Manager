@@ -7,12 +7,35 @@ import type { ModuleInfo } from "@/lib/types";
 
 export const MODULES_PER_PAGE = 50;
 
-/** Recherche, filtres d'état et d'origine, et pagination de la liste des modules d'un projet. */
+/** Liste paginée, ou modules regroupés par dépôt d'origine. */
+export type ModuleView = "list" | "repository";
+const MODULE_VIEW_STORAGE_KEY = "sdk-local-manager.modules-view";
+
+function storedModuleView(): ModuleView {
+  if (typeof window === "undefined") return "list";
+  try {
+    return window.localStorage.getItem(MODULE_VIEW_STORAGE_KEY) === "repository" ? "repository" : "list";
+  } catch {
+    return "list";
+  }
+}
+
+/** Recherche, filtres d'état et d'origine, pagination et vue (liste ou par dépôt) des modules d'un projet. */
 export function useModuleFilters(modules: ModuleInfo[], projectName: string | undefined, database: string) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [origin, setOrigin] = useState("all");
   const [page, setPage] = useState(1);
+  const [view, setViewState] = useState<ModuleView>(storedModuleView);
+
+  function setView(next: ModuleView) {
+    setViewState(next);
+    try {
+      window.localStorage.setItem(MODULE_VIEW_STORAGE_KEY, next);
+    } catch {
+      // Préférence de confort : sans stockage, la vue choisie vaut jusqu'à la fermeture.
+    }
+  }
 
   const deferredSearch = useDeferredValue(search);
   const filtered = useMemo(() => {
@@ -60,6 +83,8 @@ export function useModuleFilters(modules: ModuleInfo[], projectName: string | un
     page,
     setPage,
     pageCount,
+    view,
+    setView,
     filtered,
     visible,
     active,

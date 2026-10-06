@@ -6,8 +6,9 @@ import {
   type ReactNode,
   type SetStateAction,
   useCallback,
+  useMemo,
 } from "react";
-import { DropdownMenu } from "@radix-ui/themes";
+import { DropdownMenu, SegmentedControl } from "@radix-ui/themes";
 import {
   Boxes,
   ChevronDown,
@@ -15,35 +16,29 @@ import {
   ChevronRight,
   CloudDownload,
   FileArchive,
-  Languages,
+  FolderGit2,
+  List,
   Loader2,
-  MoreHorizontal,
-  PackageX,
   PlusCircle,
   RefreshCcw,
   Search,
-  Trash2,
 } from "lucide-react";
-import { type ModuleFilters, MODULES_PER_PAGE } from "@/hooks/use-module-filters";
-import { compactWorkspacePath } from "@/lib/format";
-import { moduleOriginLabel, normalizedModuleOrigin } from "@/lib/modules";
-import type { Job, ManagerSettings, ModuleInfo, Overview, Project } from "@/lib/types";
+import { type ModuleFilters, type ModuleView, MODULES_PER_PAGE } from "@/hooks/use-module-filters";
+import { groupModulesByRepository } from "@/lib/module-repositories";
+import type { Job, ManagerSettings, ModuleInfo, ModuleRepository, Overview, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TabsContent } from "@/components/ui/tabs";
 import {
-  REFINED_IDENTIFIER,
   REFINED_LABEL,
   REFINED_MODULE_COLUMNS,
-  REFINED_ROW_TITLE,
   RefinedPanel,
   RefinedSectionHeader,
 } from "@/components/common/refined-layout";
-import { ModuleStateBadge } from "@/components/modules/module-badges";
+import { ModuleRepositoryGroups } from "@/components/modules/module-repository-groups";
+import { ModuleRow, type ModuleRowActions } from "@/components/modules/module-row";
 
 type ModulesTabProps = {
   canUseDb: boolean;
@@ -54,9 +49,11 @@ type ModulesTabProps = {
   loadingModules: boolean;
   moduleFilters: ModuleFilters;
   modules: ModuleInfo[];
+  moduleRepositories: ModuleRepository[];
   moduleSelectionBlock: ReactNode;
   odooDatabases: string[];
   openRepositoryImport: () => void;
+  openUrl: (url?: string) => Promise<void>;
   openSocleDialog: () => void;
   openZipImport: () => void;
   overview: Overview | null;
@@ -85,9 +82,11 @@ export function ModulesTab({
   loadingModules,
   moduleFilters,
   modules,
+  moduleRepositories,
   moduleSelectionBlock,
   odooDatabases,
   openRepositoryImport,
+  openUrl,
   openSocleDialog,
   openZipImport,
   overview,
@@ -128,6 +127,36 @@ export function ModulesTab({
       return next;
     });
   }, []);
+  const projectName = selectedProject?.name;
+  const rowActions = useMemo<ModuleRowActions>(
+    () => ({
+      canUseDb,
+      installModule: (name) =>
+        void createJob("install_module", { project: projectName, db: selectedDb, modules: name }),
+      updateModule: (name) => void createJob("update_module", { project: projectName, db: selectedDb, modules: name }),
+      requestDeleteCode,
+      requestTranslationReset,
+      requestUninstall,
+      toggleFromRow: toggleModuleFromRow,
+      toggleSelection: toggleModuleSelection,
+    }),
+    [
+      canUseDb,
+      createJob,
+      projectName,
+      requestDeleteCode,
+      requestTranslationReset,
+      requestUninstall,
+      selectedDb,
+      toggleModuleFromRow,
+      toggleModuleSelection,
+    ],
+  );
+  const repositoryView = moduleFilters.view === "repository";
+  const repositoryGroups = useMemo(
+    () => (repositoryView ? groupModulesByRepository(moduleFilters.filtered, moduleRepositories) : []),
+    [moduleFilters.filtered, moduleRepositories, repositoryView],
+  );
   // Filtres et sélection des modules : identiques en affichage classique et affiné.
   const moduleFiltersBlock = (
     <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_180px_210px_220px]">
@@ -175,7 +204,35 @@ export function ModulesTab({
       </Select>
     </div>
   );
-  const modulePaginationBlock = moduleFilters.filtered.length > 0 && (
+  const moduleViewBlock = (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <SegmentedControl.Root
+        size="1"
+        value={moduleFilters.view}
+        onValueChange={(value) => moduleFilters.setView(value as ModuleView)}
+        aria-label="Affichage des modules"
+      >
+        <SegmentedControl.Item value="list">
+          <span className="flex items-center gap-1.5">
+            <List className="h-3.5 w-3.5" aria-hidden="true" />
+            Liste
+          </span>
+        </SegmentedControl.Item>
+        <SegmentedControl.Item value="repository">
+          <span className="flex items-center gap-1.5">
+            <FolderGit2 className="h-3.5 w-3.5" aria-hidden="true" />
+            Par dépôt
+          </span>
+        </SegmentedControl.Item>
+      </SegmentedControl.Root>
+      {repositoryView && repositoryGroups.length > 0 && (
+        <span className="text-xs text-muted-foreground">
+          {repositoryGroups.filter((group) => group.repository).length} dépôt(s) · branche chargée affichée pour chacun
+        </span>
+      )}
+    </div>
+  );
+  const modulePaginationBlock = !repositoryView && moduleFilters.filtered.length > 0 && (
     <div className="flex flex-col gap-3 border-t bg-muted/30 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
       <span className="text-muted-foreground">
         {Math.min((moduleFilters.page - 1) * MODULES_PER_PAGE + 1, moduleFilters.filtered.length)}–
@@ -286,6 +343,7 @@ export function ModulesTab({
           }
         />
         {moduleFiltersBlock}
+        {moduleViewBlock}
         {moduleSelectionBlock}
         {/* overflow-clip arrondit les coins sans créer de conteneur de défilement, contrairement à
               overflow-hidden qui empêcherait l'en-tête de rester collé. L'en-tête reste donc un bandeau droit :
@@ -303,185 +361,37 @@ export function ModulesTab({
               <div className="text-right">Actions</div>
             </div>
           </div>
-          <div className="min-w-0">
-            {moduleFilters.visible.length
-              ? moduleFilters.visible.map((module) => {
-                  const sourcePath = module.source_path || module.path;
-                  const linkPath = module.link_path || (module.path_kind?.startsWith("lien") ? module.path : "");
-                  const displaySourcePath = compactWorkspacePath(sourcePath, overview?.workspace);
-                  const displayLinkPath = compactWorkspacePath(linkPath, overview?.workspace);
-                  const samePaths = Boolean(linkPath && sourcePath && linkPath === sourcePath);
-                  const origin = normalizedModuleOrigin(module.origin, sourcePath);
-                  const moduleTitle = module.title || module.name;
-                  const showTechnicalName = moduleTitle !== module.name;
-                  const moduleSelected = selectedModules.has(module.name);
-                  return (
-                    <div
+          {repositoryView ? (
+            repositoryGroups.length ? (
+              <ModuleRepositoryGroups
+                groups={repositoryGroups}
+                openUrl={openUrl}
+                rowActions={rowActions}
+                searchActive={moduleFilters.search.trim() !== ""}
+                selectedModules={selectedModules}
+                setSelectedModules={setSelectedModules}
+                showLocations={showModuleLocations}
+                workspace={overview?.workspace}
+              />
+            ) : (
+              moduleEmptyState
+            )
+          ) : (
+            <div className="min-w-0">
+              {moduleFilters.visible.length
+                ? moduleFilters.visible.map((module) => (
+                    <ModuleRow
                       key={module.name}
-                      className={cn(
-                        "grid min-w-0 cursor-pointer gap-3 border-t p-3 transition-colors first:border-t-0 xl:items-center",
-                        REFINED_MODULE_COLUMNS,
-                        moduleSelected ? "bg-selected" : "hover:bg-hover",
-                      )}
-                      onClick={(event) => toggleModuleFromRow(event, module.name)}
-                    >
-                      <label className="flex min-w-0 cursor-pointer items-start gap-3 rounded-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
-                        <Checkbox
-                          className="mt-1"
-                          aria-label={`Sélectionner ${module.name}`}
-                          checked={moduleSelected}
-                          onCheckedChange={(checked) => toggleModuleSelection(module.name, checked === true)}
-                        />
-                        <span className="min-w-0">
-                          <span
-                            className={cn(
-                              "block",
-                              showTechnicalName
-                                ? cn("break-words", REFINED_ROW_TITLE)
-                                : cn("break-all", REFINED_IDENTIFIER),
-                            )}
-                          >
-                            {moduleTitle}
-                            {module.application && (
-                              <Badge variant="outline" className="ml-2 align-middle">
-                                Application
-                              </Badge>
-                            )}
-                          </span>
-                          {showTechnicalName && (
-                            <span className="mt-0.5 block break-all font-mono text-xs text-muted-foreground">
-                              {module.name}
-                            </span>
-                          )}
-                          {showModuleLocations && (
-                            <span className="mt-1.5 block space-y-0.5 text-xs">
-                              {module.path_kind && (
-                                <span className="block text-muted-foreground">{module.path_kind}</span>
-                              )}
-                              <span
-                                className="block truncate font-mono text-teal-700 dark:text-teal-300"
-                                title={sourcePath}
-                              >
-                                {displaySourcePath || "-"}
-                              </span>
-                              {displayLinkPath && !samePaths && (
-                                <span
-                                  className="block truncate font-mono text-blue-700 dark:text-blue-300"
-                                  title={linkPath}
-                                >
-                                  {displayLinkPath}
-                                </span>
-                              )}
-                            </span>
-                          )}
-                        </span>
-                      </label>
-                      <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                        <span className="text-xs font-medium text-muted-foreground xl:hidden">État</span>
-                        <ModuleStateBadge state={module.state} />
-                      </div>
-                      <div className="flex min-w-0 items-start justify-between gap-3 xl:block">
-                        <span className="text-xs font-medium text-muted-foreground xl:hidden">Version</span>
-                        <span className="min-w-0 break-all font-mono text-xs tabular-nums">
-                          {module.installed_version || module.version || "-"}
-                        </span>
-                      </div>
-                      <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-                        <span className="text-xs font-medium text-muted-foreground xl:hidden">Origine</span>
-                        <Badge className="shrink-0" variant="outline">
-                          {moduleOriginLabel(origin)}
-                        </Badge>
-                      </div>
-                      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                        {module.state === "installed" ? (
-                          <Button
-                            className="w-full"
-                            size="sm"
-                            variant="accent"
-                            disabled={!canUseDb}
-                            onClick={() =>
-                              createJob("update_module", {
-                                project: selectedProject?.name,
-                                db: selectedDb,
-                                modules: module.name,
-                              })
-                            }
-                          >
-                            <RefreshCcw className="h-4 w-4" />
-                            Mettre à jour
-                          </Button>
-                        ) : (
-                          <Button
-                            className="w-full"
-                            size="sm"
-                            variant="success"
-                            disabled={!canUseDb}
-                            onClick={() =>
-                              createJob("install_module", {
-                                project: selectedProject?.name,
-                                db: selectedDb,
-                                modules: module.name,
-                              })
-                            }
-                          >
-                            <PlusCircle className="h-4 w-4" />
-                            Installer
-                          </Button>
-                        )}
-                        <DropdownMenu.Root modal={false}>
-                          <DropdownMenu.Trigger>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-9 w-9 shrink-0"
-                              title={`Autres actions pour ${module.name}`}
-                              aria-label={`Autres actions pour ${module.name}`}
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenu.Trigger>
-                          <DropdownMenu.Content align="end" className="min-w-52">
-                            <DropdownMenu.Label>Actions sur {module.name}</DropdownMenu.Label>
-                            {module.state === "installed" && (
-                              <DropdownMenu.Item
-                                disabled={!canUseDb}
-                                onSelect={() => requestTranslationReset([module.name])}
-                              >
-                                <Languages className="h-4 w-4" />
-                                Réinitialiser les traductions
-                              </DropdownMenu.Item>
-                            )}
-                            {module.state === "installed" && (
-                              <DropdownMenu.Item
-                                color="red"
-                                disabled={!canUseDb}
-                                onSelect={() => requestUninstall([module.name])}
-                              >
-                                <PackageX className="h-4 w-4" />
-                                Désinstaller de la base
-                              </DropdownMenu.Item>
-                            )}
-                            {module.removal_mode !== "link_only" && (
-                              <DropdownMenu.Item
-                                color="red"
-                                disabled={!module.removable}
-                                onSelect={() => requestDeleteCode([module.name])}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                                Supprimer du projet
-                              </DropdownMenu.Item>
-                            )}
-                            {module.state !== "installed" && module.removal_mode === "link_only" && (
-                              <DropdownMenu.Item disabled>Module protégé</DropdownMenu.Item>
-                            )}
-                          </DropdownMenu.Content>
-                        </DropdownMenu.Root>
-                      </div>
-                    </div>
-                  );
-                })
-              : moduleEmptyState}
-          </div>
+                      actions={rowActions}
+                      module={module}
+                      selected={selectedModules.has(module.name)}
+                      showLocations={showModuleLocations}
+                      workspace={overview?.workspace}
+                    />
+                  ))
+                : moduleEmptyState}
+            </div>
+          )}
           {modulePaginationBlock}
         </RefinedPanel>
       </div>

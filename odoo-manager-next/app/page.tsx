@@ -50,6 +50,7 @@ import type {
   ManagerSettings,
   MigrationSnapshot,
   ModuleInfo,
+  ModuleRepository,
   PendingDatabaseAction,
   PendingModuleOperation,
   ProjectCreationPrerequisites,
@@ -167,6 +168,7 @@ export default function Home() {
   // est encore celle du précédent et ne doit pas servir de référence.
   const databaseOwner = useRef("");
   const [modules, setModules] = useState<ModuleInfo[]>([]);
+  const [moduleRepositories, setModuleRepositories] = useState<ModuleRepository[]>([]);
   const [loadingModules, setLoadingModules] = useState(false);
   const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
   const [socleDialogOpen, setSocleDialogOpen] = useState(false);
@@ -521,16 +523,18 @@ export default function Home() {
     const generation = ++modulesRequestGeneration.current;
     if (!projectName || !selectedDb || selectedDb === "postgres") {
       setModules([]);
+      setModuleRepositories([]);
       setLoadingModules(false);
       return;
     }
     setLoadingModules(true);
     try {
-      const payload = await api<{ modules: ModuleInfo[] }>(
+      const payload = await api<{ modules: ModuleInfo[]; repositories?: ModuleRepository[] }>(
         `/api/projects/${encodeURIComponent(projectName)}/modules?db=${encodeURIComponent(selectedDb)}`,
       );
       if (generation !== modulesRequestGeneration.current) return;
       setModules(payload.modules);
+      setModuleRepositories(payload.repositories ?? []);
       setSelectedModules((current) => {
         const available = new Set(payload.modules.map((module) => module.name));
         return new Set(Array.from(current).filter((name) => available.has(name)));
@@ -540,6 +544,7 @@ export default function Home() {
       if (isProjectGone(err)) {
         // Projet supprimé entre-temps : pas d'erreur à montrer, la liste des projets suffit à se corriger.
         setModules([]);
+        setModuleRepositories([]);
         void refreshOverview();
       } else {
         pushToast("error", err instanceof Error ? err.message : "Impossible de charger les modules.");
@@ -1779,9 +1784,11 @@ export default function Home() {
                       loadingModules={loadingModules}
                       moduleFilters={moduleFilters}
                       modules={modules}
+                      moduleRepositories={moduleRepositories}
                       moduleSelectionBlock={moduleSelectionBlock}
                       odooDatabases={odooDatabases}
                       openRepositoryImport={openRepositoryImport}
+                      openUrl={openUrl}
                       openSocleDialog={openSocleDialog}
                       openZipImport={openZipImport}
                       overview={overview}
