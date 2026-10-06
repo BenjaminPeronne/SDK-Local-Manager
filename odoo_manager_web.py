@@ -37,6 +37,7 @@ from odoo_manager_core import (
     data_conflicts,
     database_restore,
     docker_status,
+    git_checkouts,
     job_progress,
     job_queue,
     performance,
@@ -2401,6 +2402,7 @@ def modules_for(project, db_name=None):
 
     if base_modules is None:
         base_modules = [basic_module(project, path, layout) for path in module_dirs(project)]
+        module_repository_roots(project, base_modules, layout)
         if base_modules:
             with MODULE_CACHE_LOCK:
                 MODULE_CACHE[cache_key] = {"created_at": now, "modules": [dict(item) for item in base_modules]}
@@ -2417,6 +2419,226 @@ def modules_for(project, db_name=None):
         module.update(module_removal_info(project, Path(module["path"]), layout))
         modules.append(module)
     return modules
+
+
+IMPORTED_SOURCES_FILE = "sources.json"
+
+
+def project_path_variants(path, resolved=None):
+    """Chemin tel qu'écrit et résolu : les chemins des modules sont l'un ou l'autre selon leur lien.
+
+    `resolved` évite une résolution déjà faite : chacune coûte un appel système sous Windows.
+    """
+    return {git_checkouts.normalized(path), git_checkouts.normalized(resolved or safe_resolve(path))}
+
+
+def project_layout_variants(project, layout=None):
+    """Variantes des dossiers addons-store, odoo/, du projet et des projets, résolues une seule fois."""
+    storage = layout.storage_parent if layout else safe_resolve(project_addons_storage_parent(project))
+    return {
+        "storage": project_path_variants(project_addons_storage_parent(project), storage),
+        "odoo": project_path_variants(project_odoo_root(project), storage.parent),
+        "project": project_path_variants(WORKSPACE / project, storage.parent.parent),
+        "workspace": project_path_variants(WORKSPACE, storage.parent.parent.parent),
+    }
+
+
+def module_checkout_finder(variants):
+    """Recherche des dépôts sous odoo/, sans jamais retenir odoo/ lui-même ni le dossier du projet.
+
+    Ces deux dossiers peuvent être des dépôts (modèle de projet, dépôt de production) qui ne
+    suivent pas les modules copiés dans addons-store : les leur attribuer serait faux.
+    """
+    return git_checkouts.CheckoutFinder(boundaries=variants["project"] | variants["odoo"] | variants["workspace"])
+
+
+def module_repository_roots(project, modules, layout=None):
+    """Ajoute à chaque module la racine de son dépôt (clone Git ou téléchargement SDK), vide sinon."""
+    variants = project_layout_variants(project, layout)
+    project_roots = variants["project"]
+    finder = module_checkout_finder(variants)
+    storage_parents = variants["storage"]
+    inside_project = tuple(root + os.sep for root in project_roots)
+    for module in modules:
+        source = module.get("source_path") or module["path"]
+        # Un module rangé seul à la racine d'addons-store, ou hors du projet, peut être lui-même un dépôt.
+        check_module = git_checkouts.normalized(os.path.dirname(source)) in storage_parents or not (
+            git_checkouts.normalized(source).startswith(inside_project)
+        )
+        module["repository"] = finder.root(source, check_module=check_module)
+
+
+def imported_sources_path(project):
+    return project_imports_root(project) / IMPORTED_SOURCES_FILE
+
+
+def read_imported_sources(project):
+    """Dépôt, branche et commit des modules copiés depuis un dépôt Git par « Ajouter des modules ».
+
+    Ces copies n'emportent ni .git ni info.sdk : sans cette note, leur dépôt serait perdu.
+    """
+    try:
+        data = json.loads(imported_sources_path(project).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    modules = data.get("modules") if isinstance(data, dict) else None
+    if not isinstance(modules, dict):
+        return {}
+    return {name: source for name, source in modules.items() if isinstance(name, str) and isinstance(source, dict)}
+
+
+def write_imported_sources(project, sources):
+    path = imported_sources_path(project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.tmp")
+    temporary.write_text(json.dumps({"modules": sources}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def record_imported_sources(project, names, url, branch, commit=""):
+    sources = read_imported_sources(project)
+    imported_at = time.strftime("%Y-%m-%d %H:%M")
+    for name in names:
+        sources[name] = {"url": url, "branch": branch, "commit": commit, "imported_at": imported_at}
+    write_imported_sources(project, sources)
+
+
+def forget_imported_sources(project, names):
+    """Oublie l'origine des modules remplacés par un autre import ou supprimés du projet."""
+    sources = read_imported_sources(project)
+    if not any(name in sources for name in names):
+        return
+    for name in names:
+        sources.pop(name, None)
+    write_imported_sources(project, sources)
+
+
+def storage_checkouts(project, variants):
+    """Dépôts rangés directement dans addons-store (clones Git ou téléchargements SDK)."""
+    storage = project_addons_storage_parent(project)
+    finder = module_checkout_finder(variants)
+    try:
+        children = sorted(storage.iterdir(), key=lambda path: path.name.lower())
+    except OSError:
+        return []
+    return [
+        str(safe_resolve(child)) for child in children if not child.name.startswith(".") and finder.is_checkout(child)
+    ]
+
+
+def repository_entry(root, standard_roots):
+    info = git_checkouts.read_checkout(root) or {
+        "source": "git",
+        "branch": "",
+        "tag": "",
+        "commit": "",
+        "remote": "",
+        "remote_label": "",
+    }
+    # Le nom du dépôt plutôt que celui du dossier : odoo/ peut contenir le dépôt de production du client.
+    name = info["remote_label"].rsplit("/", 1)[-1] if info["remote_label"] else ""
+    return {
+        "id": root,
+        "name": name or os.path.basename(root.rstrip("/\\")),
+        "path": root,
+        "standard": git_checkouts.normalized(root) in standard_roots,
+        **info,
+    }
+
+
+def module_repositories(project, modules):
+    """Dépôts d'où viennent les modules, standards (Odoo, Enterprise) en dernier.
+
+    Complète `repository` des modules hors de tout dépôt : leur import enregistré, le code d'Odoo
+    quand il n'est pas un clone, ou le dépôt d'addons-store qui contient un module du même nom.
+    Dans ce dernier cas, Odoo charge une copie (`repository_copy`) : mettre le dépôt à jour ne
+    la change pas. Une copie sans aucun dépôt connu reste sans dépôt.
+    """
+    variants = project_layout_variants(project)
+    storage_parents = variants["storage"]
+    odoo_roots = project_path_variants(project_legacy_addons_storage_parent(project).parent)
+    standard_roots = odoo_roots | {
+        os.path.join(storage, name) for storage in storage_parents for name in ("odoo_entreprise", "odoo_enterprise")
+    }
+    inside_odoo = tuple(root + os.sep for root in odoo_roots)
+    imported = checkouts = None
+    repositories = {}
+    resolved_roots = {}
+    for module in modules:
+        module["repository_copy"] = False
+        root = module.get("repository", "")
+        if root:
+            # Un même dépôt, atteint par un lien ou directement, ne doit former qu'un groupe.
+            if root not in resolved_roots:
+                resolved_roots[root] = str(safe_resolve(root))
+            root = module["repository"] = resolved_roots[root]
+            if root not in repositories:
+                repositories[root] = repository_entry(root, standard_roots)
+            continue
+        source = module.get("source_path") or module["path"]
+        if git_checkouts.normalized(source).startswith(inside_odoo):
+            module["repository"] = "odoo"
+            repositories.setdefault(
+                "odoo",
+                {
+                    "id": "odoo",
+                    "name": "odoo",
+                    "path": "",
+                    "standard": True,
+                    "source": "odoo",
+                    "branch": project_odoo_version(project) or "",
+                    "tag": "",
+                    "commit": "",
+                    "remote": "",
+                    "remote_label": "",
+                },
+            )
+            continue
+        if git_checkouts.normalized(os.path.dirname(source)) not in storage_parents:
+            continue
+        if imported is None:
+            imported = read_imported_sources(project)
+        origin = imported.get(module["name"])
+        url = str((origin or {}).get("url") or "")
+        if not url:
+            if checkouts is None:
+                checkouts = storage_checkouts(project, variants)
+            root = next(
+                (
+                    checkout
+                    for checkout in checkouts
+                    if any(
+                        os.path.isfile(os.path.join(checkout, module["name"], manifest))
+                        for manifest in ("__manifest__.py", "__openerp__.py")
+                    )
+                ),
+                "",
+            )
+            if root:
+                module["repository"], module["repository_copy"] = root, True
+                if root not in repositories:
+                    repositories[root] = repository_entry(root, standard_roots)
+            continue
+        branch = str(origin.get("branch") or "")
+        key = f"import:{url}#{branch}"
+        module["repository"] = key
+        repositories.setdefault(
+            key,
+            {
+                "id": key,
+                "name": url.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1].removesuffix(".git"),
+                "path": "",
+                "standard": False,
+                "source": "import",
+                "branch": branch,
+                "tag": "",
+                "commit": str(origin.get("commit") or ""),
+                "remote": git_checkouts.without_credentials(url),
+                "remote_label": git_checkouts.remote_label(url),
+                "imported_at": str(origin.get("imported_at") or ""),
+            },
+        )
+    return sorted(repositories.values(), key=lambda repository: (repository["standard"], repository["name"].lower()))
 
 
 RESTORE_COMPLETENESS_SQL = (
@@ -4885,6 +5107,10 @@ def delete_module_file_entry(job, project, module_name):
     else:
         move_deleted_module_path(job, project, module_name, entry, "Fichier addon")
 
+    try:
+        forget_imported_sources(project, [module_name])
+    except OSError:
+        pass
     return True
 
 
@@ -5159,6 +5385,10 @@ def install_module_candidates(job, project, candidates, replace_existing=False):
         raise
 
     clear_project_module_cache(project)
+    try:
+        forget_imported_sources(project, [Path(module_path).name for module_path in candidates])
+    except OSError:
+        pass
     job.add(f"Terminé. Modules préparés: {linked}. Déjà présents: {skipped}.")
     job.add("Installe ou mets à jour le module depuis l'interface.")
 
@@ -6134,6 +6364,10 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
             raise
         finally:
             clear_project_module_cache(project)
+        try:
+            record_imported_sources(project, [plan["name"] for plan in plans], url, branch, commit)
+        except OSError as exc:
+            job.add(f"Dépôt d'origine non mémorisé ({exc}) : ces modules apparaîtront sans dépôt.")
         job.add(f"Code préparé : {len(plans)} module(s), source {url}, branche {branch}.")
         job.add("Installe ou mets à jour ces modules dans la base Odoo depuis l’interface.")
         job.result = {"kind": "repository_modules", "modules": names, "added": added, "updated": updated}
@@ -6768,7 +7002,8 @@ def project_modules_payload(request):
     db_name = request.query_value("db")
     if db_name:
         validate_db(db_name)
-    return {"modules": modules_for(project, db_name)}
+    modules = modules_for(project, db_name)
+    return {"modules": modules, "repositories": module_repositories(project, modules)}
 
 
 def project_addon_links_payload(request):

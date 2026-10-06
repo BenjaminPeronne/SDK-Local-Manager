@@ -5,9 +5,11 @@ import unittest
 import zipfile
 from pathlib import Path
 from unittest import mock
+from unittest.mock import ANY
 
 import odoo_manager_web as web
 from odoo_manager_core.config import ManagerSettings
+from tests import test_git_checkouts
 
 
 class DummyJob:
@@ -183,6 +185,63 @@ class ModuleLayoutTests(unittest.TestCase):
             (store / name / "__manifest__.py").write_text("{}\n", encoding="utf-8")
 
         self.assertEqual(["sudokeys_project_tracking"], [path.name for path in web.module_dirs(self.project)])
+
+    def make_module(self, directory):
+        directory.mkdir(parents=True)
+        (directory / "__manifest__.py").write_text("{}\n", encoding="utf-8")
+        return directory
+
+    def test_modules_are_grouped_by_the_repository_they_come_from(self):
+        store = self.project_root / "odoo" / "addons-store"
+        addons = self.project_root / "odoo" / "addons"
+        sha = "4ca6a5538a9624338ca51749011bf2e208458644"
+        test_git_checkouts.make_git_checkout(
+            store / "sodial-addons",
+            "ref: refs/heads/dev",
+            config='[remote "origin"]\n\turl = ssh://git@gitlab.sudokeys.com:10022/sudokeys/sodial-addons.git\n',
+        )
+        self.make_module(store / "sodial-addons" / "sodial_base")
+        (addons / "sodial_base").symlink_to(Path("../addons-store/sodial-addons/sodial_base"))
+        # Copie dans addons-store d'un module que le dépôt contient aussi : c'est elle qu'Odoo charge.
+        self.make_module(store / "sodial-addons" / "sodial_sale")
+        self.make_module(store / "sodial_sale")
+        self.make_module(self.project_root / "odoo" / "odoo" / "addons" / "sale")
+        self.make_module(store / "web_widget")
+        web.record_imported_sources(
+            self.project, ["web_widget"], "ssh://git@gitlab.sudokeys.com:10022/OCA/web.git", "17.0", sha
+        )
+        self.make_module(store / "lonely_copy")
+        # Le dossier odoo/ peut être le dépôt de production du client : il ne compte jamais.
+        test_git_checkouts.make_git_checkout(self.project_root / "odoo", "ref: refs/heads/preprod1")
+
+        modules = web.modules_for(self.project)
+        repositories = web.module_repositories(self.project, modules)
+
+        by_module = {module["name"]: (module["repository"], module["repository_copy"]) for module in modules}
+        # Le dossier temporaire passe par un lien sous macOS (/var -> /private/var) : un seul groupe malgré tout.
+        repository = str((store / "sodial-addons").resolve())
+        self.assertEqual((repository, False), by_module["sodial_base"])
+        self.assertEqual((repository, True), by_module["sodial_sale"])
+        self.assertEqual(("odoo", False), by_module["sale"])
+        self.assertEqual(
+            ("import:ssh://git@gitlab.sudokeys.com:10022/OCA/web.git#17.0", False), by_module["web_widget"]
+        )
+        self.assertEqual(("", False), by_module["lonely_copy"])
+        self.assertEqual(
+            [("sodial-addons", "git", "dev", False), ("web", "import", "17.0", False), ("odoo", "odoo", ANY, True)],
+            [(item["name"], item["source"], item["branch"], item["standard"]) for item in repositories],
+        )
+        self.assertEqual("gitlab.sudokeys.com/OCA/web", repositories[1]["remote_label"])
+        self.assertEqual(sha, repositories[1]["commit"])
+
+    def test_imported_module_origin_is_forgotten_when_replaced_or_deleted(self):
+        web.record_imported_sources(self.project, ["a", "b"], "git@example.invalid:x/y.git", "main")
+
+        web.forget_imported_sources(self.project, ["a"])
+
+        self.assertEqual(["b"], sorted(web.read_imported_sources(self.project)))
+        web.imported_sources_path(self.project).write_text("pas du JSON", encoding="utf-8")
+        self.assertEqual({}, web.read_imported_sources(self.project))
 
     @mock.patch("odoo_manager_web.module_dirs", return_value=iter(()))
     def test_empty_module_scan_is_not_cached(self, module_dirs):

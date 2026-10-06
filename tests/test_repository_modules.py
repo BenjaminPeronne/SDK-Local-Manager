@@ -270,7 +270,10 @@ class RepositoryModulesTests(ModuleLayoutTests):
         self.assertEqual("add", by_name["beta"]["action"])
         self.assertEqual("blocked", by_name["bad name"]["action"])
         self.assertIn("Odoo 16.0", by_name["old"]["reason"])
-        self.assertEqual(list(self.storage().iterdir()), [self.storage("alpha")])
+        # L'import qui a préparé alpha a noté son dépôt dans le dossier technique .odoo_manager_imports.
+        self.assertEqual(
+            [path for path in self.storage().iterdir() if not path.name.startswith(".")], [self.storage("alpha")]
+        )
 
     def test_sparse_checkout_pattern_matches_only_the_exact_manifest(self):
         self.assertEqual("/addons/x\\*y/__manifest__.py\n", web.sparse_checkout_pattern("addons/x*y/__manifest__.py"))

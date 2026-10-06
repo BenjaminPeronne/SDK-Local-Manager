@@ -180,6 +180,7 @@ SDK-Local-Manager/
 │   ├── docker_api.py            #   État de Docker lu par l'API du moteur
 │   ├── system.py                #   État de Docker et choix du moteur (natif ou WSL)
 │   ├── traefik.py               #   Détection des instances Traefik et de leurs ports
+│   ├── git_checkouts.py         #   Dépôt, branche et adresse d'origine des modules
 │   ├── windows_links.py         #   Liens d'addons sous Windows
 │   └── version.py               #   Version publiée par /api/version
 ├── odoo-manager-next/           # Frontend et application de bureau
@@ -397,6 +398,21 @@ Dans **Modules**, renseigner l'URL du dépôt et une branche ou un tag compatibl
 - Le dépôt est récupéré dans un dossier temporaire (cinq minutes au plus). Les liens symboliques et les noms de modules ambigus sont refusés. Les dépôts privés utilisent les accès Git déjà configurés, sans jeton dans l'URL.
 - Les versions remplacées sont conservées dans `.odoo_manager_backups/modules/<projet>` ; un import qui échoue ou qu'on arrête est défait.
 - L'opération ne prépare que le **code** : installer ou mettre à jour ensuite les modules dans la base.
+- Le dépôt, la branche et le commit importés sont notés dans `addons-store/.odoo_manager_imports/sources.json`, pour la vue **Par dépôt**. Un import ZIP ou une suppression du module efface cette note.
+
+### Modules par dépôt
+
+Dans **Modules**, la vue **Par dépôt** regroupe les modules selon le dépôt d'où vient leur code, avec la branche chargée (ou l'étiquette, sinon le commit) et l'adresse du dépôt. Les recherches et les filtres s'appliquent comme dans la liste. La case d'un dépôt sélectionne tous ses modules, pour les mettre à jour d'un coup. Le choix de la vue est mémorisé sur le poste.
+
+Le dépôt d'un module est lu sans lancer Git (`odoo_manager_core/git_checkouts.py`) :
+
+- **Clone Git** : branche, étiquette et adresse `origin` lues dans `.git` (worktrees compris).
+- **Archive SDK** : dépôt téléchargé depuis la plateforme SDK, sans `.git` ; son fichier `info.sdk` donne l'adresse, la branche active et le commit.
+- **Copie importée** : module ajouté par **Ajouter des modules › Depuis un dépôt Git** (voir plus haut).
+- **Copie** (badge orange) : Odoo charge une copie rangée à la racine d'`addons-store`, alors qu'un dépôt du projet contient un module du même nom. Mettre ce dépôt à jour ne change pas la copie.
+- Le code d'Odoo et d'Odoo Enterprise ferme la liste, replié.
+
+Les dossiers du projet et `odoo/` ne comptent jamais comme dépôt d'un module : ils peuvent être le dépôt du modèle de projet ou le dépôt de production du client, qui ne suivent pas les copies d'`addons-store`.
 
 ---
 
