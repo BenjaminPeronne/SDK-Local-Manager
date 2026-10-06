@@ -175,6 +175,15 @@ class ModuleLayoutTests(unittest.TestCase):
         command = run_capture.call_args.args[0]
         self.assertEqual(command[:2], ["wsl.exe", "--exec"])
 
+    def test_folder_copies_made_by_the_file_manager_are_not_listed_as_modules(self):
+        # sudokeys_v19 : « sudokeys_project_tracking 2 », copie du Finder qu'Odoo ignore.
+        store = self.project_root / "odoo" / "addons-store"
+        for name in ("sudokeys_project_tracking", "sudokeys_project_tracking 2", "sale - Copie", "sale (1)"):
+            (store / name).mkdir()
+            (store / name / "__manifest__.py").write_text("{}\n", encoding="utf-8")
+
+        self.assertEqual(["sudokeys_project_tracking"], [path.name for path in web.module_dirs(self.project)])
+
     @mock.patch("odoo_manager_web.module_dirs", return_value=iter(()))
     def test_empty_module_scan_is_not_cached(self, module_dirs):
         self.assertEqual(web.modules_for(self.project), [])

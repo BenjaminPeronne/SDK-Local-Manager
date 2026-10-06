@@ -1869,6 +1869,15 @@ def module_parent_candidates(project):
     ]
 
 
+def is_module_directory_name(name):
+    """Vrai pour un nom de dossier qu'Odoo peut charger comme module.
+
+    Une copie faite dans le Finder ou l'Explorateur (« sale 2 », « sale - Copie ») n'en est pas
+    un : Odoo l'ignore, la liste des modules aussi, sinon le module y apparaît deux fois.
+    """
+    return bool(SAFE_MODULE_RE.fullmatch(name)) and "," not in name
+
+
 def active_wsl_distribution():
     context = active_workspace_wsl_context()
     return context.distribution if context else SETTINGS.wsl_distribution
@@ -1911,7 +1920,7 @@ def wsl_module_dirs(project):
         windows_path = wsl_windows_path(posixpath.normpath(linux_path), distribution)
         windows_source_path = wsl_windows_path(posixpath.normpath(source_path or linux_path), distribution)
         name = posixpath.basename(linux_path)
-        if not SAFE_MODULE_RE.fullmatch(name) or name in seen:
+        if not is_module_directory_name(name) or name in seen:
             continue
         seen.add(name)
         host_path, metadata = wsl_module_metadata(
@@ -1973,6 +1982,8 @@ def module_dirs(project):
             access_errors.append(f"{parent}: {exc}")
             continue
         for child in children:
+            if not is_module_directory_name(child.name):
+                continue
             try:
                 is_directory = child.is_dir()
                 is_link = child.is_symlink()
