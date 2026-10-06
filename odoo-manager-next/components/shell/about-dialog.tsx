@@ -166,22 +166,22 @@ export function AboutDialog({
               </button>
             )}
           </div>
+          <div className="flex items-center gap-4 rounded-md border border-orange-500/30 bg-orange-500/[0.06] p-4 dark:bg-orange-500/[0.08]">
+            <img
+              src={approvedByChouab.src}
+              alt="Sceau « Approuvé par Chouab »"
+              width={72}
+              height={72}
+              className="h-[72px] w-[72px] shrink-0 drop-shadow-md transition-transform duration-300 ease-out hover:-rotate-6 hover:scale-105 motion-reduce:transition-none motion-reduce:hover:transform-none"
+            />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold">Approuvé par Chouab</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">Sceau officiel d’approbation</div>
+            </div>
+          </div>
           <div className="rounded-md border p-4">
             <div className="text-sm font-semibold">À propos du créateur</div>
-            <div className="mt-3 flex items-center gap-3">
-              <img
-                src={approvedByChouab.src}
-                alt="Sceau « Approuvé par Chouab »"
-                width={72}
-                height={72}
-                className="h-[72px] w-[72px] shrink-0 drop-shadow-md transition-transform duration-300 ease-out hover:-rotate-6 hover:scale-105 motion-reduce:transition-none motion-reduce:hover:transform-none"
-              />
-              <div className="min-w-0">
-                <div className="text-sm font-semibold">Approuvé par Chouab</div>
-                <div className="mt-0.5 text-xs text-muted-foreground">Sceau officiel d’approbation</div>
-              </div>
-            </div>
-            <div className="mt-3 flex items-start gap-2 border-t pt-3 text-sm leading-relaxed text-muted-foreground">
+            <div className="mt-3 flex items-start gap-2 text-sm leading-relaxed text-muted-foreground">
               <Heart className="mt-0.5 h-4 w-4 shrink-0 fill-current text-red-500" aria-hidden="true" />
               <p>Fait avec amour par Aymerick Benjamin LAURETTA-PERONNE</p>
             </div>
