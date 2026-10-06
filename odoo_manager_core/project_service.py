@@ -260,6 +260,8 @@ find /tmp -maxdepth 1 -name 'tmp*' -mmin +10 2>/dev/null | while IFS= read -r en
 done
 """.strip()
 # Interpréteur d'Odoo : celui du venv de l'image, sinon python3. `$0` porte le script, `$@` ses arguments.
+# Copie de init/requirements_pip.txt du projet, lue par pip dans le conteneur Odoo.
+CONTAINER_PIP_REQUIREMENTS = "/tmp/odoo-manager-requirements_pip.txt"
 ODOO_PYTHON_PREFIX = 'py=/home/_venv/bin/python; [ -x "$py" ] || py=python3; '
 # Noms d'import (ou de distribution) introuvables pour l'interpréteur d'Odoo, un par ligne.
 MISSING_PYTHON_MODULES_SCRIPT = """import importlib.util, sys
@@ -2162,6 +2164,21 @@ class ProjectService:
         if not has_requirements:
             return
         self.log(log, "Vérification des dépendances Python du projet...")
+        # Les modèles de projet ne montent pas ce fichier au même endroit (/conf ou /home/odoo/srv/conf) :
+        # la copie du fichier du projet ne dépend pas du compose.
+        docker_prefix = self.docker()
+        code = self.stream(
+            self.docker(
+                "cp",
+                self.command_path(docker_prefix, requirements),
+                f"odoo-{project}:{CONTAINER_PIP_REQUIREMENTS}",
+            ),
+            log=log,
+        )
+        if code != 0:
+            raise RuntimeError(
+                "Le fichier init/requirements_pip.txt du projet n'a pas pu être copié dans son conteneur Odoo."
+            )
         code = self.stream(
             self.docker(
                 "exec",
@@ -2171,7 +2188,7 @@ class ProjectService:
                 "pip",
                 "install",
                 "-r",
-                "/home/odoo/srv/conf/requirements_pip.txt",
+                CONTAINER_PIP_REQUIREMENTS,
             ),
             log=log,
         )

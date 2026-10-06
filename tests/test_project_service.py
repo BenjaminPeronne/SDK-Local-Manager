@@ -1713,15 +1713,26 @@ class ProjectServiceTests(unittest.TestCase):
 
         self.assertEqual("phonenumbers\nsvglib\n", requirements.read_text(encoding="utf-8"))
 
-    def test_project_pip_requirements_are_installed_from_the_mounted_conf_path(self):
+    def test_project_pip_requirements_are_copied_into_the_container_wherever_they_are_mounted(self):
+        # sudokeys_v19 monte le fichier sur /conf, les projets récents sur /home/odoo/srv/conf.
         requirements = self.project_path / "init" / "requirements_pip.txt"
         requirements.parent.mkdir(parents=True)
         requirements.write_text("svglib\n", encoding="utf-8")
 
         self.service.install_project_pip_requirements("DEMO", log=lambda _line: None)
 
-        command, _cwd = self.runner.streams[-1]
-        self.assertEqual(command[-2:], ["-r", "/home/odoo/srv/conf/requirements_pip.txt"])
+        (copy, _cwd), (install, _cwd) = self.runner.streams[-2:]
+        self.assertEqual(["cp", str(requirements), "odoo-DEMO:/tmp/odoo-manager-requirements_pip.txt"], copy[1:])
+        self.assertEqual(["pip", "install", "-r", "/tmp/odoo-manager-requirements_pip.txt"], install[-4:])
+
+    def test_project_without_python_requirements_runs_nothing(self):
+        requirements = self.project_path / "init" / "requirements_pip.txt"
+        requirements.parent.mkdir(parents=True)
+        requirements.write_text("# aucun paquet\n\n", encoding="utf-8")
+
+        self.service.install_project_pip_requirements("DEMO", log=lambda _line: None)
+
+        self.assertFalse(self.runner.streams)
 
     def test_already_listed_python_package_is_not_duplicated(self):
         requirements = self.project_path / "init" / "requirements_pip.txt"
