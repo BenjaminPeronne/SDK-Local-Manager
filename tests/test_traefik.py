@@ -1,5 +1,6 @@
 import unittest
 
+from odoo_manager_core.project_service import traefik_loopback_override
 from odoo_manager_core.traefik import (
     PublishedPort,
     TraefikInstance,
@@ -10,9 +11,11 @@ from odoo_manager_core.traefik import (
     entrypoints_from_config,
     entrypoints_from_environment,
     parse_docker_ports,
+    recorded_substitute_ports,
     reset_traefik_entrypoint_cache,
     same_directory,
     select_traefik_instance,
+    substitute_port_candidates,
     url_with_port,
 )
 
@@ -145,6 +148,26 @@ class TraefikParsingTests(unittest.TestCase):
         self.assertEqual("http://dev.demo.localhost/", url_with_port("http://dev.demo.localhost/", 80))
         self.assertEqual("http://dev.demo.localhost:8080/", url_with_port("http://dev.demo.localhost/", 8080))
         self.assertEqual("http://localhost:8069/", url_with_port("http://localhost:8069/", 8080))
+
+
+class SubstitutePortTests(unittest.TestCase):
+    def test_candidates_start_at_the_usual_alternative_port(self):
+        self.assertEqual([8080, 8081, 8082], list(substitute_port_candidates(80))[:3])
+        self.assertEqual(8443, substitute_port_candidates(443)[0])
+        self.assertEqual(8081, substitute_port_candidates(8080)[0])
+        self.assertEqual(65535, substitute_port_candidates(65530)[-1])
+
+    def test_replacement_ports_are_read_back_from_the_generated_override(self):
+        override = traefik_loopback_override(
+            "traefik",
+            [PublishedPort("", 8080, 80), PublishedPort("", 8443, 443), PublishedPort("", 9000, 9000, "udp")],
+            {8080: 80},
+        )
+
+        self.assertIn('"127.0.0.1:8080:80"  # à la place du port 80, déjà utilisé sur cette machine', override)
+        self.assertIn('      - "127.0.0.1:8443:443"\n', override)
+        self.assertEqual({(80, 80, "tcp"): 8080}, recorded_substitute_ports(override))
+        self.assertEqual({}, recorded_substitute_ports(""))
 
 
 class TraefikDetectionTests(unittest.TestCase):

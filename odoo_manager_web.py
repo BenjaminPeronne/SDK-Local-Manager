@@ -908,13 +908,12 @@ def traefik_status(docker=None):
     elif problems:
         state = "conflict"
         message = f"Une instance Traefik existante ({instance.describe()}) ne peut pas servir les projets : {'; '.join(problems)}."
-    elif platform_id() == "linux" and local_port_listening(http_port):
+    # Ailleurs, un port pris est remplacé par un port libre au démarrage de Traefik.
+    elif platform_id() == "linux" and running_in_wsl() and local_port_listening(http_port):
         state = "port_busy"
         message = (
             f"Le port {http_port} est déjà occupé, probablement par le Traefik de Docker Desktop : "
             "arrête-le pour que les projets de l'environnement Linux soient accessibles."
-            if running_in_wsl()
-            else f"Le port {http_port} est déjà occupé par un autre service : libère-le pour démarrer Traefik."
         )
     elif not exists:
         state = "missing"

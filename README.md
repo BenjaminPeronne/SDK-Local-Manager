@@ -291,7 +291,7 @@ Ports utilisés :
 | Port | Usage |
 | --- | --- |
 | `18765` | API locale du gestionnaire (`127.0.0.1` uniquement). Un port libre est choisi s'il est occupé. Voir [docs/api-locale.md](docs/api-locale.md). |
-| `80` / `443` | Accès aux projets via Traefik. |
+| `80` / `443` | Accès aux projets via Traefik. Si un autre service (Apache, IIS, un autre Traefik…) occupe déjà un de ces ports au démarrage de Traefik, un port libre le remplace (`8080`, puis `8081`… pour `80`) : les adresses deviennent `http://dev.PROJET.localhost:8080/`. Le compose de `docker-local-tools` n'est pas modifié ; le port de remplacement est repris aux démarrages suivants tant que le port d'origine reste pris. |
 | `8069` / `5432` | Odoo et PostgreSQL, internes aux conteneurs. |
 | `10022` | SSH sortant vers GitLab Sudokeys. |
 | `3000` | Next.js, en développement uniquement. |

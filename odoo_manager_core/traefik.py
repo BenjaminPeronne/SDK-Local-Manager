@@ -35,6 +35,14 @@ DOCKER_PORT_PATTERN = re.compile(
     r"->(?P<container>\d+)(?:-(?P<container_end>\d+))?/(?P<protocol>\w+)$"
 )
 IMAGE_PATTERN = re.compile(r"(?:^|/)traefik(?::|@|$)", re.IGNORECASE)
+# Port publié à la place d'un port du compose déjà pris, noté dans la surcharge compose générée.
+SUBSTITUTE_PORT_COMMENT = "# à la place du port {port}, déjà utilisé sur cette machine"
+SUBSTITUTE_PORT_PATTERN = re.compile(
+    r"^\s*-\s*\"(?:.*:)?(?P<host>\d+):(?P<container>\d+)(?:/(?P<protocol>\w+))?\"\s*"
+    r"# à la place du port (?P<configured>\d+),",
+    re.MULTILINE,
+)
+SUBSTITUTE_PORT_ATTEMPTS = 50
 ENTRYPOINT_CACHE = {}
 ENTRYPOINT_CACHE_LOCK = threading.Lock()
 
@@ -271,6 +279,29 @@ def compose_service_ports(text, service="traefik"):
         host_ip = parts[0] if len(parts) == 3 else ""
         ports.append(PublishedPort(host_ip, int(parts[-2]), int(parts[-1]), protocol or "tcp"))
     return ports
+
+
+def substitute_port_candidates(port):
+    """Ports essayés à la place d'un port déjà pris : 8080, 8081… pour 80 ; 8443, 8444… pour 443."""
+    start = port + 8000 if port < 1024 else port + 1
+    return range(start, min(start + SUBSTITUTE_PORT_ATTEMPTS, 65536))
+
+
+def substitute_key(port):
+    return port.host_port, port.container_port, port.protocol
+
+
+def recorded_substitute_ports(text):
+    """Ports publiés à la place des ports du compose au dernier démarrage.
+
+    Clé : (port du compose, port du conteneur, protocole) ; valeur : port réellement publié.
+    """
+    return {
+        (int(match.group("configured")), int(match.group("container")), match.group("protocol") or "tcp"): int(
+            match.group("host")
+        )
+        for match in SUBSTITUTE_PORT_PATTERN.finditer(text or "")
+    }
 
 
 def same_directory(label, directory, execution_directory=None):
