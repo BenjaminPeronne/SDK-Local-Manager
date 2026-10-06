@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, FolderPlus, Loader2, RefreshCcw } from "lucide-react";
 import type { GitLabStatus, StoredRikaCredentials } from "@/lib/desktop";
+import { existingProjectNamed, normalizeProjectName, PROJECT_NAME_MAX_LENGTH } from "@/lib/project-name";
 import type { ProjectCreationPrerequisites } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -67,6 +68,7 @@ export function CreateProjectDialog({
   open,
   onOpenChange,
   prerequisites,
+  projects,
   dockerReady,
   loading,
   onRefreshPrerequisites,
@@ -76,6 +78,8 @@ export function CreateProjectDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   prerequisites: ProjectCreationPrerequisites | null;
+  /** Projets existants : un nom déjà pris, casse ignorée, est signalé avant la création. */
+  projects: { name: string }[];
   dockerReady: boolean;
   loading: boolean;
   onRefreshPrerequisites: () => Promise<ProjectCreationPrerequisites | null>;
@@ -162,9 +166,13 @@ export function CreateProjectDialog({
     setRememberRikaPassword(false);
   }
 
+  // Le nom envoyé : sans séparateur final, que la saisie garde pour pouvoir continuer le nom.
+  const projectName = normalizeProjectName(name, { final: true });
+  const nameTaken = existingProjectNamed(projectName, projects);
+
   async function submitProject() {
     const created = await onSubmit({
-      name: name.trim(),
+      name: projectName,
       version: sourceType === "rika" ? (rikaVersion === RIKA_AUTO_VERSION ? "" : rikaVersion) : version,
       source_type: sourceType,
       repository_url: repositoryUrl.trim(),
@@ -212,13 +220,28 @@ export function CreateProjectDialog({
               <Input
                 id="new-project-name"
                 value={name}
-                maxLength={63}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="CLIENT_V19"
+                maxLength={PROJECT_NAME_MAX_LENGTH}
+                onChange={(event) => setName(normalizeProjectName(event.target.value))}
+                placeholder="client_v19"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 autoFocus
+                aria-invalid={Boolean(nameTaken)}
+                aria-describedby="new-project-name-hint"
               />
-              <span className="min-h-4 text-xs font-normal text-muted-foreground">
-                Lettres, chiffres, tirets, points et underscores.
+              <span
+                id="new-project-name-hint"
+                className={cn(
+                  "min-h-4 break-words text-xs font-normal",
+                  nameTaken ? "text-red-700 dark:text-red-300" : "text-muted-foreground",
+                )}
+              >
+                {nameTaken
+                  ? `Le projet ${nameTaken.name.toUpperCase()} existe déjà : choisis un autre nom.`
+                  : projectName
+                    ? `Adresse du projet : dev.${projectName}.localhost`
+                    : "Mis en forme automatiquement : minuscules, sans espace ni accent."}
               </span>
             </div>
             <div className="grid content-start gap-1.5 text-sm font-medium">
@@ -439,7 +462,7 @@ export function CreateProjectDialog({
               Annuler
             </Button>
             <Button
-              disabled={loading || !name.trim() || !prerequisitesReady || !sourceFieldsReady}
+              disabled={loading || !projectName || Boolean(nameTaken) || !prerequisitesReady || !sourceFieldsReady}
               onClick={() => void submitProject()}
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}

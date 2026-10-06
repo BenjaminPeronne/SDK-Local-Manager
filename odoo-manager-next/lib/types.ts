@@ -364,7 +364,14 @@ export type Toast = {
   id: number;
   kind: "success" | "error" | "info";
   message: string;
+  /** Même message reçu plusieurs fois pendant qu'il est affiché : un seul toast, avec le compte. */
+  count?: number;
+  /** Relancé à chaque répétition : le délai d'affichage repart de zéro. */
+  shownAt?: number;
+  action?: ToastAction;
 };
+
+export type ToastAction = { label: string; onClick: () => void };
 
 type DiagnosticIssue = {
   severity: "success" | "warning" | "error" | string;

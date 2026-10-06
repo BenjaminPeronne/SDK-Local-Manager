@@ -37,6 +37,7 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 
 **Projets**
 - Création d'un projet Odoo **standard**, **standard + dépôt d'addons GitLab**, ou **copie d'une instance RIKA** (version Odoo détectée automatiquement).
+- Nom de projet mis en forme pendant la saisie (« Client V19 » → `client_v19`), adresse affichée, et refus d'un nom déjà pris à la casse près ; les noms s'affichent en majuscules.
 - Connexion facultative à un compte GitLab (jeton personnel) pour rechercher les dépôts et choisir la branche ou le tag au clavier.
 - Préparation dans un dossier temporaire puis déplacement en une seule opération : un clone interrompu ne laisse pas de projet à moitié créé.
 - Démarrage, arrêt, logs en direct, diagnostic et ouverture d'Odoo dans le navigateur une fois Traefik prêt, en mode normal ou debug (`?debug=1`, `?debug=assets`).
@@ -66,6 +67,8 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 - Les actions d'un même projet sont mises en file au lieu de s'exécuter en parallèle.
 - Une action en cours peut être arrêtée : ses processus sont interrompus puis ses effets défaits (conteneurs démarrés, bases partiellement créées, imports de modules). Les étapes irréversibles refusent l'arrêt.
 - Historique des actions, progression en temps réel (SSE) et journal des erreurs consultable dans l'application.
+- Actions en cours du projet ouvert sur une ligne compacte (étape, pourcentage, « Suivre ») ; celles des autres projets signalées dans la barre latérale, les actions générales en bas de celle-ci.
+- Notifications au-dessus des fenêtres ouvertes, refermables, en pause au survol, regroupées quand elles se répètent, avec « Voir le journal » à la fin d'une action.
 - Identifiants RIKA et jeton GitLab mémorisés dans le trousseau du système.
 
 ---
@@ -320,6 +323,8 @@ Les formulaires sont pré-remplis avec les valeurs par défaut d'Odoo : master p
 
 ### Créer un projet
 
+Le nom saisi est mis en forme pendant la frappe, et de nouveau par le backend : minuscules, accents retirés, un `_` à la place des espaces et autres caractères refusés, ni séparateur au début ni à la fin (`lib/project-name.ts`, `normalize_project_name`). Il devient l'adresse `dev.<nom>.localhost`, le dossier et les conteneurs. Traefik ignorant la casse, un nom déjà pris en majuscules (`AKAAZ` pour `akaaz`) est refusé. L'interface affiche les noms en majuscules ; la confirmation de suppression ignore la casse.
+
 Le backend récupère le modèle Docker, Odoo Community et Odoo Enterprise depuis GitLab, configure le projet puis crée les liens relatifs des modules. Git est appelé avec des arguments structurés, sans terminal interactif ni demande d'identifiants. Quand un autre projet contient déjà le même dépôt, ses objets servent de cache local puis sont dissociés : chaque projet reste autonome.
 
 **Copie depuis RIKA** demande le nom de l'instance et les identifiants Sudokeys, génère et télécharge la copie, contrôle le ZIP, puis détecte la version Odoo avant de préparer le modèle Docker correspondant.
@@ -348,6 +353,12 @@ Une restauration faite par Odoo et coupée en route (version précédente du ges
 ### Démarrage et paquets Python manquants
 
 Quand Odoo répond en erreur 500 pendant son chargement, le journal du lancement en cours est lu : un paquet Python manquant (`No module named 'openai'`) est installé dans le conteneur, noté dans `init/requirements_pip.txt`, puis le serveur est relancé. Une base qui échoue trois fois à se charger pour une autre raison arrête l'attente avec l'erreur d'Odoo, au lieu d'attendre dix minutes.
+
+### Données d'un module déjà présentes dans la base
+
+Une mise à jour (`-u`) échoue quand une nouvelle version d'un module apporte des données qu'un utilisateur a déjà créées à la main, sans identifiant XML : Odoo tente de les créer une seconde fois (`duplicate key value violates unique constraint "res_country_state_name_code_uniq"`, cantons suisses ajoutés à `base` en 16.0). Le gestionnaire lit alors dans le journal le fichier en cours de chargement (`loading base/data/res.country.state.csv`) et la clé en double, relit ce fichier (CSV ou XML) dans le conteneur, rapproche chacune de ses lignes de l'enregistrement existant de même clé et lui attribue l'identifiant XML manquant, comme le fait la migration d'Odoo, puis relance la mise à jour (`odoo_manager_core/data_conflicts.py`, huit fichiers au plus par action). Les enregistrements déjà rattachés au module ne sont pas touchés.
+
+Les scripts de neutralisation d'Odoo 15 à 20 n'insèrent que des paramètres système (`ON CONFLICT`) et un serveur de messagerie factice : ils ne provoquent pas ces collisions.
 
 ### Performances
 

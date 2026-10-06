@@ -135,7 +135,8 @@ export function ProjectHeader({
       <div className="flex min-w-0 flex-wrap items-start gap-2">
         <h2
           className={cn(
-            "min-w-0 max-w-full break-words text-2xl font-semibold leading-tight sm:text-3xl",
+            // Majuscules comme dans la liste des projets ; le nom réel (dossier, adresse) reste en minuscules.
+            "min-w-0 max-w-full break-words text-2xl font-semibold uppercase leading-tight sm:text-3xl",
             projectHeaderCompact && "lg:text-xl",
           )}
         >

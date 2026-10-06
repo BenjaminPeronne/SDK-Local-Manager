@@ -2,18 +2,32 @@ import { Dialog as RadixDialog, IconButton } from "@radix-ui/themes";
 import { X } from "lucide-react";
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { TOAST_REGION_ATTRIBUTE } from "@/components/common/toast-stack";
 
 export const Dialog = RadixDialog.Root;
+
+/** Clic dans une notification : elle s'affiche au-dessus de la fenêtre, qui ne doit pas se fermer pour autant. */
+function insideToasts(event: Event) {
+  return event.target instanceof Element && Boolean(event.target.closest(`[${TOAST_REGION_ATTRIBUTE}]`));
+}
 export const DialogTrigger = RadixDialog.Trigger;
 export const DialogClose = RadixDialog.Close;
 
 export const DialogContent = React.forwardRef<
   React.ElementRef<typeof RadixDialog.Content>,
   React.ComponentPropsWithoutRef<typeof RadixDialog.Content>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, onPointerDownOutside, onInteractOutside, ...props }, ref) => (
   <RadixDialog.Content
     ref={ref}
     size="3"
+    onPointerDownOutside={(event) => {
+      if (insideToasts(event)) event.preventDefault();
+      onPointerDownOutside?.(event);
+    }}
+    onInteractOutside={(event) => {
+      if (insideToasts(event)) event.preventDefault();
+      onInteractOutside?.(event);
+    }}
     // Rythme vertical par défaut : sans lui, chaque fenêtre recollait son en-tête, son contenu et
     // ses boutons, et chaque nouvelle fenêtre naissait avec des blocs collés. Une fenêtre à mise
     // en page propre le remplace par sa classe `gap-*`.

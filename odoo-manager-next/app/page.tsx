@@ -77,7 +77,7 @@ import { RestoreDatabaseDialog } from "@/components/databases/restore-database-d
 import { TestUserDialog } from "@/components/databases/test-user-dialog";
 import { ActivityTab } from "@/components/jobs/activity-tab";
 import { CancelJobDialog } from "@/components/jobs/cancel-job-dialog";
-import { RunningJobsBanner } from "@/components/jobs/running-jobs-banner";
+import { ProjectActivity } from "@/components/jobs/job-activity";
 import { DeleteModuleCodeDialog } from "@/components/modules/delete-module-code-dialog";
 import { ModuleSelectionBar, type ModuleSelectionBarProps } from "@/components/modules/module-selection-bar";
 import { ModulesTab } from "@/components/modules/modules-tab";
@@ -229,7 +229,10 @@ export default function Home() {
   const lastSynchronizedJobCompletion = useRef("");
   const modulesRequestGeneration = useRef(0);
   const schedule = useScheduledTimeouts();
-  const { toasts, pushToast } = useToasts(schedule);
+  const { toasts, pushToast, dismissToast } = useToasts();
+  // Défini plus bas (il dépend de l'état de la vue) : la notification de fin d'action passe par ce relais.
+  const openJobRef = useRef<((job: Job) => void) | null>(null);
+  const openJobFromToast = useCallback((job: Job) => openJobRef.current?.(job), []);
   const { apiUnavailable, markApiSuccess, markApiFailure } = useApiAvailability();
   // Lue à la fin d'une action : la saison dépend des réglages, chargés plus bas.
   const seasonRef = useRef<Season | null>(null);
@@ -246,7 +249,13 @@ export default function Home() {
     refreshJobs,
     trackCreatedJob,
     focusJob,
-  } = useJobs({ pushToast, markApiSuccess, markApiFailure, onJobSucceeded: celebrateJobSuccess });
+  } = useJobs({
+    pushToast,
+    markApiSuccess,
+    markApiFailure,
+    onJobSucceeded: celebrateJobSuccess,
+    onOpenJob: openJobFromToast,
+  });
   const pendingProjectNames = useRef(new Set<string>());
   const {
     overview,
@@ -1139,6 +1148,9 @@ export default function Home() {
     selectJob(job.id);
     setActiveTab("logs");
   }
+  useEffect(() => {
+    openJobRef.current = followJob;
+  });
 
   function selectJob(jobId: number) {
     stopLiveLogStream();
@@ -1299,18 +1311,27 @@ export default function Home() {
   // création de base devient l'étape recommandée. `selectedDb` reste renseigné pendant une sonde
   // Postgres momentanément vide : il évite de masquer les onglets d'un projet qui a des bases.
   const awaitingFirstDatabase = selectedProjectOnline && odooDatabases.length === 0 && !selectedDb;
+  // Un projet tout juste créé n'a pas encore de base, mais son journal de création se consulte.
+  const selectedProjectHasJobs = projectJobs.length > 0;
   const projectTabVisible: Record<string, boolean> = {
     bases: selectedProjectOnline,
     modules: selectedProjectOnline && !awaitingFirstDatabase,
     // Projet arrêté : l'activité reste visible, elle explique souvent pourquoi il ne démarre pas.
-    logs: !awaitingFirstDatabase,
+    logs: !awaitingFirstDatabase || selectedProjectHasJobs,
     actions: true,
   };
+  // Actions en cours du projet ouvert ; celles des autres projets sont signalées dans la barre latérale.
+  const selectedProjectRunningJobs = useMemo(
+    () => (projectViewOpen ? runningJobs.filter((job) => job.project === selectedProjectName) : []),
+    [projectViewOpen, runningJobs, selectedProjectName],
+  );
 
   // Un onglet masqué ne reste jamais actif.
   useEffect(() => {
-    if (awaitingFirstDatabase && (activeTab === "modules" || activeTab === "logs")) setActiveTab("bases");
-  }, [activeTab, awaitingFirstDatabase]);
+    if (awaitingFirstDatabase && (activeTab === "modules" || (activeTab === "logs" && !selectedProjectHasJobs))) {
+      setActiveTab("bases");
+    }
+  }, [activeTab, awaitingFirstDatabase, selectedProjectHasJobs]);
   // Sans projet ouvert, les onglets n'offrent que des panneaux vides : l'accueil prend la place.
   const showWelcome = !projectViewOpen;
 
@@ -1684,7 +1705,8 @@ export default function Home() {
                   switchToRefinedInterface={switchToRefinedInterface}
                 />
               )}
-              {runningJobs.length > 0 && <RunningJobsBanner onFollowJob={followJob} runningJobs={runningJobs} />}
+              {/* L'onglet Activité montre déjà l'action suivie : pas de rappel au-dessus. */}
+              {activeTab !== "logs" && <ProjectActivity jobs={selectedProjectRunningJobs} onFollowJob={followJob} />}
 
               {showWelcome ? (
                 <WelcomeScreen
@@ -1889,6 +1911,7 @@ export default function Home() {
         open={createProjectOpen}
         onOpenChange={setCreateProjectOpen}
         prerequisites={creationPrerequisites}
+        projects={overview?.projects ?? []}
         dockerReady={Boolean(systemStatus?.docker.running)}
         loading={loading}
         onRefreshPrerequisites={loadCreationPrerequisites}
@@ -2261,7 +2284,7 @@ export default function Home() {
         </div>
       )}
 
-      <ToastStack toasts={toasts} raised={showFloatingModuleActions} />
+      <ToastStack toasts={toasts} raised={showFloatingModuleActions} onDismiss={dismissToast} />
     </main>
   );
 }

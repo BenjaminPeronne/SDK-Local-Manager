@@ -2,33 +2,47 @@
 
 import { useCallback, useRef, useState } from "react";
 import { API_BASE } from "@/lib/api";
-import type { Toast } from "@/lib/types";
+import type { Toast, ToastAction } from "@/lib/types";
 
-type Schedule = (callback: () => void, delay: number) => void;
+// Au-delà, les plus anciens partent : une rafale d'erreurs ne doit pas couvrir l'écran.
+export const MAX_VISIBLE_TOASTS = 4;
 
-/** Notifications éphémères ; les erreurs sont aussi remontées au journal du backend. */
-export function useToasts(schedule: Schedule) {
+export type PushToast = (kind: Toast["kind"], message: string, options?: { action?: ToastAction }) => void;
+
+/**
+ * Notifications éphémères ; les erreurs sont aussi remontées au journal du backend.
+ *
+ * Leur disparition est gérée par la pile affichée (pause au survol) : ce hook ne tient que la liste.
+ */
+export function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastId = useRef(1);
 
-  const pushToast = useCallback(
-    (kind: Toast["kind"], message: string) => {
-      const id = toastId.current++;
-      setToasts((current) => [...current, { id, kind, message }]);
-      schedule(
-        () => setToasts((current) => current.filter((toast) => toast.id !== id)),
-        kind === "error" ? 8000 : 4200,
-      );
-      if (kind === "error") {
-        void fetch(`${API_BASE}/api/errors/report`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message }),
-        }).catch(() => undefined);
-      }
-    },
-    [schedule],
-  );
+  const dismissToast = useCallback((id: number) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }, []);
 
-  return { toasts, pushToast };
+  const pushToast = useCallback<PushToast>((kind, message, options) => {
+    setToasts((current) => {
+      const repeated = current.find((toast) => toast.kind === kind && toast.message === message);
+      if (repeated) {
+        return current.map((toast) =>
+          toast === repeated
+            ? { ...toast, count: (toast.count ?? 1) + 1, shownAt: Date.now(), action: options?.action ?? toast.action }
+            : toast,
+        );
+      }
+      const toast = { id: toastId.current++, kind, message, shownAt: Date.now(), action: options?.action };
+      return [...current, toast].slice(-MAX_VISIBLE_TOASTS);
+    });
+    if (kind === "error") {
+      void fetch(`${API_BASE}/api/errors/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      }).catch(() => undefined);
+    }
+  }, []);
+
+  return { toasts, pushToast, dismissToast };
 }

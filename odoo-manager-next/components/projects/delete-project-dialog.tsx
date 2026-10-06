@@ -22,7 +22,7 @@ export function DeleteProjectDialog({ createJob, onOpenChange, open, selectedPro
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Supprimer {selectedProject?.name}</DialogTitle>
+          <DialogTitle>Supprimer {selectedProject?.name.toUpperCase()}</DialogTitle>
           <DialogDescription>
             Le projet part dans la corbeille : tu peux le récupérer pendant 30 jours depuis Paramètres, section Espace
             disque. Ensuite, il est supprimé définitivement. Saisis le nom du projet pour confirmer.
@@ -31,11 +31,16 @@ export function DeleteProjectDialog({ createJob, onOpenChange, open, selectedPro
         <Input
           value={deleteConfirm}
           onChange={(event) => setDeleteConfirm(event.target.value)}
-          placeholder={selectedProject?.name}
+          placeholder={selectedProject?.name.toUpperCase()}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
         />
         <Button
           variant="destructive"
-          disabled={!selectedProject || deleteConfirm !== selectedProject.name || submitting}
+          disabled={
+            !selectedProject || deleteConfirm.trim().toLowerCase() !== selectedProject.name.toLowerCase() || submitting
+          }
           onClick={async () => {
             // Un second clic pendant l'envoi lancerait une deuxième suppression, vouée à échouer.
             setSubmitting(true);

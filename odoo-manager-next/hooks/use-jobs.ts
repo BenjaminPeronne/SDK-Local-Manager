@@ -5,21 +5,24 @@ import { api } from "@/lib/api";
 import { sendTaskNotification } from "@/lib/desktop-runtime";
 import { type JobOutputCache, mergeIncrementalJobOutput } from "@/lib/job-output";
 import { isJobUnfinished, jobCompletionTitle, jobsFingerprint } from "@/lib/jobs";
-import type { Job, Toast } from "@/lib/types";
+import type { Job } from "@/lib/types";
+import type { PushToast } from "@/hooks/use-toasts";
 
 type UseJobsOptions = {
-  pushToast: (kind: Toast["kind"], message: string) => void;
+  pushToast: PushToast;
   markApiSuccess: () => void;
   markApiFailure: (error: unknown) => boolean;
   /** Appelé quand une action suivie se termine bien, après sa notification. */
   onJobSucceeded?: () => void;
+  /** Ouvre le journal d'une action depuis sa notification de fin. */
+  onOpenJob?: (job: Job) => void;
 };
 
 /**
  * Actions du gestionnaire : liste, action suivie, lecture incrémentale de sa sortie et
  * notification de fin. Le rythme des relectures appartient à l'appelant (flux, filet de secours).
  */
-export function useJobs({ pushToast, markApiSuccess, markApiFailure, onJobSucceeded }: UseJobsOptions) {
+export function useJobs({ pushToast, markApiSuccess, markApiFailure, onJobSucceeded, onOpenJob }: UseJobsOptions) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   // Lue par les relectures en cours : l'état React ne l'est qu'au rendu suivant.
@@ -44,13 +47,15 @@ export function useJobs({ pushToast, markApiSuccess, markApiFailure, onJobSuccee
       const successful = job.status === "done";
       const title = `${jobCompletionTitle(job)} : ${job.title}`;
       const message = !successful && job.error_message ? `${title}\n${job.error_message}` : title;
-      pushToast(successful ? "success" : job.status === "cancelled" ? "info" : "error", message);
+      // Le journal n'existe que dans un projet : une action générale n'a pas de lien.
+      const action = job.project && onOpenJob ? { label: "Voir le journal", onClick: () => onOpenJob(job) } : undefined;
+      pushToast(successful ? "success" : job.status === "cancelled" ? "info" : "error", message, { action });
       void sendTaskNotification(job).catch(() => {
         // A refused system permission must not affect job polling.
       });
       if (successful) onJobSucceeded?.();
     },
-    [pushToast, onJobSucceeded],
+    [pushToast, onJobSucceeded, onOpenJob],
   );
 
   /** Applique une liste reçue ; `notify` à faux au démarrage, pour ne pas annoncer des actions déjà finies. */

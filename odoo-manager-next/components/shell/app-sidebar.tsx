@@ -4,7 +4,7 @@ import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
 import { Circle, FolderPlus, Info, Loader2, Search, Settings } from "lucide-react";
 import type { StaticImageData } from "next/image";
 import { statusVariant } from "@/lib/format";
-import { isJobActive, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
+import { isJobActive, isJobUnfinished, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
 import type { Season } from "@/lib/seasonal";
 import type { AppUpdate, ExternalLogView, Job, ManagerSettings, Overview, Project, SystemStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,7 @@ import { ChristmasHat } from "@/components/seasonal/christmas";
 import { WitchHat } from "@/components/seasonal/halloween";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/shell/update-banner";
+import { GeneralActivity } from "@/components/jobs/job-activity";
 import type { UpdateInstaller } from "@/hooks/use-update-installer";
 
 type AppSidebarProps = {
@@ -74,6 +75,15 @@ export function AppSidebar({
     }
     return runningJobs;
   }, [jobs]);
+  // Toute action en cours d'un projet le signale dans la liste, qu'il soit ouvert ou non.
+  const projectBusyJobs = useMemo(() => {
+    const busy = new Map<string, Job>();
+    for (const job of jobs) {
+      if (job.project && isJobActive(job) && !busy.has(job.project)) busy.set(job.project, job);
+    }
+    return busy;
+  }, [jobs]);
+  const generalJobs = useMemo(() => jobs.filter((job) => !job.project && isJobUnfinished(job)), [jobs]);
   const filteredProjects = useMemo(() => {
     const query = projectsFilter.trim().toLowerCase();
     return (overview?.projects || [])
@@ -161,7 +171,7 @@ export function AppSidebar({
                 }}
               >
                 <span className="min-w-0 flex-1 py-2">
-                  <span className="block truncate text-sm font-semibold">{job.project}</span>
+                  <span className="block truncate text-sm font-semibold uppercase">{job.project}</span>
                   <span className="mt-0.5 flex items-center gap-1.5 text-xs text-primary">
                     <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
                     {job.title.startsWith(MIGRATION_JOB_PREFIX) ? "Copie en cours…" : "Création en cours…"}
@@ -181,6 +191,7 @@ export function AppSidebar({
               projectLifecycleJobs.get(`Arrêter ${project.name}`);
             const switchingOn = lifecycleJob?.title.startsWith("Démarrer ") ?? false;
             const displayedRunning = running || switchingOn;
+            const busyJob = lifecycleJob || projectBusyJobs.get(project.name);
 
             return (
               <div
@@ -214,8 +225,13 @@ export function AppSidebar({
                     </span>
                   </button>
                   <div className="flex w-[74px] shrink-0 items-center justify-end gap-2">
-                    {lifecycleJob ? (
-                      <Loader2 className="h-4 w-4 animate-spin text-primary" aria-label="Changement d’état en cours" />
+                    {busyJob ? (
+                      <span title={busyJob.title} className="inline-flex h-6 w-6 items-center justify-center">
+                        <Loader2
+                          className="h-4 w-4 animate-spin text-primary"
+                          aria-label={`En cours : ${busyJob.title}`}
+                        />
+                      </span>
                     ) : (
                       <span
                         className={cn(
@@ -253,6 +269,7 @@ export function AppSidebar({
           })}
         </div>
         <div className="grid grid-cols-2 gap-2 border-t p-3 lg:grid-cols-1">
+          <GeneralActivity jobs={generalJobs} className="col-span-2 lg:col-span-1" />
           {availableUpdate && (
             <UpdateBanner
               update={availableUpdate}
