@@ -2365,6 +2365,21 @@ class ProjectService:
                 f"Copie du filestore ({total} fichier(s)) interrompue : {' '.join(lines)[-300:] or f'code {code}'}"
             )
 
+    def free_space_from_restore_leftovers(self, project, log=None):
+        """Après un démarrage manqué : démarre seul le conteneur Odoo pour supprimer ces restes.
+
+        Retourne True si de la place a été libérée, donc si un nouvel essai a une chance d'aboutir.
+        """
+        container = f"odoo-{project}"
+        status = self.container_status(container)
+        if status in {"exited", "created"}:
+            # `docker start` ignore la dépendance à PostgreSQL : le nettoyage n'a besoin que de ce conteneur.
+            if self.capture(self.docker("start", container), timeout=60)[0] != 0:
+                return False
+        elif status != "running":
+            return False
+        return self.remove_odoo_restore_leftovers(project, log=log) > 0
+
     def remove_odoo_restore_leftovers(self, project, log=None):
         """Supprime du conteneur Odoo les restes d'une restauration interrompue. Retourne les octets libérés."""
         container = f"odoo-{project}"
@@ -3351,7 +3366,15 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
         self.fix_postgres_healthcheck_start_period(compose, log=log)
         self.start_traefik(log=log)
         self.log(log, f"Démarrage du projet {project}...")
-        self.compose_up_project(project, path, log=log)
+        try:
+            self.compose_up_project(project, path, log=log)
+        except RuntimeError:
+            # Disque saturé par les restes d'une restauration interrompue : PostgreSQL ne démarre
+            # plus, et le nettoyage prévu après le démarrage n'aurait jamais lieu.
+            if not self.free_space_from_restore_leftovers(project, log=log):
+                raise
+            self.log(log, "Nouvel essai de démarrage après le nettoyage...")
+            self.compose_up_project(project, path, log=log)
         container = f"odoo-{project}"
         self.detach_odoo_from_container_command(project, log=log)
         self.wait_for_container(container, log=log)

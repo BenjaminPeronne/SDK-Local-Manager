@@ -1827,6 +1827,42 @@ class OdooStartupRepairTests(unittest.TestCase):
         requirements = (self.root / "DEMO" / "init" / "requirements_pip.txt").read_text(encoding="utf-8")
         self.assertEqual("openai\n", requirements)
 
+    def test_a_start_blocked_by_a_full_disk_cleans_the_leftovers_then_retries(self):
+        attempts = []
+
+        def compose_up(project, path, log=None, recreate_changed=False):
+            attempts.append(project)
+            if len(attempts) == 1:
+                raise RuntimeError("Docker Compose n'a pas démarré correctement.")
+
+        self.runner.statuses = {"odoo-DEMO": "exited"}
+        with (
+            patch.object(self.service, "start_traefik"),
+            patch.object(self.service, "compose_up_project", side_effect=compose_up),
+            patch.object(self.service, "remove_odoo_restore_leftovers", return_value=34 * 1024**3) as cleanup,
+            patch.object(self.service, "detach_odoo_from_container_command"),
+            patch.object(self.service, "wait_for_container"),
+            patch.object(self.service, "wait_for_odoo_container_initialization"),
+            patch.object(self.service, "tune_postgres"),
+        ):
+            self.service.start_project_containers("DEMO", log=lambda _line: None)
+
+        self.assertEqual(["DEMO", "DEMO"], attempts)
+        self.assertTrue(any(command[-2:] == ["start", "odoo-DEMO"] for command, _cwd, _t in self.runner.captures))
+        self.assertGreaterEqual(cleanup.call_count, 1)
+
+    def test_a_start_failure_without_leftovers_is_reported_as_is(self):
+        self.runner.statuses = {"odoo-DEMO": "running"}
+        with (
+            patch.object(self.service, "start_traefik"),
+            patch.object(self.service, "compose_up_project", side_effect=RuntimeError("image introuvable")) as up,
+            patch.object(self.service, "remove_odoo_restore_leftovers", return_value=0),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "image introuvable"):
+                self.service.start_project_containers("DEMO", log=lambda _line: None)
+
+        self.assertEqual(1, up.call_count)
+
     def test_restore_leftovers_report_the_space_they_freed(self):
         original_capture = self.runner.capture
         self.runner.capture = lambda command, cwd=None, timeout=10: (
