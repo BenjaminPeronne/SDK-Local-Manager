@@ -22,7 +22,7 @@ import { RepositoryModuleStatus, RepositoryModuleVersion } from "@/components/mo
 // Au-delà, le rendu des lignes ralentit la fenêtre (dépôts complets de 1 500 modules) : on filtre.
 const REPOSITORY_PICKER_MAX_ROWS = 200;
 
-const REPOSITORY_ACTION_ORDER = { update: 0, add: 1, blocked: 2 } as const;
+const REPOSITORY_ACTION_ORDER = { update: 0, replace: 1, add: 2, blocked: 3 } as const;
 
 type RepositoryImportDialogProps = {
   canUseDb: boolean;
@@ -106,7 +106,9 @@ export function RepositoryImportDialog({
     repositorySelection.has(module.name),
   );
   const repositorySelectedAdds = repositorySelectedModules.filter((module) => module.action === "add").length;
-  const repositorySelectedUpdates = repositorySelectedModules.length - repositorySelectedAdds;
+  const repositorySelectedReplaces = repositorySelectedModules.filter((module) => module.action === "replace").length;
+  const repositorySelectedUpdates =
+    repositorySelectedModules.length - repositorySelectedAdds - repositorySelectedReplaces;
   const repositoryUpdatableModules = repositorySelectableModules.filter((module) => module.action === "update");
   function repositoryModuleRow(module: RepositoryModule) {
     const blocked = module.action === "blocked";
@@ -454,11 +456,14 @@ export function RepositoryImportDialog({
                 {[
                   repositorySelectedAdds && `${repositorySelectedAdds} ajout(s)`,
                   repositorySelectedUpdates && `${repositorySelectedUpdates} mise(s) à jour`,
+                  repositorySelectedReplaces && `${repositorySelectedReplaces} remplacement(s) d’un autre dépôt`,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
               </span>
             )}
+            {repositorySelectedReplaces > 0 &&
+              "L’autre dépôt n’est pas modifié : « Revenir à la version du dépôt » le rétablit, module par module. "}
             {repositorySelectedUpdates > 0 ? "Les versions remplacées sont sauvegardées ; " : ""}
             {repositorySelectedUpdates > 0
               ? "tout est annulé si un module échoue."

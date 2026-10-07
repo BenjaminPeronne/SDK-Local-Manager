@@ -137,6 +137,8 @@ export function ModulesTab({
       requestDeleteCode,
       requestTranslationReset,
       requestUninstall,
+      restoreRepositoryVersion: (name) =>
+        void createJob("restore_module_source", { project: projectName, module: name }),
       toggleFromRow: toggleModuleFromRow,
       toggleSelection: toggleModuleSelection,
     }),

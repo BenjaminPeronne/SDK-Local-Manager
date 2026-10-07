@@ -2,7 +2,7 @@
 
 import { memo, type MouseEvent as ReactMouseEvent } from "react";
 import { DropdownMenu } from "@radix-ui/themes";
-import { Copy, Languages, MoreHorizontal, PackageX, PlusCircle, RefreshCcw, Trash2 } from "lucide-react";
+import { Copy, Languages, MoreHorizontal, PackageX, PlusCircle, RefreshCcw, Trash2, Undo2 } from "lucide-react";
 import { compactWorkspacePath } from "@/lib/format";
 import { moduleOriginLabel, normalizedModuleOrigin } from "@/lib/modules";
 import type { ModuleInfo } from "@/lib/types";
@@ -23,6 +23,7 @@ export type ModuleRowActions = {
   requestDeleteCode: (moduleNames: string[]) => void;
   requestTranslationReset: (moduleNames: string[]) => void;
   requestUninstall: (moduleNames: string[]) => void;
+  restoreRepositoryVersion: (name: string) => void;
   toggleFromRow: (event: ReactMouseEvent<HTMLElement>, name: string) => void;
   toggleSelection: (name: string, checked: boolean) => void;
 };
@@ -81,6 +82,15 @@ export const ModuleRow = memo(function ModuleRow({
             {module.application && (
               <Badge variant="outline" className="ml-2 align-middle">
                 Application
+              </Badge>
+            )}
+            {module.replaced_repository && (
+              <Badge
+                variant="warning"
+                className="ml-2 align-middle"
+                title={`Copie importée à la place de la version de ${module.replaced_repository}, qui reste en place : « Revenir à la version du dépôt » la rétablit.`}
+              >
+                Remplace {module.replaced_repository}
               </Badge>
             )}
             {showRepositoryCopy && module.repository_copy && (
@@ -183,6 +193,12 @@ export const ModuleRow = memo(function ModuleRow({
               >
                 <PackageX className="h-4 w-4" />
                 Désinstaller de la base
+              </DropdownMenu.Item>
+            )}
+            {module.replaced_repository && (
+              <DropdownMenu.Item onSelect={() => actions.restoreRepositoryVersion(module.name)}>
+                <Undo2 className="h-4 w-4" />
+                Revenir à la version du dépôt {module.replaced_repository}
               </DropdownMenu.Item>
             )}
             {module.removal_mode !== "link_only" && (

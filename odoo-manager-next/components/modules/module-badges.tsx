@@ -32,6 +32,16 @@ export function RepositoryModuleStatus({ module }: { module: RepositoryModule })
         Nouveau
       </Badge>
     );
+  if (module.action === "replace")
+    return (
+      <Badge
+        variant="warning"
+        className="shrink-0"
+        title={module.replaces && `Remplace la version de ${module.replaces}`}
+      >
+        Remplace
+      </Badge>
+    );
   const same = Boolean(module.current_version && module.current_version === module.version);
   return (
     <Badge variant="default" className="shrink-0">

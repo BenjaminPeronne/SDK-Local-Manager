@@ -297,6 +297,8 @@ export type ModuleInfo = {
   repository?: string;
   /** Odoo charge une copie dans addons-store : mettre le dépôt à jour ne la change pas. */
   repository_copy?: boolean;
+  /** Copie importée qui remplace la version de ce dépôt, rétablissable. */
+  replaced_repository?: string;
 };
 
 /** Dépôt d'où viennent des modules du projet. */
@@ -355,9 +357,12 @@ export type RepositoryModule = {
   current_version: string;
   installed_version: string;
   state: string;
-  action: "add" | "update" | "blocked";
+  /** replace : le module vient aujourd'hui d'un autre dépôt du projet, rétabli ensuite à la demande. */
+  action: "add" | "update" | "replace" | "blocked";
   reason: string;
   warning: string;
+  /** Dépôt dont la version est remplacée, par exemple « gazdom-addons (master) ». */
+  replaces?: string;
 };
 
 export type RepositoryInspection =
