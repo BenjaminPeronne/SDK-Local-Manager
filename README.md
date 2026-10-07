@@ -410,7 +410,7 @@ Le dépôt d'un module est lu sans lancer Git (`odoo_manager_core/git_checkouts.
 - **Clone Git** : branche, étiquette et adresse `origin` lues dans `.git` (worktrees compris).
 - **Archive SDK** : dépôt téléchargé depuis la plateforme SDK, sans `.git` ; son fichier `info.sdk` donne l'adresse, la branche active et le commit.
 - **Copie importée** : module ajouté par **Ajouter des modules › Depuis un dépôt Git** (voir plus haut).
-- **Copie** (badge orange) : Odoo charge une copie rangée à la racine d'`addons-store`, alors qu'un dépôt du projet contient un module du même nom. Mettre ce dépôt à jour ne change pas la copie.
+- **Copie rangée à la racine d'`addons-store`** : elle est classée sous le dépôt du projet qui contient un module du même nom. Mettre ce dépôt à jour ne change pas la copie.
 - Le code d'Odoo et d'Odoo Enterprise ferme la liste, replié.
 
 Les dossiers du projet et `odoo/` ne comptent jamais comme dépôt d'un module : ils peuvent être le dépôt du modèle de projet ou le dépôt de production du client, qui ne suivent pas les copies d'`addons-store`.

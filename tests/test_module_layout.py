@@ -79,10 +79,11 @@ class ModuleLayoutTests(unittest.TestCase):
         self.assertEqual(str(storage.resolve(strict=False)), module["source_path"])
         self.assertEqual("lien vers addons-store", module["path_kind"])
 
-    def test_modules_report_enterprise_and_other_origins(self):
+    def test_modules_report_odoo_enterprise_and_other_origins(self):
         community = self.project_root / "odoo" / "odoo" / "addons" / "community_module"
+        base = self.project_root / "odoo" / "odoo" / "odoo" / "addons" / "base_module"
         enterprise = self.project_root / "odoo" / "addons-store" / "odoo_enterprise" / "enterprise_module"
-        for module in (community, enterprise):
+        for module in (community, base, enterprise):
             module.mkdir(parents=True)
             (module / "__manifest__.py").write_text("{'name': 'Test'}\n", encoding="utf-8")
 
@@ -90,7 +91,8 @@ class ModuleLayoutTests(unittest.TestCase):
 
         origins = {module["name"]: module["origin"] for module in web.modules_for(self.project)}
 
-        self.assertEqual("other", origins["community_module"])
+        self.assertEqual("odoo", origins["community_module"])
+        self.assertEqual("odoo", origins["base_module"])
         self.assertEqual("enterprise", origins["enterprise_module"])
         self.assertEqual("other", origins["custom_module"])
 
@@ -217,16 +219,14 @@ class ModuleLayoutTests(unittest.TestCase):
         modules = web.modules_for(self.project)
         repositories = web.module_repositories(self.project, modules)
 
-        by_module = {module["name"]: (module["repository"], module["repository_copy"]) for module in modules}
+        by_module = {module["name"]: module["repository"] for module in modules}
         # Le dossier temporaire passe par un lien sous macOS (/var -> /private/var) : un seul groupe malgré tout.
         repository = str((store / "sodial-addons").resolve())
-        self.assertEqual((repository, False), by_module["sodial_base"])
-        self.assertEqual((repository, True), by_module["sodial_sale"])
-        self.assertEqual(("odoo", False), by_module["sale"])
-        self.assertEqual(
-            ("import:ssh://git@gitlab.sudokeys.com:10022/OCA/web.git#17.0", False), by_module["web_widget"]
-        )
-        self.assertEqual(("", False), by_module["lonely_copy"])
+        self.assertEqual(repository, by_module["sodial_base"])
+        self.assertEqual(repository, by_module["sodial_sale"])
+        self.assertEqual("odoo", by_module["sale"])
+        self.assertEqual("import:ssh://git@gitlab.sudokeys.com:10022/OCA/web.git#17.0", by_module["web_widget"])
+        self.assertEqual("", by_module["lonely_copy"])
         self.assertEqual(
             [("sodial-addons", "git", "dev", False), ("web", "import", "17.0", False), ("odoo", "odoo", ANY, True)],
             [(item["name"], item["source"], item["branch"], item["standard"]) for item in repositories],

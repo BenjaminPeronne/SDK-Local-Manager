@@ -2255,9 +2255,12 @@ def module_location_info(project, path, layout=None):
 
 
 def module_origin(source_path):
+    """enterprise, odoo (code standard d'Odoo, dans odoo/odoo/) ou other."""
     normalized_path = str(source_path).replace("\\", "/").casefold()
     if "/addons-store/odoo_entreprise/" in normalized_path or "/addons-store/odoo_enterprise/" in normalized_path:
         return "enterprise"
+    if "/odoo/odoo/addons/" in normalized_path and "/addons-store/" not in normalized_path.split("/odoo/odoo/", 1)[1]:
+        return "odoo"
     return "other"
 
 
@@ -2591,9 +2594,8 @@ def module_repositories(project, modules):
     """Dépôts d'où viennent les modules, standards (Odoo, Enterprise) en dernier.
 
     Complète `repository` des modules hors de tout dépôt : leur import enregistré, le code d'Odoo
-    quand il n'est pas un clone, ou le dépôt d'addons-store qui contient un module du même nom.
-    Dans ce dernier cas, Odoo charge une copie (`repository_copy`) : mettre le dépôt à jour ne
-    la change pas. Une copie sans aucun dépôt connu reste sans dépôt.
+    quand il n'est pas un clone, ou le dépôt d'addons-store qui contient un module du même nom
+    (Odoo charge alors une copie de ce module). Une copie sans aucun dépôt connu reste sans dépôt.
     """
     variants = project_layout_variants(project)
     storage_parents = variants["storage"]
@@ -2606,7 +2608,6 @@ def module_repositories(project, modules):
     repositories = {}
     resolved_roots = {}
     for module in modules:
-        module["repository_copy"] = False
         root = module.get("repository", "")
         if root:
             # Un même dépôt, atteint par un lien ou directement, ne doit former qu'un groupe.
@@ -2656,7 +2657,7 @@ def module_repositories(project, modules):
                 "",
             )
             if root:
-                module["repository"], module["repository_copy"] = root, True
+                module["repository"] = root
                 if root not in repositories:
                     repositories[root] = repository_entry(root, standard_roots)
             continue
