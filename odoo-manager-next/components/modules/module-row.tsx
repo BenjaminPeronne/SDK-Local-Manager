@@ -2,7 +2,7 @@
 
 import { memo, type MouseEvent as ReactMouseEvent } from "react";
 import { DropdownMenu } from "@radix-ui/themes";
-import { Copy, Languages, MoreHorizontal, PackageX, PlusCircle, RefreshCcw, Trash2, Undo2 } from "lucide-react";
+import { Languages, MoreHorizontal, PackageX, PlusCircle, RefreshCcw, Trash2, Undo2 } from "lucide-react";
 import { compactWorkspacePath } from "@/lib/format";
 import { moduleOriginLabel, normalizedModuleOrigin } from "@/lib/modules";
 import type { ModuleInfo } from "@/lib/types";
@@ -12,9 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { REFINED_IDENTIFIER, REFINED_MODULE_COLUMNS, REFINED_ROW_TITLE } from "@/components/common/refined-layout";
 import { ModuleStateBadge } from "@/components/modules/module-badges";
-
-export const MODULE_COPY_HINT =
-  "Odoo charge une copie de ce module rangée dans addons-store, pas le dossier du dépôt : mettre le dépôt à jour ne la change pas.";
 
 export type ModuleRowActions = {
   canUseDb: boolean;
@@ -32,8 +29,6 @@ type ModuleRowProps = {
   actions: ModuleRowActions;
   module: ModuleInfo;
   selected: boolean;
-  /** Vue par dépôt : signale les copies, qu'une mise à jour du dépôt ne change pas. */
-  showRepositoryCopy?: boolean;
   showLocations: boolean;
   workspace?: string;
 };
@@ -43,7 +38,6 @@ export const ModuleRow = memo(function ModuleRow({
   actions,
   module,
   selected,
-  showRepositoryCopy = false,
   showLocations,
   workspace,
 }: ModuleRowProps) {
@@ -91,16 +85,6 @@ export const ModuleRow = memo(function ModuleRow({
                 title={`Copie importée à la place de la version de ${module.replaced_repository}, qui reste en place : « Revenir à la version du dépôt » la rétablit.`}
               >
                 Remplace {module.replaced_repository}
-              </Badge>
-            )}
-            {showRepositoryCopy && module.repository_copy && (
-              <Badge
-                variant="outline"
-                className="ml-2 gap-1 border-amber-500/50 align-middle text-amber-700 dark:text-amber-300"
-                title={MODULE_COPY_HINT}
-              >
-                <Copy className="h-3 w-3" aria-hidden="true" />
-                Copie
               </Badge>
             )}
           </span>

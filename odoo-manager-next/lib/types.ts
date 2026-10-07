@@ -275,7 +275,8 @@ export type RestoreDatabasePayload = {
   file: File;
 };
 
-export type ModuleOrigin = "enterprise" | "other";
+/** odoo : code standard d'Odoo (Community), dans odoo/odoo du projet. */
+export type ModuleOrigin = "odoo" | "enterprise" | "other";
 
 export type ModuleInfo = {
   name: string;
@@ -295,8 +296,6 @@ export type ModuleInfo = {
   removal_note?: string;
   /** Identifiant du dépôt d'origine (voir ModuleRepository), vide hors de tout dépôt connu. */
   repository?: string;
-  /** Odoo charge une copie dans addons-store : mettre le dépôt à jour ne la change pas. */
-  repository_copy?: boolean;
   /** Copie importée qui remplace la version de ce dépôt, rétablissable. */
   replaced_repository?: string;
 };

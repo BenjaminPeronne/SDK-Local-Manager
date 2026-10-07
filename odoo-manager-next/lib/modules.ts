@@ -5,16 +5,26 @@ export function socleAppInstalled(app: SocleApp) {
 }
 
 export function normalizedModuleOrigin(origin?: string, sourcePath?: string): ModuleOrigin {
-  if (origin === "enterprise") return "enterprise";
+  if (origin === "enterprise" || origin === "odoo") return origin;
   const normalizedPath = (sourcePath || "").replace(/\\/g, "/").toLowerCase();
-  return normalizedPath.includes("/addons-store/odoo_entreprise/") ||
+  if (
+    normalizedPath.includes("/addons-store/odoo_entreprise/") ||
     normalizedPath.includes("/addons-store/odoo_enterprise/")
-    ? "enterprise"
-    : "other";
+  )
+    return "enterprise";
+  // Réponse d'un ancien backend, qui ne distinguait pas le code standard d'Odoo.
+  if (!origin && normalizedPath.includes("/odoo/odoo/addons/")) return "odoo";
+  return "other";
 }
 
+const MODULE_ORIGIN_LABELS: Record<ModuleOrigin, string> = {
+  odoo: "Odoo Community",
+  enterprise: "Odoo Enterprise",
+  other: "Autre",
+};
+
 export function moduleOriginLabel(origin: ModuleOrigin) {
-  return origin === "enterprise" ? "Odoo Enterprise" : "Autre";
+  return MODULE_ORIGIN_LABELS[origin];
 }
 
 export function moduleRepositoryUrlError(value: string) {

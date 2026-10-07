@@ -6,7 +6,6 @@ export type ModuleRepositoryGroup = {
   repository: ModuleRepository | null;
   modules: ModuleInfo[];
   installed: number;
-  copies: number;
 };
 
 export const NO_REPOSITORY_GROUP = "";
@@ -41,7 +40,6 @@ export function groupModulesByRepository(
       repository,
       modules: members,
       installed: members.filter((module) => installedState(module.state)).length,
-      copies: members.filter((module) => module.repository_copy).length,
     };
   };
   const projectGroups = repositories.filter((repository) => !repository.standard).map((r) => group(r.id, r));

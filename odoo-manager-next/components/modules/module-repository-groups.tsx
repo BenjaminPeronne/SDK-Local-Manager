@@ -17,10 +17,18 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { MODULE_COPY_HINT, ModuleRow, type ModuleRowActions } from "@/components/modules/module-row";
+import { ModuleRow, type ModuleRowActions } from "@/components/modules/module-row";
 
 // Au-delà, un dépôt s'ouvre replié : Odoo et Enterprise comptent des centaines de modules.
 const EXPANDED_GROUP_MAX_MODULES = 40;
+
+/** Dépôts ouverts ou fermés à la main ; les autres suivent groupExpanded. */
+export type RepositoryFolding = Record<string, boolean>;
+
+/** Ouvert par défaut : petit dépôt, ou recherche en cours (ses résultats se voient). */
+export function groupExpanded(group: ModuleRepositoryGroup, folding: RepositoryFolding, searchActive: boolean) {
+  return folding[group.id] ?? (searchActive || group.modules.length <= EXPANDED_GROUP_MAX_MODULES);
+}
 // Lignes affichées à l'ouverture d'un dépôt, puis par clic sur « Afficher plus ».
 const GROUP_ROWS_STEP = 50;
 
@@ -63,7 +71,9 @@ function RevisionBadge({ repository }: { repository: ModuleRepository }) {
 }
 
 type ModuleRepositoryGroupsProps = {
+  folding: RepositoryFolding;
   groups: ModuleRepositoryGroup[];
+  onFold: (groupId: string, expanded: boolean) => void;
   openUrl: (url?: string) => Promise<void>;
   rowActions: ModuleRowActions;
   /** Recherche en cours : tous les dépôts qui ont des résultats s'ouvrent. */
@@ -76,7 +86,9 @@ type ModuleRepositoryGroupsProps = {
 
 /** Modules regroupés par dépôt d'origine, chaque dépôt avec sa branche et son adresse. */
 export function ModuleRepositoryGroups({
+  folding,
   groups,
+  onFold,
   openUrl,
   rowActions,
   searchActive,
@@ -85,7 +97,6 @@ export function ModuleRepositoryGroups({
   showLocations,
   workspace,
 }: ModuleRepositoryGroupsProps) {
-  const [expandedOverrides, setExpandedOverrides] = useState<Record<string, boolean>>({});
   const [visibleRows, setVisibleRows] = useState<Record<string, number>>({});
 
   function toggleGroupSelection(group: ModuleRepositoryGroup, checked: boolean) {
@@ -103,8 +114,7 @@ export function ModuleRepositoryGroups({
     <div className="min-w-0">
       {groups.map((group) => {
         const repository = group.repository;
-        const expanded =
-          expandedOverrides[group.id] ?? (searchActive || group.modules.length <= EXPANDED_GROUP_MAX_MODULES);
+        const expanded = groupExpanded(group, folding, searchActive);
         const selectedCount = group.modules.filter((module) => selectedModules.has(module.name)).length;
         const limit = visibleRows[group.id] ?? GROUP_ROWS_STEP;
         const remaining = group.modules.length - limit;
@@ -127,7 +137,7 @@ export function ModuleRepositoryGroups({
                 className="grid min-w-0 flex-1 gap-0.5 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-expanded={expanded}
                 aria-controls={contentId}
-                onClick={() => setExpandedOverrides((current) => ({ ...current, [group.id]: !expanded }))}
+                onClick={() => onFold(group.id, !expanded)}
               >
                 <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                   <ChevronRight
@@ -181,12 +191,6 @@ export function ModuleRepositoryGroups({
                 {group.modules.length} module{group.modules.length > 1 ? "s" : ""}
                 <span className="block">
                   {group.installed} installé{group.installed > 1 ? "s" : ""}
-                  {group.copies > 0 && (
-                    <span className="text-amber-700 dark:text-amber-300" title={MODULE_COPY_HINT}>
-                      {" "}
-                      · {group.copies} copie{group.copies > 1 ? "s" : ""}
-                    </span>
-                  )}
                 </span>
               </span>
             </div>
@@ -198,7 +202,6 @@ export function ModuleRepositoryGroups({
                     actions={rowActions}
                     module={module}
                     selected={selectedModules.has(module.name)}
-                    showRepositoryCopy
                     showLocations={showLocations}
                     workspace={workspace}
                   />

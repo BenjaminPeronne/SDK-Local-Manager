@@ -7,6 +7,7 @@ import {
   type SetStateAction,
   useCallback,
   useMemo,
+  useState,
 } from "react";
 import { DropdownMenu, SegmentedControl } from "@radix-ui/themes";
 import {
@@ -14,6 +15,8 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   CloudDownload,
   FileArchive,
   FolderGit2,
@@ -37,7 +40,11 @@ import {
   RefinedPanel,
   RefinedSectionHeader,
 } from "@/components/common/refined-layout";
-import { ModuleRepositoryGroups } from "@/components/modules/module-repository-groups";
+import {
+  groupExpanded,
+  ModuleRepositoryGroups,
+  type RepositoryFolding,
+} from "@/components/modules/module-repository-groups";
 import { ModuleRow, type ModuleRowActions } from "@/components/modules/module-row";
 
 type ModulesTabProps = {
@@ -159,6 +166,27 @@ export function ModulesTab({
     () => (repositoryView ? groupModulesByRepository(moduleFilters.filtered, moduleRepositories) : []),
     [moduleFilters.filtered, moduleRepositories, repositoryView],
   );
+  // Dépôts repliés ou dépliés à la main, valables pour la recherche en cours : une nouvelle
+  // recherche rouvre les dépôts qui ont des résultats.
+  const searchKey = moduleFilters.search.trim();
+  const [repositoryFolding, setRepositoryFolding] = useState<{ search: string; folding: RepositoryFolding }>({
+    search: "",
+    folding: {},
+  });
+  const folding = repositoryFolding.search === searchKey ? repositoryFolding.folding : {};
+  const expandedGroups = repositoryGroups.filter((group) => groupExpanded(group, folding, searchKey !== "")).length;
+  function foldGroup(groupId: string, expanded: boolean) {
+    setRepositoryFolding((current) => ({
+      search: searchKey,
+      folding: { ...(current.search === searchKey ? current.folding : {}), [groupId]: expanded },
+    }));
+  }
+  function foldAllGroups(expanded: boolean) {
+    setRepositoryFolding({
+      search: searchKey,
+      folding: Object.fromEntries(repositoryGroups.map((group) => [group.id, expanded])),
+    });
+  }
   // Filtres et sélection des modules : identiques en affichage classique et affiné.
   const moduleFiltersBlock = (
     <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_180px_210px_220px]">
@@ -188,6 +216,7 @@ export function ModulesTab({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">Toutes les origines</SelectItem>
+          <SelectItem value="odoo">Odoo Community</SelectItem>
           <SelectItem value="enterprise">Odoo Enterprise</SelectItem>
           <SelectItem value="other">Autre</SelectItem>
         </SelectContent>
@@ -228,9 +257,34 @@ export function ModulesTab({
         </SegmentedControl.Item>
       </SegmentedControl.Root>
       {repositoryView && repositoryGroups.length > 0 && (
-        <span className="text-xs text-muted-foreground">
-          {repositoryGroups.filter((group) => group.repository).length} dépôt(s) · branche chargée affichée pour chacun
-        </span>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-xs text-muted-foreground">
+            {repositoryGroups.filter((group) => group.repository).length} dépôt(s) · branche chargée affichée pour
+            chacun
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={expandedGroups === repositoryGroups.length}
+              onClick={() => foldAllGroups(true)}
+            >
+              <ChevronsUpDown className="h-4 w-4" />
+              Tout déplier
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={expandedGroups === 0}
+              onClick={() => foldAllGroups(false)}
+            >
+              <ChevronsDownUp className="h-4 w-4" />
+              Tout replier
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -366,10 +420,12 @@ export function ModulesTab({
           {repositoryView ? (
             repositoryGroups.length ? (
               <ModuleRepositoryGroups
+                folding={folding}
                 groups={repositoryGroups}
+                onFold={foldGroup}
                 openUrl={openUrl}
                 rowActions={rowActions}
-                searchActive={moduleFilters.search.trim() !== ""}
+                searchActive={searchKey !== ""}
                 selectedModules={selectedModules}
                 setSelectedModules={setSelectedModules}
                 showLocations={showModuleLocations}

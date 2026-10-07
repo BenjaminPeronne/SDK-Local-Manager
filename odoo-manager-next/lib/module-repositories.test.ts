@@ -19,8 +19,8 @@ function repository(id: string, values: Partial<ModuleRepository> = {}): ModuleR
   };
 }
 
-function module(name: string, repositoryId = "", state = "uninstalled", copy = false): ModuleInfo {
-  return { name, title: name, state, path: `/addons/${name}`, repository: repositoryId, repository_copy: copy };
+function module(name: string, repositoryId = "", state = "uninstalled"): ModuleInfo {
+  return { name, title: name, state, path: `/addons/${name}`, repository: repositoryId };
 }
 
 test("modules are grouped by repository, project repositories before standard Odoo", () => {
@@ -31,7 +31,7 @@ test("modules are grouped by repository, project repositories before standard Od
   ];
   const modules = [
     module("sale", "odoo", "installed"),
-    module("sodial_sale", "sodial-addons", "installed", true),
+    module("sodial_sale", "sodial-addons", "installed"),
     module("lonely_copy"),
     module("sodial_base", "sodial-addons", "to upgrade"),
     module("ghost", "removed-repository"),
@@ -40,11 +40,11 @@ test("modules are grouped by repository, project repositories before standard Od
   const groups = groupModulesByRepository(modules, repositories);
 
   assert.deepEqual(
-    groups.map((group) => [group.id, group.modules.map((item) => item.name), group.installed, group.copies]),
+    groups.map((group) => [group.id, group.modules.map((item) => item.name), group.installed]),
     [
-      ["sodial-addons", ["sodial_sale", "sodial_base"], 2, 1],
-      [NO_REPOSITORY_GROUP, ["lonely_copy", "ghost"], 0, 0],
-      ["odoo", ["sale"], 1, 0],
+      ["sodial-addons", ["sodial_sale", "sodial_base"], 2],
+      [NO_REPOSITORY_GROUP, ["lonely_copy", "ghost"], 0],
+      ["odoo", ["sale"], 1],
     ],
   );
   assert.equal(groups[1].repository, null);
