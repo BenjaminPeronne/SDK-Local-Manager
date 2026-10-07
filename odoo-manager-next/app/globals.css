@@ -52,6 +52,16 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  /* Fenêtres : une grille sans colonnes déclarées prend la largeur de son contenu le plus large
+     (l'adresse SSH d'un dépôt, sur une seule ligne) et pousse toute la fenêtre hors de l'écran.
+     Sa colonne unique peut ici rétrécir ; une grille qui déclare ses colonnes (grid-cols-*,
+     qui passe après cette règle) garde les siennes. */
+  .rt-BaseDialogContent :where(.grid) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 :root {
   --background: 0 8% 95%;
   --foreground: 0 0% 4%;
