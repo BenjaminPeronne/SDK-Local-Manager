@@ -197,6 +197,84 @@ def remove_odoo_container_command(content, container):
     return content, ""
 
 
+ODOO_HTTP_PORT = 8069
+ODOO_GEVENT_PORT = 8072
+ODOO_CONF_PORT_RE = re.compile(
+    r"^[ \t]*(workers|http_port|xmlrpc_port|gevent_port|longpolling_port)[ \t]*=[ \t]*(\d+)[ \t]*(?:[#;].*)?$",
+    re.MULTILINE,
+)
+TRAEFIK_ROUTER_RULE_RE = re.compile(r"traefik\.http\.routers\.(?P<router>[\w.-]+)\.rule=(?P<rule>.*)$")
+
+
+def odoo_websocket_port(conf_text):
+    """Port où Odoo sert /websocket : le port gevent avec des workers, son port HTTP sans.
+
+    Sans workers (mode multithread, réglage des projets locaux), Odoo n'ouvre pas le port
+    gevent et répond lui-même au websocket sur son port HTTP.
+    """
+    values = {key: int(value) for key, value in ODOO_CONF_PORT_RE.findall(conf_text or "")}
+    if values.get("workers", 0) > 0:
+        return values.get("gevent_port") or values.get("longpolling_port") or ODOO_GEVENT_PORT
+    return values.get("http_port") or values.get("xmlrpc_port") or ODOO_HTTP_PORT
+
+
+def websocket_route(content):
+    """Route Traefik de /websocket d'un compose : (service Traefik, port, ligne du port, service compose).
+
+    None si le compose n'a pas de route /websocket ou pas de port pour son service.
+    """
+    lines = content.splitlines()
+    routers = sorted(
+        {
+            match.group("router")
+            for line in lines
+            if (match := TRAEFIK_ROUTER_RULE_RE.search(line)) and "/websocket" in match.group("rule")
+        }
+    )
+    if not routers:
+        return None
+    router = routers[0]
+    service = router
+    service_re = re.compile(
+        rf"traefik\.http\.routers\.{re.escape(router)}\.service=([\w.-]+?)(?:@\w+)?[\"']?\s*(?:#.*)?$"
+    )
+    for line in lines:
+        match = service_re.search(line)
+        if match:
+            service = match.group(1)
+    port_re = re.compile(rf"traefik\.http\.services\.{re.escape(service)}\.loadbalancer\.server\.port=(\d+)")
+    index = next((position for position, line in enumerate(lines) if port_re.search(line)), None)
+    if index is None:
+        return None
+    # Service compose qui porte l'étiquette : la clé la moins indentée au-dessus d'elle, hors `services:`.
+    compose_service = ""
+    threshold = len(lines[index]) - len(lines[index].lstrip())
+    for line in reversed(lines[:index]):
+        header = COMPOSE_KEY_RE.match(line)
+        if not header or len(header.group("indent")) >= threshold:
+            continue
+        threshold = len(header.group("indent"))
+        if threshold == 0:
+            break
+        compose_service = header.group("key")
+    return service, int(port_re.search(lines[index]).group(1)), index, compose_service
+
+
+def set_websocket_route_port(content, port):
+    """Compose dont la route /websocket vise `port` ; inchangé sans route."""
+    route = websocket_route(content)
+    if route is None:
+        return content
+    service, _current, index, _compose_service = route
+    lines = content.splitlines(keepends=True)
+    lines[index] = re.sub(
+        rf"(traefik\.http\.services\.{re.escape(service)}\.loadbalancer\.server\.port=)\d+",
+        rf"\g<1>{port}",
+        lines[index],
+    )
+    return "".join(lines)
+
+
 HTTP_FAILURE_LABELS = {
     "refused": "connexion refusée sur le port {port}",
     "reset": "connexion coupée sur le port {port}",
@@ -2150,6 +2228,71 @@ class ProjectService:
             raise RuntimeError("Impossible de recréer le conteneur Odoo du projet.")
         return True
 
+    def align_websocket_route(self, project, log=None):
+        """Fait viser à la route Traefik de /websocket le port où Odoo sert vraiment le websocket.
+
+        Le modèle de projet l'envoie au port gevent (8072), qu'Odoo n'ouvre qu'avec des workers.
+        Sans workers, le websocket échouait (502) : messages et vues ouvertes par l'IA n'arrivaient
+        qu'après rechargement de la page. Le conteneur Odoo garde les étiquettes de sa création :
+        il est recréé s'il vise encore un autre port. Retourne True s'il l'a été.
+        """
+        compose = self.compose_file(project)
+        if not compose:
+            return False
+        try:
+            content = compose.read_text(encoding="utf-8")
+        except OSError:
+            return False
+        route = websocket_route(content)
+        if route is None:
+            return False
+        traefik_service, port, _index, compose_service = route
+        try:
+            conf_text = (self.project_path(project) / "odoo.conf").read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            conf_text = ""
+        expected = odoo_websocket_port(conf_text)
+        if port != expected:
+            backup = compose.with_name(f"{compose.name}.websocket.bak.{time.strftime('%Y%m%d_%H%M%S')}")
+            try:
+                shutil.copy2(compose, backup)
+                compose.write_text(set_websocket_route_port(content, expected), encoding="utf-8")
+            except OSError as exc:
+                self.log(
+                    log, f"Route du websocket non corrigée ({exc}) : les messages en direct d'Odoo resteront bloqués."
+                )
+                return False
+            reason = (
+                "Odoo tourne sans workers et sert le websocket sur ce port"
+                if expected != ODOO_GEVENT_PORT
+                else ("Odoo tourne avec des workers et sert le websocket sur son port gevent")
+            )
+            self.log(
+                log,
+                f"Websocket d'Odoo : la route Traefik visait le port {port} ; elle vise désormais le port {expected} "
+                f"({reason}). Sauvegarde: {backup}",
+            )
+        container = f"odoo-{project}"
+        label = f"traefik.http.services.{traefik_service}.loadbalancer.server.port"
+        code, current = self.capture(
+            self.docker("inspect", "-f", '{{index .Config.Labels "' + label + '"}}', container), timeout=8
+        )
+        current = current.strip() if code == 0 else ""
+        if not current.isdigit() or int(current) == expected:
+            return False
+        self.log(
+            log,
+            "Recréation du conteneur Odoo pour appliquer la route du websocket (bases, filestores et code conservés)...",
+        )
+        code = self.stream(
+            self.docker("compose", "up", "-d", "--no-deps", compose_service or container),
+            cwd=self.project_path(project),
+            log=log,
+        )
+        if code != 0:
+            raise RuntimeError("Impossible de recréer le conteneur Odoo du projet pour corriger la route du websocket.")
+        return True
+
     def install_project_pip_requirements(self, project, log=None):
         requirements = self.project_path(project) / "init" / "requirements_pip.txt"
         try:
@@ -3576,6 +3719,7 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
             self.compose_up_project(project, path, log=log)
         container = f"odoo-{project}"
         self.detach_odoo_from_container_command(project, log=log)
+        self.align_websocket_route(project, log=log)
         self.wait_for_container(container, log=log)
         self.wait_for_odoo_container_initialization(container, log=log)
         self.remove_odoo_restore_leftovers(project, log=log)

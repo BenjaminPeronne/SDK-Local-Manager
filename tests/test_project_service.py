@@ -16,8 +16,11 @@ from odoo_manager_core.project_service import (
     OdooError,
     ProjectService,
     add_postgres_healthcheck_start_period,
+    odoo_websocket_port,
     remove_odoo_container_command,
+    set_websocket_route_port,
     use_pgvector_postgres_image,
+    websocket_route,
 )
 from odoo_manager_core.traefik import reset_traefik_entrypoint_cache
 
@@ -34,6 +37,23 @@ ODOO_COMMAND_COMPOSE = (
     "    stop_grace_period: 1s\n"
 )
 ODOO_AS_CONTAINER_COMMAND = "/bin/bash /usr/local/bin/odoo -c /home/odoo/srv/conf/odoo.conf"
+
+# Étiquettes Traefik du modèle de projet : le websocket vise le port gevent.
+WEBSOCKET_COMPOSE = (
+    "services:\n"
+    "  odoo-DEMO:\n"
+    "    container_name: odoo-DEMO\n"
+    "    labels:\n"
+    "      - traefik.enable=true\n"
+    "      - traefik.http.routers.odoo-DEMO.rule=Host(`dev.DEMO.localhost`)\n"
+    "      - traefik.http.services.odoo-DEMO.loadbalancer.server.port=8069\n"
+    "      # Odoo Websocket\n"
+    "      - traefik.http.routers.odoo-DEMO-ws.rule=Path(`/websocket`) && Host(`dev.DEMO.localhost`)\n"
+    "      - traefik.http.services.odoo-DEMO-ws.loadbalancer.server.port=8072\n"
+    "      - traefik.http.routers.odoo-DEMO-ws.service=odoo-DEMO-ws@docker\n"
+    "    networks:\n"
+    "      - traefik-local\n"
+)
 
 TRAEFIK_MIDDLEWARE_LABELS = (
     "traefik.http.middlewares.odoo-forward.headers.customrequestheaders.X-Forwarded-Proto=http,"
@@ -180,6 +200,30 @@ class FakeRunner:
         if len(command) >= 5 and command[1:3] == ["inspect", "-f"] and "json .Args" in command[3]:
             return 0, self.traefik_arguments.get(command[4], '["--entrypoints.web.address=:80"]\t[]')
         return 0, ""
+
+
+class WebsocketRouteTests(unittest.TestCase):
+    def test_websocket_port_follows_the_odoo_server_mode(self):
+        self.assertEqual(8069, odoo_websocket_port("[options]\nhttp_port = 8069\ngevent_port = 8072\n# workers = 2\n"))
+        self.assertEqual(8072, odoo_websocket_port("[options]\nworkers = 2\n"))
+        self.assertEqual(9000, odoo_websocket_port("[options]\nworkers = 4\ngevent_port = 9000\n"))
+        self.assertEqual(8073, odoo_websocket_port("[options]\nworkers = 2\nlongpolling_port = 8073\n"))
+        self.assertEqual(8070, odoo_websocket_port("[options]\nworkers = 0\nhttp_port = 8070\n"))
+        self.assertEqual(8069, odoo_websocket_port(""))
+
+    def test_only_the_websocket_service_port_changes(self):
+        self.assertEqual(("odoo-DEMO-ws", 8072, 9, "odoo-DEMO"), websocket_route(WEBSOCKET_COMPOSE))
+
+        updated = set_websocket_route_port(WEBSOCKET_COMPOSE, 8069)
+
+        self.assertEqual(
+            WEBSOCKET_COMPOSE.replace(
+                "odoo-DEMO-ws.loadbalancer.server.port=8072", "odoo-DEMO-ws.loadbalancer.server.port=8069"
+            ),
+            updated,
+        )
+        self.assertIn("odoo-DEMO.loadbalancer.server.port=8069", updated)
+        self.assertIsNone(websocket_route("services:\n  odoo-DEMO:\n    image: odoo\n"))
 
 
 class ProjectServiceTests(unittest.TestCase):
@@ -704,6 +748,58 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertIn("name not in ('old_pending')", reset)
         self.assertIn("when state = 'to install' then 'uninstalled' else 'installed'", reset)
         self.assertIn("Modules remis dans leur état précédent : sale -> installed", logs)
+
+    def label_capture(self, port):
+        original_capture = self.runner.capture
+
+        def capture(command, cwd=None, timeout=10):
+            if command[1:3] == ["inspect", "-f"] and "Config.Labels" in command[3]:
+                self.runner.captures.append((list(command), cwd, timeout))
+                return 0, port
+            return original_capture(command, cwd, timeout)
+
+        self.runner.capture = capture
+
+    def test_websocket_route_is_moved_to_the_http_port_without_workers(self):
+        # Constaté sur tous les projets : route vers 8072, workers commenté, websocket en 502.
+        compose = self.project_path / "compose.yml"
+        compose.write_text(WEBSOCKET_COMPOSE, encoding="utf-8")
+        (self.project_path / "odoo.conf").write_text("[options]\ngevent_port = 8072\n# workers = 2\n", encoding="utf-8")
+        self.label_capture("8072\n")
+        logs = []
+
+        self.assertTrue(self.service.align_websocket_route("DEMO", log=logs.append))
+
+        self.assertIn("odoo-DEMO-ws.loadbalancer.server.port=8069", compose.read_text(encoding="utf-8"))
+        self.assertEqual(1, len(list(self.project_path.glob("compose.yml.websocket.bak.*"))))
+        self.assertTrue(any("vise désormais le port 8069" in line for line in logs))
+        self.assertEqual(
+            [["compose", "up", "-d", "--no-deps", "odoo-DEMO"]],
+            [command[1:] for command, _cwd in self.runner.streams],
+        )
+
+    def test_websocket_route_already_aligned_changes_nothing(self):
+        for conf, port in (("# workers = 2\n", "8069"), ("workers = 2\n", "8072")):
+            with self.subTest(conf=conf):
+                self.runner.streams.clear()
+                compose = self.project_path / "compose.yml"
+                compose.write_text(set_websocket_route_port(WEBSOCKET_COMPOSE, int(port)), encoding="utf-8")
+                (self.project_path / "odoo.conf").write_text(f"[options]\n{conf}", encoding="utf-8")
+                self.label_capture(port)
+
+                self.assertFalse(self.service.align_websocket_route("DEMO", log=lambda _line: None))
+                self.assertFalse(self.runner.streams)
+                self.assertFalse(list(self.project_path.glob("compose.yml.websocket.bak.*")))
+
+    def test_container_still_on_the_old_port_is_recreated_after_an_earlier_compose_fix(self):
+        # Le compose corrigé lors d'un démarrage interrompu : le conteneur garde son ancienne étiquette.
+        (self.project_path / "compose.yml").write_text(
+            set_websocket_route_port(WEBSOCKET_COMPOSE, 8069), encoding="utf-8"
+        )
+        self.label_capture("8072")
+
+        self.assertTrue(self.service.align_websocket_route("DEMO", log=lambda _line: None))
+        self.assertEqual(["compose", "up", "-d", "--no-deps", "odoo-DEMO"], self.runner.streams[-1][0][1:])
 
     def test_odoo_launch_records_early_output_and_exit_status(self):
         self.runner.odoo_server_running = False

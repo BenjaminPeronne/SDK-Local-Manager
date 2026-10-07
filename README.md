@@ -357,6 +357,8 @@ Quand Odoo répond en erreur 500 pendant son chargement, le journal du lancement
 
 Traefik 3.6 peut cesser de suivre les démarrages de conteneurs sans rien journaliser : la route de tout projet démarré ensuite répond `404 page not found`, configuration correcte ou non. Quand la route d'un projet reste en 404 sans cause trouvée (labels, réseau, port, middlewares), le gestionnaire redémarre Traefik une fois, ce qui lui fait relire tous les conteneurs.
 
+Le websocket d'Odoo (messages en direct, vues ouvertes par l'IA, notifications) passe par la route Traefik `/websocket` du modèle de projet, qui vise le port gevent `8072`. Odoo n'ouvre ce port qu'avec des `workers` : sans eux, réglage des projets locaux, il sert le websocket sur son port HTTP `8069`, et la route répondait `502`. Au démarrage d'un projet, le gestionnaire fait viser à cette route le port qui correspond à `odoo.conf` (`8069` sans workers, port gevent avec). Il garde une copie du compose (`docker-compose.yml.websocket.bak.*`) et recrée une fois le conteneur Odoo, qui garde les étiquettes de sa création.
+
 ### Supprimer une base
 
 La base est supprimée directement dans PostgreSQL (connexions coupées, `DROP DATABASE`), puis son filestore, par le conteneur Odoo ou sur le disque si le projet est arrêté. Le gestionnaire de bases d'Odoo n'intervient plus : il exigeait Odoo joignable via Traefik et capable d'ouvrir la base, si bien qu'une base cassée ou un Traefik qui ne voit plus le projet empêchaient la suppression. Le master password n'est plus demandé.
