@@ -269,6 +269,7 @@ API_ACTIONS = (
     "repair_enterprise_links",
     "repository_modules",
     "reset_admin_password",
+    "restore_module_source",
     "reset_all_translations",
     "reset_module_translations",
     "restore_module_update_exclusions",
@@ -2495,12 +2496,52 @@ def write_imported_sources(project, sources):
     temporary.replace(path)
 
 
-def record_imported_sources(project, names, url, branch, commit=""):
+def record_imported_sources(project, names, url, branch, commit="", replaced=None):
+    """Note le dépôt des modules importés ; `replaced` : lien d'origine des modules qui remplacent un dépôt.
+
+    Réimporter un module garde le lien d'origine noté au premier remplacement.
+    """
     sources = read_imported_sources(project)
     imported_at = time.strftime("%Y-%m-%d %H:%M")
     for name in names:
-        sources[name] = {"url": url, "branch": branch, "commit": commit, "imported_at": imported_at}
+        entry = {"url": url, "branch": branch, "commit": commit, "imported_at": imported_at}
+        replaced_link = (replaced or {}).get(name) or sources.get(name, {}).get("replaced_link")
+        if replaced_link:
+            entry["replaced_link"] = str(replaced_link)
+        sources[name] = entry
     write_imported_sources(project, sources)
+
+
+def replaced_module_path(project, link_value):
+    """Dossier du module que désignait un lien d'odoo/addons, s'il est dans odoo/ et contient un module."""
+    if not link_value:
+        return None
+    candidate = Path(str(link_value))
+    target = (
+        candidate
+        if candidate.is_absolute()
+        else Path(os.path.normpath(project_addons_link_parent(project) / candidate))
+    )
+    if not path_is_relative_to(target, project_odoo_root(project)):
+        return None
+    try:
+        return target if any((target / manifest).is_file() for manifest in MANIFEST_FILENAMES) else None
+    except OSError:
+        return None
+
+
+def module_source_label(project, directory):
+    """« gazdom-addons (master) » pour le dossier d'un module rangé dans un dépôt, sinon son chemin dans odoo/."""
+    root = module_checkout_finder(project_layout_variants(project)).root(directory, check_module=True)
+    if root:
+        info = git_checkouts.read_checkout(root) or {}
+        name = str(info.get("remote_label") or "").rsplit("/", 1)[-1] or os.path.basename(root)
+        revision = info.get("branch") or info.get("tag") or str(info.get("commit") or "")[:7]
+        return f"{name} ({revision})" if revision else name
+    try:
+        return Path(directory).parent.relative_to(project_odoo_root(project)).as_posix()
+    except ValueError:
+        return str(Path(directory).parent)
 
 
 def forget_imported_sources(project, names):
@@ -2622,6 +2663,9 @@ def module_repositories(project, modules):
         branch = str(origin.get("branch") or "")
         key = f"import:{url}#{branch}"
         module["repository"] = key
+        original = replaced_module_path(project, origin.get("replaced_link"))
+        if original is not None:
+            module["replaced_repository"] = module_source_label(project, original)
         repositories.setdefault(
             key,
             {
@@ -3192,6 +3236,10 @@ JOB_CANCEL_POLICIES = {
         "Possible pendant la désinstallation Odoo (modules remis en état). La suppression des fichiers ne peut pas être interrompue.",
     ),
     "repository_modules_job": (True, MODULE_FILES_CANCEL_HINT),
+    "restore_module_source_job": (
+        False,
+        "Le lien du module est remplacé en un instant ; l'arrêter laisserait le module sans version.",
+    ),
     "import_zip_modules_job": (True, MODULE_FILES_CANCEL_HINT),
     "link_modules_job": (True, MODULE_FILES_CANCEL_HINT),
     "create_project_job": (
@@ -6161,8 +6209,25 @@ def repository_module_plans(project, modules, states, odoo_version):
             if current_key and new_key and new_key < current_key:
                 plan["warning"] = f"Version plus ancienne que celle du projet ({plan['current_version']})."
         elif link_state == "different":
-            source = posixpath.dirname(posixpath.normpath(link_value.replace("\\", "/"))).lstrip("./")
-            plan["reason"] = f"Déjà fourni par {source}." if source else "Déjà fourni par un autre dossier du projet."
+            original = replaced_module_path(project, link_value)
+            if original is None:
+                source = posixpath.dirname(posixpath.normpath(link_value.replace("\\", "/"))).lstrip("./")
+                plan["reason"] = (
+                    f"Déjà fourni par {source}, hors du projet." if source else "Déjà fourni par un autre dossier."
+                )
+            elif module_origin(original) == "enterprise" or "/odoo/odoo/" in original.as_posix():
+                plan["reason"] = "Fourni par Odoo standard ou Enterprise : une copie le masquerait."
+            else:
+                # Le dépôt d'origine n'est pas modifié : seul le lien d'odoo/addons change, et il est noté.
+                label = module_source_label(project, original)
+                plan["action"] = "replace"
+                plan["replaces"] = label
+                plan["replaced_link"] = link_value
+                plan["current_version"] = str(read_manifest_dict(original).get("version") or "")
+                plan["warning"] = (
+                    f"Remplace la version du dépôt {label}, qui n'est pas modifié. "
+                    "« Revenir à la version du dépôt », dans la liste des modules, la rétablit."
+                )
         elif link_state == "other":
             plan["reason"] = "Un dossier non géré occupe odoo/addons."
         elif safe_path_exists(storage) or storage.is_symlink():
@@ -6338,11 +6403,16 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
         storage, links = project_addons_storage_parent(project), project_addons_link_parent(project)
         added = [plan["name"] for plan in plans if plan["action"] == "add"]
         updated = [plan["name"] for plan in plans if plan["action"] == "update"]
+        replaced = {plan["name"]: plan["replaced_link"] for plan in plans if plan["action"] == "replace"}
         job.add(
             f"Modules à ajouter ({len(added)}) : {', '.join(added) or '-'} · "
             f"à mettre à jour ({len(updated)}) : {', '.join(updated) or '-'}"
+            + (f" · remplaçant un autre dépôt ({len(replaced)}) : {', '.join(replaced)}" if replaced else "")
         )
         backups, created = [], []
+        # Le lien remplacé est mis de côté comme une version précédente : un échec le remet en place.
+        journal = ModuleChangeJournal()
+        journal.created, journal.backups = created, backups
         try:
             for candidate, plan in zip(selected, plans, strict=True):
                 target, link = storage / candidate.name, links / candidate.name
@@ -6354,7 +6424,12 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
                 copy_module_to_storage(job, project, candidate)
                 if plan["action"] == "add" and addon_link_status(link, target)[0] == "missing":
                     created.append(link)
-                ensure_relative_module_link(job, project, candidate.name, target)
+                if plan["action"] == "replace":
+                    ensure_relative_module_link(
+                        job, project, candidate.name, target, replace_existing=True, journal=journal
+                    )
+                else:
+                    ensure_relative_module_link(job, project, candidate.name, target)
         except BaseException:
             for path in reversed(created):
                 remove_module_entry(path)
@@ -6365,12 +6440,62 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
         finally:
             clear_project_module_cache(project)
         try:
-            record_imported_sources(project, [plan["name"] for plan in plans], url, branch, commit)
+            record_imported_sources(project, [plan["name"] for plan in plans], url, branch, commit, replaced)
         except OSError as exc:
             job.add(f"Dépôt d'origine non mémorisé ({exc}) : ces modules apparaîtront sans dépôt.")
         job.add(f"Code préparé : {len(plans)} module(s), source {url}, branche {branch}.")
         job.add("Installe ou mets à jour ces modules dans la base Odoo depuis l’interface.")
-        job.result = {"kind": "repository_modules", "modules": names, "added": added, "updated": updated}
+        job.result = {
+            "kind": "repository_modules",
+            "modules": names,
+            "added": added,
+            "updated": updated,
+            "replaced": sorted(replaced),
+        }
+
+
+def restore_module_source_job(job, project, module_name):
+    """Rend au module la version du dépôt qu'un import depuis Git avait remplacée.
+
+    La copie importée est mise de côté avec les autres versions remplacées, le lien d'origine
+    d'odoo/addons est recréé tel qu'il était.
+    """
+    project = validate_project(project)
+    validate_modules(module_name)
+    replaced_link = str((read_imported_sources(project).get(module_name) or {}).get("replaced_link") or "")
+    if not replaced_link:
+        raise RuntimeError(f"{module_name} ne remplace la version d'aucun dépôt : rien à rétablir.")
+    original = replaced_module_path(project, replaced_link)
+    if original is None:
+        raise RuntimeError(
+            f"La version d'origine de {module_name} est introuvable ({replaced_link}) : "
+            "son dépôt a été déplacé ou supprimé. La copie importée reste en place."
+        )
+    link_parent = project_addons_link_parent(project)
+    link = link_parent / module_name
+    storage = project_addons_storage_parent(project) / module_name
+    if addon_link_status(link, storage)[0] != "matching":
+        raise RuntimeError(f"{module_name} n'utilise plus sa copie importée : rien n'est modifié.")
+    label = module_source_label(project, original)
+    with job_control.protected(f"retour de {module_name} à la version du dépôt"):
+        backup = backup_existing_module(job, project, storage)
+        try:
+            remove_module_entry(link)
+            create_addon_link(link, replaced_link)
+        except BaseException:
+            move_module_entry(backup, storage)
+            if not (link.exists() or link.is_symlink()):
+                create_addon_link(link, Path(os.path.relpath(storage, link_parent)))
+            raise
+        finally:
+            clear_project_module_cache(project)
+    try:
+        forget_imported_sources(project, [module_name])
+    except OSError:
+        pass
+    job.add(f"{module_name} : version du dépôt {label} rétablie ({link} -> {replaced_link}).")
+    job.add("Mets à jour ce module dans la base Odoo pour qu'elle utilise cette version.")
+    job.result = {"kind": "restore_module_source", "module": module_name, "repository": label}
 
 
 def extract_zip_module_candidates(project, filename, upload):
@@ -7414,6 +7539,18 @@ def repository_modules_action(payload):
     )
 
 
+def restore_module_source_action(payload):
+    project = payload_project(payload)
+    module_name = str(payload.get("module", "") or "").strip()
+    validate_modules(module_name)
+    return Job(
+        f"Revenir à la version du dépôt · {module_name}",
+        restore_module_source_job,
+        (project, module_name),
+        project=project,
+    )
+
+
 def update_all_modules_action(payload):
     project = payload_project(payload)
     db_name = payload_database(payload)
@@ -7642,6 +7779,7 @@ def link_modules_action(payload):
 
 JOB_ACTIONS = {
     "repository_modules": repository_modules_action,
+    "restore_module_source": restore_module_source_action,
     "start_project": project_job("Démarrer {project}", start_project_job),
     "stop_project": project_job("Arrêter {project}", stop_project_job),
     "update_project": project_job("MAJ projet {project}", update_project_job),

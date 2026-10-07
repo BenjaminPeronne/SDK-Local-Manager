@@ -395,6 +395,7 @@ Dans **Modules**, renseigner l'URL du dépôt et une branche ou un tag compatibl
 
 - **Ajouter** refuse un module déjà présent, avant toute modification.
 - **Mettre à jour** remplace uniquement les copies gérées dans `addons-store/` et leur lien dans `addons/` ; les autres dossiers sont protégés.
+- **Remplacer** concerne un module fourni par un autre dépôt du projet. C'est le cas d'un projet créé depuis le dépôt de production du client (« Dépôt d'addons GitLab »), qui embarque ses dépôts d'addons. Pour tester une autre branche, l'import copie le module dans `addons-store/` et y fait pointer `addons/`. L'autre dépôt n'est pas modifié et son lien est noté : **Revenir à la version du dépôt**, dans le menu du module, le rétablit. Les modules d'Odoo et d'Enterprise restent bloqués.
 - Le dépôt est récupéré dans un dossier temporaire (cinq minutes au plus). Les liens symboliques et les noms de modules ambigus sont refusés. Les dépôts privés utilisent les accès Git déjà configurés, sans jeton dans l'URL.
 - Les versions remplacées sont conservées dans `.odoo_manager_backups/modules/<projet>` ; un import qui échoue ou qu'on arrête est défait.
 - L'opération ne prépare que le **code** : installer ou mettre à jour ensuite les modules dans la base.

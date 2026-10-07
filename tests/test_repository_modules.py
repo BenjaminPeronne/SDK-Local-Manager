@@ -87,7 +87,8 @@ class RepositoryModulesTests(ModuleLayoutTests):
     def test_new_module_is_copied_and_linked(self):
         job = self.run_import(["alpha"])
         self.assertEqual(
-            job.result, {"kind": "repository_modules", "modules": ["alpha"], "added": ["alpha"], "updated": []}
+            job.result,
+            {"kind": "repository_modules", "modules": ["alpha"], "added": ["alpha"], "updated": [], "replaced": []},
         )
         self.assertTrue((self.project_root / "odoo/addons/alpha").is_symlink())
         self.assertFalse((self.project_root / "odoo/addons/beta").exists())
@@ -180,20 +181,52 @@ class RepositoryModulesTests(ModuleLayoutTests):
         self.assertFalse((self.project_root / "odoo/addons/beta").exists())
         self.assertFalse(self.storage("alpha").exists())
 
-    def test_module_linked_to_another_project_source_is_blocked(self):
-        # Cas CARITEL : le module est fourni par la copie d'un autre dépôt sous addons-store.
+    def test_module_from_another_repository_is_replaced_then_restored(self):
+        # Cas CARITEL et GAZDOM : projet créé depuis le dépôt de production du client, rangé sous
+        # addons-store ; ses modules ne pouvaient plus être importés depuis leur propre dépôt.
         other = self.storage("caritel_v18/addons/alpha")
         other.mkdir(parents=True)
-        (other / "__manifest__.py").write_text("{'name': 'Alpha'}")
-        (self.project_root / "odoo/addons/alpha").symlink_to("../addons-store/caritel_v18/addons/alpha")
+        (other / "__manifest__.py").write_text("{'name': 'Alpha', 'version': '18.0.1.0.0'}")
+        link = self.project_root / "odoo/addons/alpha"
+        original_link = "../addons-store/caritel_v18/addons/alpha"
+        link.symlink_to(original_link)
 
-        with self.assertRaisesRegex(ValueError, "alpha : Déjà fourni par addons-store/caritel_v18/addons."):
-            self.run_import(["alpha"])
+        job = self.run_import(["alpha"])
+
+        self.assertEqual(["alpha"], job.result["replaced"])
+        self.assertEqual(Path("../addons-store/alpha"), Path(link.readlink()))
+        self.assertEqual("{'name': 'Alpha', 'version': '18.0.1.0.0'}", (other / "__manifest__.py").read_text())
+        self.assertEqual(original_link, web.read_imported_sources(self.project)["alpha"]["replaced_link"])
+        modules = web.modules_for(self.project)
+        web.module_repositories(self.project, modules)
+        alpha = next(module for module in modules if module["name"] == "alpha")
+        self.assertEqual("addons-store/caritel_v18/addons", alpha["replaced_repository"])
+
+        # Réimporter le module garde le lien d'origine à rétablir.
+        self.run_import(["alpha"])
+        self.assertEqual(original_link, web.read_imported_sources(self.project)["alpha"]["replaced_link"])
+
+        restore = DummyJob()
+        web.restore_module_source_job(restore, self.project, "alpha")
+
         # Valeur du lien et non resolve() : sur le runner Windows, resolve() du lien garde le nom
         # court du dossier temporaire (RUNNER~1) alors que celui du dossier cible est développé.
-        self.assertEqual(
-            Path("../addons-store/caritel_v18/addons/alpha"), Path((self.project_root / "odoo/addons/alpha").readlink())
+        self.assertEqual(Path(original_link), Path(link.readlink()))
+        self.assertFalse(self.storage("alpha").exists())
+        self.assertNotIn("alpha", web.read_imported_sources(self.project))
+        with self.assertRaisesRegex(RuntimeError, "rien à rétablir"):
+            web.restore_module_source_job(DummyJob(), self.project, "alpha")
+
+    def test_enterprise_module_of_another_repository_stays_blocked(self):
+        enterprise = self.storage("caritel_v18/addons-store/odoo_entreprise/alpha")
+        enterprise.mkdir(parents=True)
+        (enterprise / "__manifest__.py").write_text("{'name': 'Alpha'}")
+        (self.project_root / "odoo/addons/alpha").symlink_to(
+            "../addons-store/caritel_v18/addons-store/odoo_entreprise/alpha"
         )
+
+        with self.assertRaisesRegex(ValueError, "alpha : Fourni par Odoo standard ou Enterprise"):
+            self.run_import(["alpha"])
 
     def test_tree_listing_follows_import_discovery_rules(self):
         tree = "\n".join(
