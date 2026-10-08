@@ -33,6 +33,9 @@ DOCKER_MEMORY_CRITICAL = 3 * GIB
 SWAP_MIN = 2 * GIB
 SWAP_MAX = 4 * GIB
 DISK_RECOMMENDED = 64 * GIB
+# Ressources de l'ordinateur Windows, transmises par l'application au backend qui tourne dans WSL.
+HOST_MEMORY_VARIABLE = "ODOO_MANAGER_HOST_MEMORY"
+HOST_CPUS_VARIABLE = "ODOO_MANAGER_HOST_CPUS"
 
 DOCKER_DESKTOP_SETTINGS_DIR = Path.home() / "Library" / "Group Containers" / "group.com.docker"
 # Docker Desktop 4.35 et suivants lisent settings-store.json ; les versions précédentes, settings.json.
@@ -79,8 +82,10 @@ def host_resources(system=None):
         elif system == "Windows":
             memory = windows_total_memory()
         elif running_in_wsl():
-            # Backend dans WSL : /proc/meminfo décrit la machine virtuelle, pas l'ordinateur.
-            memory = 0
+            # Backend dans WSL : /proc/meminfo et os.cpu_count() décrivent la machine virtuelle, pas
+            # l'ordinateur. L'application Windows qui lance le backend transmet les vrais chiffres.
+            memory = int(os.environ.get(HOST_MEMORY_VARIABLE) or 0)
+            cpus = int(os.environ.get(HOST_CPUS_VARIABLE) or 0) or cpus
         else:
             memory = linux_total_memory(Path("/proc/meminfo").read_text(encoding="utf-8"))
     except (OSError, ValueError, subprocess.SubprocessError):

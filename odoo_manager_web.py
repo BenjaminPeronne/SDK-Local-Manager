@@ -4939,7 +4939,7 @@ def performance_payload():
     # Sous Linux, Docker utilise directement toute la machine : rien à lui allouer.
     recommended = (
         performance.recommended_docker_resources(host["memory"], host["cpus"])
-        if environment in {"macos", "windows"}
+        if environment in {"macos", "windows", "wsl"}
         else None
     )
     status = performance.resources_status(memory, cpus, recommended)

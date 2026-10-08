@@ -518,6 +518,13 @@ test("the legacy Windows workspace is handed to the backend for migration", () =
   assert.ok(args.includes("ODOO_MANAGER_LEGACY_WORKSPACE=/mnt/c/Users/a/Odoo-projects"));
 });
 
+test("the backend learns the Windows computer's memory and processors", () => {
+  const { args } = backendCommand({ port: 18765, hostMemory: 34359738368, hostCpus: 12 });
+  assert.ok(args.includes("ODOO_MANAGER_HOST_MEMORY=34359738368"));
+  assert.ok(args.includes("ODOO_MANAGER_HOST_CPUS=12"));
+  assert.equal(args.at(-1), BACKEND_PATH);
+});
+
 test("the Windows GitLab key is copied once, private to the environment user", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-ssh-"));
   try {

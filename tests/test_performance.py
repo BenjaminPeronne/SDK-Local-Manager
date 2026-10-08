@@ -50,6 +50,21 @@ class RecommendationTests(unittest.TestCase):
     def test_linux_memory_comes_from_meminfo(self):
         self.assertEqual(16 * GIB, performance.linux_total_memory("MemTotal:       16777216 kB\nMemFree: 1 kB\n"))
 
+    def test_wsl_reads_the_windows_computer_from_the_application(self):
+        variables = {performance.HOST_MEMORY_VARIABLE: str(32 * GIB), performance.HOST_CPUS_VARIABLE: "16"}
+        with (
+            patch.object(performance, "running_in_wsl", return_value=True),
+            patch.object(performance.os, "cpu_count", return_value=8),
+            patch.dict(performance.os.environ, variables),
+        ):
+            self.assertEqual({"memory": 32 * GIB, "cpus": 16}, performance.host_resources("Linux"))
+        with (
+            patch.object(performance, "running_in_wsl", return_value=True),
+            patch.object(performance.os, "cpu_count", return_value=8),
+            patch.dict(performance.os.environ, clear=True),
+        ):
+            self.assertEqual({"memory": 0, "cpus": 8}, performance.host_resources("Linux"))
+
 
 class DockerDesktopSettingsTests(unittest.TestCase):
     def test_writes_only_resources_and_keeps_a_larger_swap(self):
@@ -201,6 +216,22 @@ class PerformancePayloadTests(unittest.TestCase):
 
         self.assertFalse(payload["can_apply"])
         self.assertEqual("[wsl2]\nmemory=10GB\nprocessors=14\nswap=2GB\n", payload["wslconfig"])
+
+    def test_wsl_payload_recommends_from_the_windows_computer(self):
+        service = Mock()
+        service.docker_resources.return_value = (16 * GIB, 12)
+        with (
+            patch.object(web, "platform_id", return_value="linux"),
+            patch.object(performance, "running_in_wsl", return_value=True),
+            patch.object(web, "project_service", return_value=service),
+            patch.object(performance, "host_resources", return_value={"memory": 32 * GIB, "cpus": 12}),
+        ):
+            payload = web.performance_payload()
+
+        self.assertEqual(("wsl", "low"), (payload["environment"], payload["status"]))
+        self.assertEqual({"memory": 20 * GIB, "cpus": 10, "swap": 4 * GIB}, payload["recommended"])
+        self.assertFalse(payload["can_apply"])
+        self.assertEqual("[wsl2]\nmemory=20GB\nprocessors=10\nswap=4GB\n", payload["wslconfig"])
 
     def test_native_linux_docker_needs_nothing(self):
         service = Mock()

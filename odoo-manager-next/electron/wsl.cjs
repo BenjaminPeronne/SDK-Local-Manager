@@ -6,6 +6,7 @@
 // gestionnaire installe donc sa propre distribution WSL, y lance le backend, et
 // l'utilisateur n'ouvre jamais de terminal.
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { execFile } = require("node:child_process");
@@ -117,7 +118,15 @@ function importArguments({ archive, distribution = DISTRIBUTION, location }) {
   return ["--install", "--from-file", archive, "--name", distribution, "--location", location, "--no-launch"];
 }
 
-function backendCommand({ distribution = DISTRIBUTION, port, instance, logLevel, legacyWorkspace } = {}) {
+function backendCommand({
+  distribution = DISTRIBUTION,
+  port,
+  instance,
+  logLevel,
+  legacyWorkspace,
+  hostMemory,
+  hostCpus,
+} = {}) {
   // `wsl.exe --exec` ne transmet que les variables Windows listées dans WSLENV : les
   // réglages du backend passent par `env`. Le jeton de l'API, secret, passe seul par
   // WSLENV (voir Backend.launch) pour ne pas figurer dans la ligne de commande.
@@ -127,6 +136,10 @@ function backendCommand({ distribution = DISTRIBUTION, port, instance, logLevel,
   if (logLevel) variables.push(`ODOO_MANAGER_LOG_LEVEL=${logLevel}`);
   // Ancien dossier de projets Windows, vu sous /mnt : le backend y propose la migration.
   if (legacyWorkspace) variables.push(`ODOO_MANAGER_LEGACY_WORKSPACE=${legacyWorkspace}`);
+  // Dans WSL, le backend ne voit que la machine virtuelle : la mémoire et les processeurs de
+  // l'ordinateur viennent d'ici, pour recommander la part à donner à Docker.
+  if (hostMemory) variables.push(`ODOO_MANAGER_HOST_MEMORY=${hostMemory}`);
+  if (hostCpus) variables.push(`ODOO_MANAGER_HOST_CPUS=${hostCpus}`);
   return { executable: "wsl.exe", args: ["-d", distribution, "--exec", "env", ...variables, BACKEND_PATH] };
 }
 
@@ -370,7 +383,14 @@ class WslEnvironment {
   }
 
   backendCommand(port, instance, legacyWorkspace = "") {
-    return backendCommand({ distribution: this.distribution, port, instance, legacyWorkspace });
+    return backendCommand({
+      distribution: this.distribution,
+      port,
+      instance,
+      legacyWorkspace,
+      hostMemory: os.totalmem(),
+      hostCpus: os.cpus().length,
+    });
   }
 
   /**
