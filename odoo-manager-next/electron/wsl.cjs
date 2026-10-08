@@ -372,7 +372,15 @@ class WslEnvironment {
       const index = planned.indexOf(step);
       if (index < 0) return;
       this.onProgress({ step, label: PREPARE_STEP_LABELS[step], index: index + 1, total: planned.length });
-      await action();
+      try {
+        await action();
+      } catch (error) {
+        // Le journal et l'écran disent quelle étape a échoué, pas seulement quelle commande.
+        error.step = step;
+        this.log(`Échec de l'étape « ${PREPARE_STEP_LABELS[step]} » : ${error.message}`);
+        if (error.command) this.log(`  Commande : ${error.command}`);
+        throw error;
+      }
     };
 
     await run("import", () => this.importDistribution({ archive, checksum }));
@@ -453,6 +461,27 @@ class WslEnvironment {
   }
 }
 
+/**
+ * Erreur d'une commande échouée : sa sortie quand elle en a une, sinon comment elle s'est arrêtée.
+ *
+ * Node met la commande entière dans `error.message` : un script de dix lignes s'affichait à
+ * l'écran à la place de la cause, sans le code de sortie ni le dépassement de délai. La commande
+ * reste disponible pour le journal (`error.command`), jamais dans le message.
+ */
+function commandError(executable, error, stdout, stderr) {
+  const output = decodeWslOutput(stderr).trim() || decodeWslOutput(stdout).trim();
+  const name = path.win32.basename(String(executable));
+  const stopped = () => {
+    if (error?.killed) return `${name} n'a pas répondu dans le délai imparti.`;
+    if (error?.signal) return `${name} a été interrompu (${error.signal}).`;
+    if (typeof error?.code === "number") return `${name} s'est arrêté sans message (code ${error.code}).`;
+    return String(error?.message || error || "").split("\n")[0];
+  };
+  const failure = new Error(output || stopped());
+  failure.command = error?.cmd || name;
+  return failure;
+}
+
 function defaultRunner(executable, args, options = {}) {
   return new Promise((resolve, reject) => {
     execFile(
@@ -462,8 +491,7 @@ function defaultRunner(executable, args, options = {}) {
       (error, stdout, stderr) => {
         const code = error?.code ?? 0;
         if (error && !options.allowFailure) {
-          const detail = decodeWslOutput(stderr) || decodeWslOutput(stdout) || error.message;
-          reject(new Error(detail.trim() || error.message));
+          reject(commandError(executable, error, stdout, stderr));
           return;
         }
         resolve({ stdout, stderr, code });
@@ -481,6 +509,7 @@ module.exports = {
   PREPARE_STEP_LABELS,
   wslStartFailureReason,
   legacyWindowsWorkspace,
+  commandError,
   decodeWslOutput,
   expectedChecksum,
   imageFiles,

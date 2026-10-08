@@ -10,6 +10,7 @@ const {
   wslStartFailureReason,
   legacyWindowsWorkspace,
   backendCommand,
+  commandError,
   decodeWslOutput,
   expectedChecksum,
   imageFiles,
@@ -609,5 +610,62 @@ test("a different key already in the environment is never replaced", async () =>
     assert.ok(script.includes("n'est pas remplacée") && script.includes("exit 3"));
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a silent failure says how the command stopped, not the whole script", () => {
+  const script = 'set -eu\nmkdir -p /opt/sdk-manager\ncp -- "$1" /opt/sdk-manager/provision.sh.tmp';
+  const cmd = `wsl.exe -d SDK-Manager -u root --exec sh -c ${script}`;
+  const exited = commandError(
+    "wsl.exe",
+    Object.assign(new Error(`Command failed: ${cmd}\n`), { code: 1, cmd }),
+    Buffer.alloc(0),
+    Buffer.alloc(0),
+  );
+  assert.equal(exited.message, "wsl.exe s'est arrêté sans message (code 1).");
+  assert.equal(exited.command, cmd);
+  const killed = commandError(
+    "wsl.exe",
+    Object.assign(new Error("Command failed"), { code: null, killed: true, signal: "SIGTERM", cmd }),
+    Buffer.alloc(0),
+    Buffer.alloc(0),
+  );
+  assert.equal(killed.message, "wsl.exe n'a pas répondu dans le délai imparti.");
+  const explained = commandError(
+    "wsl.exe",
+    Object.assign(new Error("Command failed"), { code: 1, cmd }),
+    Buffer.alloc(0),
+    Buffer.from("cp: can't stat '/mnt/c/x'\n"),
+  );
+  assert.equal(explained.message, "cp: can't stat '/mnt/c/x'");
+});
+
+test("a failed preparation step is named in the log with its command", async () => {
+  const build = backendBuild();
+  try {
+    const logs = [];
+    const failure = Object.assign(new Error("wsl.exe s'est arrêté sans message (code 1)."), {
+      command: "wsl.exe -d SDK-Manager",
+    });
+    const runner = async (executable, args) => {
+      if (args[0] === "--version") return { stdout: utf16("Version WSL : 2.6.1.0\r\n"), stderr: "", code: 0 };
+      if (args[0] === "--list") return { stdout: utf16("SDK-Manager\r\n"), stderr: "", code: 0 };
+      if (args.includes("cat")) return { stdout: Buffer.from(""), stderr: "", code: 0 };
+      throw failure;
+    };
+    const wsl = new WslEnvironment({
+      installRoot: build.directory,
+      runner,
+      log: (line) => logs.push(line),
+      mountPath: () => "/mnt/c/app",
+    });
+    await assert.rejects(
+      wsl.prepare({ version: "0.6.0", backendSource: build.directory }),
+      (error) => error.step === "backend",
+    );
+    assert.ok(logs.some((line) => line.includes("Copie du gestionnaire") && line.includes("code 1")));
+    assert.ok(logs.some((line) => line.includes("Commande : wsl.exe -d SDK-Manager")));
+  } finally {
+    fs.rmSync(build.directory, { recursive: true, force: true });
   }
 });

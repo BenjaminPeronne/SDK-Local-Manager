@@ -72,6 +72,12 @@ test("failures are explained in terms the user can act on", () => {
   assert.match(wslSetupError(new Error("ENOENT: no such file or directory")), /absente/);
   assert.match(wslSetupError(new Error("Erreur 0x80370102")), /virtualisation/i);
   assert.equal(wslSetupError(new Error("Échec inattendu")), "Échec inattendu");
+  assert.match(wslSetupError(new Error("wsl.exe s'est arrêté sans message (code 1).")), /backend\.log/);
+  assert.match(
+    wslSetupError(new Error("Command failed: wsl.exe -d SDK-Manager -u root --exec sh -c set -eu")),
+    /backend\.log/,
+  );
+  assert.match(wslSetupError(new Error("wsl.exe n'a pas répondu dans le délai imparti.")), /Redémarre/);
 });
 
 test("Electron's technical wrapper is removed from native errors", () => {

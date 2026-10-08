@@ -109,6 +109,16 @@ export function wslSetupError(error: unknown): string {
   if (/0x80370102|virtualis/i.test(message)) {
     return "La virtualisation est désactivée dans le BIOS de ce poste. Active-la, puis réessaie.";
   }
+  if (/délai imparti/i.test(message)) {
+    return "La préparation a pris trop de temps. Redémarre l'ordinateur, puis réessaie.";
+  }
+  // Arrêt sans explication : la commande elle-même n'aide pas l'utilisateur, le journal la garde.
+  if (/sans message|interrompu|^Command failed/i.test(message)) {
+    return (
+      "La préparation s'est arrêtée sans explication. Réessaie ; si cela se reproduit, " +
+      "envoie le journal du gestionnaire (fichier backend.log) au support."
+    );
+  }
   return message || "La préparation a échoué.";
 }
 
