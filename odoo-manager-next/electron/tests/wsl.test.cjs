@@ -16,6 +16,8 @@ const {
   imageFiles,
   importArguments,
   parseDistributions,
+  parseVirtualization,
+  isVirtualizationError,
   parseWslVersion,
   supportsFileImport,
 } = require("../wsl.cjs");
@@ -98,6 +100,7 @@ function fakeEnvironment({
   backendId = "",
   provisionId = "",
   running = [],
+  virtualization = "",
   fail = () => null,
 } = {}) {
   const calls = [];
@@ -106,6 +109,9 @@ function fakeEnvironment({
     calls.push(call);
     const failure = fail(call, calls);
     if (failure) throw failure;
+    if (executable === "powershell.exe" && call.includes("VirtualizationFirmwareEnabled")) {
+      return { stdout: Buffer.from(virtualization), stderr: "", code: 0 };
+    }
     if (args.includes("--running")) return { stdout: utf16(running.join("\r\n") + "\r\n"), stderr: "", code: 0 };
     if (args.includes("--version")) return { stdout: utf16(`Version WSL : ${version}\r\n`), stderr: "", code: 0 };
     if (args.includes("--list")) return { stdout: utf16(distributions.join("\r\n") + "\r\n"), stderr: "", code: 0 };
@@ -132,7 +138,11 @@ function backendBuild(content = "ELF backend") {
 
 test("status reports what the setup screen needs, without changing anything", async () => {
   const { calls, runner } = fakeEnvironment({ distributions: ["Ubuntu", "SDK-Manager"], release: "0.5.0" });
-  const environment = new WslEnvironment({ runner, installRoot: "C:\\data\\wsl" });
+  const environment = new WslEnvironment({
+    runner,
+    installRoot: "C:\\data\\wsl",
+    memory: () => ({ total: 16, free: 8 }),
+  });
 
   assert.deepEqual(await environment.status(), {
     wslInstalled: true,
@@ -141,8 +151,16 @@ test("status reports what the setup screen needs, without changing anything", as
     distribution: "SDK-Manager",
     distributionInstalled: true,
     release: "0.5.0",
+    virtualization: "unknown",
+    memory: { total: 16, free: 8 },
+    preparing: false,
+    progress: null,
   });
   assert.ok(calls.every((call) => !call.includes("--install")));
+  assert.ok(
+    calls.every((call) => !call.startsWith("powershell.exe")),
+    "une distribution installée ne relit pas la virtualisation",
+  );
 });
 
 test("an image that does not match its checksum is refused", async () => {
@@ -704,7 +722,14 @@ test("a step stopped silently is replayed after restarting the distribution", as
 test("a step that keeps failing restarts WSL once, then names the step in the log", async () => {
   const context = await preparedWith({ fail: (call) => (call.includes("install-provision") ? silentFailure() : null) });
   try {
-    await assert.rejects(context.run(), (error) => error.step === "provision" && /sans message/.test(error.message));
+    await assert.rejects(
+      context.run(),
+      (error) =>
+        error.step === "provision" &&
+        error.message ===
+          "La préparation s'est arrêtée à l'étape « Configuration de Docker et Git » après plusieurs essais." &&
+        /sans message/.test(error.cause.message),
+    );
     assert.ok(context.calls.includes("wsl.exe --terminate SDK-Manager"));
     assert.ok(context.calls.includes("wsl.exe --shutdown"));
     assert.equal(context.calls.filter((call) => call.includes("install-provision")).length, 3);
@@ -742,7 +767,11 @@ test("the distribution is not restarted while the backend runs in it", async () 
   try {
     await context.run();
     assert.ok(context.calls.every((call) => !call.includes("--terminate") && !call.includes("--shutdown")));
-    assert.equal(context.calls.filter((call) => call.includes("install-provision")).length, 2);
+    const copies = context.calls.filter((call) => call.includes("install-provision") && !call.includes("pkill"));
+    assert.equal(copies.length, 2);
+    // Linux tourne toujours : les restes du premier essai sont arrêtés avant le second.
+    const cleanup = context.calls.findIndex((call) => call.includes("-u root --exec pkill -f --"));
+    assert.ok(cleanup > context.calls.indexOf(copies[0]) && cleanup < context.calls.lastIndexOf(copies[1]));
   } finally {
     context.cleanup();
   }
@@ -888,10 +917,160 @@ test("a Linux that never starts is named in the log", async () => {
         : null,
   });
   try {
-    await assert.rejects(context.run(), /délai imparti/);
+    await assert.rejects(context.run(), /étape « Démarrage de l'environnement Linux » après plusieurs essais/);
     assert.ok(
       context.logs.some((line) => line.includes("Démarrage de l'environnement Linux") && line.includes("Échec")),
     );
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("virtualization is read from the processor, or from a hypervisor that hides it", () => {
+  assert.equal(parseVirtualization('{"hypervisor":false,"firmware":[true]}'), "enabled");
+  // Hyper-V ou WSL déjà actif : le processeur répond faux, l'hyperviseur prouve qu'elle est active.
+  assert.equal(parseVirtualization('{"hypervisor":true,"firmware":[false]}'), "enabled");
+  assert.equal(parseVirtualization('{"hypervisor":false,"firmware":[false,false]}'), "disabled");
+  assert.equal(parseVirtualization('{"hypervisor":false,"firmware":false}'), "disabled");
+  // Réponse incomplète : jamais bloquant.
+  assert.equal(parseVirtualization('{"hypervisor":false,"firmware":[null]}'), "unknown");
+  assert.equal(parseVirtualization('{"hypervisor":false,"firmware":[]}'), "unknown");
+  assert.equal(parseVirtualization(""), "unknown");
+  assert.equal(parseVirtualization(utf16('{"hypervisor":true,"firmware":[]}')), "enabled");
+});
+
+test("Windows virtualization errors are recognised in French and English", () => {
+  assert.ok(isVirtualizationError(new Error("Erreur : 0x80370102")));
+  assert.ok(isVirtualizationError(new Error("Please ensure virtualization is enabled in the BIOS.")));
+  assert.ok(isVirtualizationError(new Error("Vérifiez que la virtualisation est activée dans le BIOS.")));
+  assert.ok(!isVirtualizationError(new Error("cp: can't stat")));
+});
+
+test("disabled virtualization stops the preparation before the import", async () => {
+  const build = backendBuild();
+  const logs = [];
+  const { calls, runner } = fakeEnvironment({ virtualization: '{"hypervisor":false,"firmware":[false]}' });
+  const environment = new WslEnvironment({
+    runner,
+    installRoot: path.join(build.directory, "wsl"),
+    mountPath: () => "/mnt/c/app",
+    log: (line) => logs.push(line),
+    sleep: async () => {},
+  });
+  try {
+    assert.equal((await environment.status()).virtualization, "disabled");
+    await assert.rejects(
+      environment.prepare({ version: "0.6.0", backendSource: build.directory, ...imageIn(build.directory) }),
+      /virtualisation est désactivée/,
+    );
+    assert.ok(calls.every((call) => !call.includes("--from-file")));
+    assert.ok(logs.some((line) => line.includes("virtualisation")));
+  } finally {
+    fs.rmSync(build.directory, { recursive: true, force: true });
+  }
+});
+
+test("enabled virtualization is read once", async () => {
+  const { calls, runner } = fakeEnvironment({ virtualization: '{"hypervisor":true,"firmware":[false]}' });
+  const environment = new WslEnvironment({ runner, installRoot: "C:\\data\\wsl" });
+  assert.equal(await environment.virtualization(), "enabled");
+  assert.equal(await environment.virtualization(), "enabled");
+  assert.equal(calls.filter((call) => call.startsWith("powershell.exe")).length, 1);
+});
+
+test("a virtualization failure from Windows is not replayed", async () => {
+  const build = backendBuild();
+  const { calls, runner } = fakeEnvironment({
+    fail: (call) =>
+      call.includes("--from-file")
+        ? Object.assign(new Error("Wsl/Service/CreateInstance/0x80370102"), { command: call })
+        : null,
+  });
+  const environment = new WslEnvironment({
+    runner,
+    installRoot: path.join(build.directory, "wsl"),
+    mountPath: () => "/mnt/c/app",
+    sleep: async () => {},
+  });
+  try {
+    await assert.rejects(
+      environment.prepare({ version: "0.6.0", backendSource: build.directory, ...imageIn(build.directory) }),
+      /0x80370102/,
+    );
+    assert.equal(calls.filter((call) => call.includes("--from-file")).length, 1);
+    assert.ok(calls.every((call) => !call.includes("--terminate") && !call.includes("--shutdown")));
+  } finally {
+    fs.rmSync(build.directory, { recursive: true, force: true });
+  }
+});
+
+test("the screen is told about a new attempt, and can join a preparation already running", async () => {
+  const progress = [];
+  let release;
+  const blocked = new Promise((resolve) => (release = resolve));
+  const context = await preparedWith({
+    fail: (call, calls) =>
+      call.includes("install-provision") && calls.filter((c) => c.includes("install-provision")).length === 1
+        ? silentFailure()
+        : null,
+  });
+  context.environment.onProgress = (step) => progress.push(step);
+  const runner = context.environment.run;
+  // La copie du backend attend : la préparation est observée pendant qu'elle tourne.
+  context.environment.run = async (executable, args, options) => {
+    if (args.includes("install-backend")) await blocked;
+    return runner(executable, args, options);
+  };
+  try {
+    const running = context.run();
+    await new Promise((resolve) => setImmediate(resolve));
+    for (let i = 0; i < 50 && !context.environment.preparation().progress; i++)
+      await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(context.environment.preparation(), {
+      preparing: true,
+      progress: { step: "backend", label: "Copie du gestionnaire", index: 1, total: 2 },
+    });
+    release();
+    await running;
+    assert.ok(
+      progress.some((step) => step.step === "provision" && step.retry === 1 && /^Nouvel essai/.test(step.label)),
+    );
+    assert.deepEqual(context.environment.preparation(), { preparing: false, progress: null });
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("set-aside disks are removed 14 days after a successful preparation", async () => {
+  const build = backendBuild();
+  const installRoot = path.join(build.directory, "wsl");
+  fs.mkdirSync(installRoot);
+  const now = Date.UTC(2026, 9, 8);
+  const old = `ext4.vhdx.interrompu-${now - 15 * 24 * 3600_000}`;
+  const recent = `ext4.vhdx.interrompu-${now - 2 * 24 * 3600_000}`;
+  for (const name of [old, recent]) fs.writeFileSync(path.join(installRoot, name), "disque");
+  const { runner } = fakeEnvironment({ distributions: ["SDK-Manager"], release: "0.5.0" });
+  const environment = new WslEnvironment({
+    runner,
+    installRoot,
+    mountPath: () => "/mnt/c/app",
+    sleep: async () => {},
+    now: () => now,
+  });
+  try {
+    await environment.prepare({ version: "0.6.0", backendSource: build.directory });
+    assert.deepEqual(fs.readdirSync(installRoot), [recent]);
+  } finally {
+    fs.rmSync(build.directory, { recursive: true, force: true });
+  }
+});
+
+test("low free memory is written to the log before preparing", async () => {
+  const context = await preparedWith({});
+  context.environment.memory = () => ({ total: 8 * 1024 ** 3, free: 512 * 1024 ** 2 });
+  try {
+    await context.run();
+    assert.ok(context.logs.some((line) => line.includes("Peu de mémoire libre") && line.includes("512 Mo")));
   } finally {
     context.cleanup();
   }

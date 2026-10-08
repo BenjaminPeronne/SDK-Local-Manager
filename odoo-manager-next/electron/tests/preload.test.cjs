@@ -7,6 +7,7 @@ const WSL_CAPABILITIES = [
   "wslStatus",
   "wslInstallWsl",
   "wslPrepare",
+  "wslPreparation",
   "wslLegacyWorkspace",
   "wslImportSshKey",
   "wslOpenEditor",

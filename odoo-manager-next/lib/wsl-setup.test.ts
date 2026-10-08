@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   isWslSetupPending,
+  memoryWarning,
   prepareProgressPercent,
   wslSetupError,
   wslSetupState,
@@ -72,10 +73,10 @@ test("failures are explained in terms the user can act on", () => {
   assert.match(wslSetupError(new Error("ENOENT: no such file or directory")), /absente/);
   assert.match(wslSetupError(new Error("Erreur 0x80370102")), /virtualisation/i);
   assert.equal(wslSetupError(new Error("Échec inattendu")), "Échec inattendu");
-  assert.match(wslSetupError(new Error("wsl.exe s'est arrêté sans message (code 1).")), /backend\.log/);
+  assert.match(wslSetupError(new Error("wsl.exe s'est arrêté sans message (code 1).")), /ouvre le journal/);
   assert.match(
     wslSetupError(new Error("Command failed: wsl.exe -d SDK-Manager -u root --exec sh -c set -eu")),
-    /backend\.log/,
+    /ouvre le journal/,
   );
   assert.match(wslSetupError(new Error("wsl.exe n'a pas répondu dans le délai imparti.")), /Redémarre/);
 });
@@ -102,4 +103,75 @@ test("an update without import spreads the bar over the remaining steps", () => 
   assert.equal(prepareProgressPercent({ step: "backend", index: 1, total: 2 }, 0), 0);
   assert.ok(prepareProgressPercent({ step: "provision", index: 2, total: 2 }, 0) > 0);
   assert.equal(prepareProgressPercent({ step: "provision", index: 1, total: 1 }, 0), 0);
+});
+
+test("disabled virtualization is announced before anything is installed", () => {
+  const base = {
+    wslInstalled: true,
+    wslVersion: "2.6.1.0",
+    supportsFileImport: true,
+    distribution: "SDK-Manager",
+    distributionInstalled: false,
+    release: "",
+  };
+  const blocked = wslSetupState({ ...base, virtualization: "disabled" }, "0.6.0");
+  assert.equal(blocked.step, "virtualization-disabled");
+  assert.match(blocked.detail, /BIOS/);
+  assert.equal(
+    wslSetupState({ ...base, wslInstalled: false, virtualization: "disabled" }, "0.6.0").step,
+    "virtualization-disabled",
+  );
+  // Une réponse floue ne bloque jamais.
+  assert.equal(wslSetupState({ ...base, virtualization: "unknown" }, "0.6.0").step, "install-environment");
+  assert.equal(wslSetupState(base, "0.6.0").step, "install-environment");
+  // Un environnement déjà installé n'est pas concerné : sa bascule a son propre message.
+  assert.equal(
+    wslSetupState({ ...base, distributionInstalled: true, release: "0.6.0", virtualization: "disabled" }, "0.6.0").step,
+    "ready",
+  );
+  assert.equal(isWslSetupPending({ ...base, virtualization: "disabled" }, "0.6.0"), true);
+});
+
+test("the English virtualization error is explained too", () => {
+  assert.match(
+    wslSetupError(
+      new Error("Please enable the Virtual Machine Platform and ensure virtualization is enabled in the BIOS."),
+    ),
+    /virtualisation est désactivée/,
+  );
+});
+
+test("a step that failed after retries tells the user what to do", () => {
+  const message = wslSetupError(
+    new Error(
+      "Error invoking remote method 'sdk:wsl-prepare': Error: La préparation s'est arrêtée à l'étape « Copie du gestionnaire » après plusieurs essais.",
+    ),
+  );
+  assert.match(message, /^La préparation s'est arrêtée à l'étape « Copie du gestionnaire »/);
+  assert.match(message, /Redémarre l'ordinateur/);
+  assert.match(message, /ouvre le journal/);
+  assert.match(
+    wslSetupError(new Error("EPERM: operation not permitted, rename 'C:\\x'")),
+    /^La préparation a échoué\./,
+  );
+});
+
+test("low memory is announced before installing, never after", () => {
+  const base = {
+    wslInstalled: true,
+    wslVersion: "2.6.1.0",
+    supportsFileImport: true,
+    distribution: "SDK-Manager",
+    distributionInstalled: false,
+    release: "",
+  };
+  const GIB = 1024 ** 3;
+  assert.match(memoryWarning({ ...base, memory: { total: 4 * GIB, free: 2 * GIB } }), /peu de mémoire \(4 Go\)/);
+  assert.match(
+    memoryWarning({ ...base, memory: { total: 16 * GIB, free: 1.5 * GIB } }),
+    /peu de mémoire libre \(1\.5 Go\)/,
+  );
+  assert.equal(memoryWarning({ ...base, memory: { total: 16 * GIB, free: 8 * GIB } }), "");
+  assert.equal(memoryWarning({ ...base, distributionInstalled: true, memory: { total: 4 * GIB, free: 1 } }), "");
+  assert.equal(memoryWarning(base), "");
 });

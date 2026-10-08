@@ -6,6 +6,8 @@ export interface DesktopBridge {
   backendDiagnostics(): Promise<{ log_path: string; details: string }>;
   openExternalUrl(url: string): Promise<void>;
   openDockerDesktop(): Promise<void>;
+  /** Ouvre le dossier du journal, fichier sélectionné. */
+  openLogFolder?(): Promise<void>;
   /** Chiffrement du disque qui porte le dossier des projets (FileVault, BitLocker, LUKS). */
   diskEncryption?(workspace: string): Promise<DiskEncryption>;
   /** Backend réellement utilisé, et pourquoi l'environnement Linux a été écarté. */
@@ -25,6 +27,8 @@ export interface DesktopBridge {
   wslStatus?(): Promise<WslStatus>;
   wslInstallWsl?(): Promise<{ ok: boolean; rebootRequired: boolean; message: string }>;
   wslPrepare?(): Promise<WslStatus>;
+  /** Préparation en cours, lancée au démarrage ou par l'écran ; ne lance aucune commande. */
+  wslPreparation?(): Promise<WslPreparation>;
   wslLegacyWorkspace?(): Promise<string>;
   relaunch?(): Promise<void>;
   stopLegacyTraefik?(): Promise<{ ok: boolean; message: string }>;
@@ -69,10 +73,17 @@ export interface UpdateProgress {
 
 /** Étape en cours de la préparation du poste, telle que l'écran l'affiche. */
 export interface WslPrepareStep {
-  step: "import" | "backend" | "provision" | "done";
+  step: "wake" | "import" | "backend" | "provision" | "done";
   label: string;
   index: number;
   total: number;
+  /** Numéro du nouvel essai, quand l'étape est rejouée après une interruption. */
+  retry?: number;
+}
+
+export interface WslPreparation {
+  preparing: boolean;
+  progress: WslPrepareStep | null;
 }
 
 export type { WslStatus } from "./wsl-setup";

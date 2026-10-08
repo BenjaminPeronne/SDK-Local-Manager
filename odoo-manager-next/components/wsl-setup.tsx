@@ -1,11 +1,11 @@
 "use client";
 
-import { CheckCircle2, CircuitBoard, Loader2, ShieldCheck, TriangleAlert } from "lucide-react";
+import { CheckCircle2, CircuitBoard, FileText, Loader2, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { desktopBridge, type WslPrepareStep } from "@/lib/desktop";
-import { prepareProgressPercent, wslSetupError, wslSetupState, type WslStatus } from "@/lib/wsl-setup";
+import { memoryWarning, prepareProgressPercent, wslSetupError, wslSetupState, type WslStatus } from "@/lib/wsl-setup";
 
 function formatElapsed(seconds: number) {
   if (seconds < 60) return `${seconds} s`;
@@ -33,6 +33,10 @@ export function WslSetupDialog({
   // Temps écoulé au début de l'étape en cours : la barre avance pendant chaque étape.
   const [stepStartedAt, setStepStartedAt] = useState(0);
   const elapsedRef = useRef(0);
+  // Étape en cours : un nouvel essai garde la même étape, la barre ne repart pas en arrière.
+  const stepRef = useRef("");
+  // Une préparation déjà lancée au démarrage n'est rejointe qu'une fois par ouverture.
+  const joinedRef = useRef(false);
 
   // L'installation dure plusieurs minutes : l'écran montre où elle en est.
   useEffect(() => {
@@ -40,7 +44,10 @@ export function WslSetupDialog({
     if (!open || !bridge?.onWslProgress) return;
     return bridge.onWslProgress((step) => {
       setProgress(step);
-      setStepStartedAt(elapsedRef.current);
+      if (step.step !== stepRef.current) {
+        stepRef.current = step.step;
+        setStepStartedAt(elapsedRef.current);
+      }
     });
   }, [open]);
 
@@ -68,35 +75,55 @@ export function WslSetupDialog({
 
   useEffect(() => {
     if (open) void refresh();
+    else joinedRef.current = false;
   }, [open, refresh]);
 
   const state = wslSetupState(status, applicationVersion);
 
-  const act = useCallback(async () => {
-    const bridge = desktopBridge();
-    if (!bridge) return;
-    setBusy(true);
-    setError("");
-    setProgress(null);
-    setStepStartedAt(0);
-    try {
-      if (state.step === "install-wsl" || state.step === "outdated-wsl") {
-        const result = await bridge.wslInstallWsl!();
-        setRebootRequired(Boolean(result?.rebootRequired));
-        if (!result?.ok && !result?.rebootRequired)
-          setError(result?.message || "Windows n'a pas pu activer sa fonction Linux.");
-      } else {
-        const updated = await bridge.wslPrepare!();
-        setStatus(updated);
-        if (updated?.distributionInstalled && updated.release === applicationVersion) onReady?.();
+  const act = useCallback(
+    async (joined: WslPrepareStep | null = null) => {
+      const bridge = desktopBridge();
+      if (!bridge) return;
+      setBusy(true);
+      setError("");
+      setProgress(joined);
+      stepRef.current = joined?.step ?? "";
+      setStepStartedAt(0);
+      try {
+        if (state.step === "virtualization-disabled") {
+          // Rien à lancer : l'utilisateur a changé le réglage, l'écran relit l'état.
+          await refresh();
+          return;
+        }
+        if (state.step === "install-wsl" || state.step === "outdated-wsl") {
+          const result = await bridge.wslInstallWsl!();
+          setRebootRequired(Boolean(result?.rebootRequired));
+          if (!result?.ok && !result?.rebootRequired)
+            setError(result?.message || "Windows n'a pas pu activer sa fonction Linux.");
+        } else {
+          const updated = await bridge.wslPrepare!();
+          setStatus(updated);
+          if (updated?.distributionInstalled && updated.release === applicationVersion) onReady?.();
+        }
+        await refresh();
+      } catch (cause) {
+        setError(wslSetupError(cause));
+      } finally {
+        setBusy(false);
       }
-      await refresh();
-    } catch (cause) {
-      setError(wslSetupError(cause));
-    } finally {
-      setBusy(false);
-    }
-  }, [applicationVersion, onReady, refresh, state.step]);
+    },
+    [applicationVersion, onReady, refresh, state.step],
+  );
+
+  // La préparation lancée au démarrage tourne peut-être déjà : l'écran affiche son avancement
+  // et attend son résultat, au lieu de proposer un bouton qui la relancerait.
+  useEffect(() => {
+    if (!open || busy || !status?.preparing || joinedRef.current) return;
+    joinedRef.current = true;
+    void act(status.progress ?? null);
+  }, [act, busy, open, status]);
+
+  const lowMemory = memoryWarning(status);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -133,12 +160,26 @@ export function WslSetupDialog({
           </p>
         )}
         {error && (
-          <p className="flex items-start gap-2 text-sm text-destructive">
-            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-            {error}
-          </p>
+          <div className="space-y-2">
+            <p className="flex items-start gap-2 text-sm text-destructive">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              {error}
+            </p>
+            {desktopBridge()?.openLogFolder && (
+              <Button variant="outline" size="sm" onClick={() => void desktopBridge()?.openLogFolder?.()}>
+                <FileText className="h-4 w-4" />
+                Ouvrir le journal
+              </Button>
+            )}
+          </div>
         )}
         {busy && <PrepareProgress progress={progress} elapsed={elapsed} stepElapsed={elapsed - stepStartedAt} />}
+        {!busy && state.step === "install-environment" && lowMemory && (
+          <p className="flex items-start gap-2 text-sm text-amber-600 dark:text-amber-400">
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            {lowMemory}
+          </p>
+        )}
         {!busy && state.step === "install-environment" && (
           <p className="flex items-start gap-2 text-sm text-muted-foreground">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
@@ -151,7 +192,7 @@ export function WslSetupDialog({
             Plus tard
           </Button>
           {state.actionLabel && (
-            <Button onClick={act} disabled={busy}>
+            <Button onClick={() => void act()} disabled={busy}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CircuitBoard className="h-4 w-4" />}
               {busy ? "Préparation…" : state.actionLabel}
             </Button>

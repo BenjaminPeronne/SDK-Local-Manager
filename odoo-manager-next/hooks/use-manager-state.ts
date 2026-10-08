@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { api, ApiUnavailableError, configureRuntimeApiBase } from "@/lib/api";
+import { desktopBridge } from "@/lib/desktop";
 import { invokeDesktop, isDesktopRuntime } from "@/lib/desktop-runtime";
 import type {
   BackendDiagnostics,
@@ -25,6 +26,32 @@ import { delay } from "@/lib/utils";
 const BOOTSTRAP_RETRY_DELAYS_MS = [0, 500, 1000, 2000];
 
 const DOCKER_CONFIRM_DELAY_MS = 700;
+// Sous Windows, le backend attend la préparation de l'environnement Linux : quelques minutes
+// après une mise à jour, davantage si une étape est rejouée.
+const WSL_PREPARATION_POLL_MS = 2000;
+
+/**
+ * Attend la fin de la préparation de l'environnement Linux lancée au démarrage, en affichant son
+ * étape. Vrai si une préparation tournait : le service local n'était pas en panne, il attendait.
+ */
+async function waitForWslPreparation(onMessage: (message: string) => void, cancelled: () => boolean) {
+  const bridge = desktopBridge();
+  if (!bridge?.wslPreparation) return false;
+  let waited = false;
+  for (;;) {
+    let preparation;
+    try {
+      preparation = await bridge.wslPreparation();
+    } catch {
+      return waited;
+    }
+    if (!preparation?.preparing || cancelled()) return waited;
+    waited = true;
+    const label = preparation.progress?.label;
+    onMessage(label ? `Préparation de l’environnement Linux : ${label}…` : "Préparation de l’environnement Linux…");
+    await delay(WSL_PREPARATION_POLL_MS);
+  }
+}
 
 type UseManagerStateOptions = {
   pushToast: (kind: Toast["kind"], message: string) => void;
@@ -126,7 +153,8 @@ export function useManagerState({
     setBackendDiagnostics(null);
     markApiSuccess();
 
-    for (const [attempt, retryDelay] of BOOTSTRAP_RETRY_DELAYS_MS.entries()) {
+    for (let attempt = 0; attempt < BOOTSTRAP_RETRY_DELAYS_MS.length; attempt++) {
+      const retryDelay = BOOTSTRAP_RETRY_DELAYS_MS[attempt];
       if (retryDelay) await delay(retryDelay);
       if (generation !== bootstrapGeneration.current) return;
       setInitializationMessage(attempt === 0 ? "Démarrage du service local…" : "Connexion au service local…");
@@ -154,6 +182,16 @@ export function useManagerState({
       } catch (err) {
         if (generation !== bootstrapGeneration.current) return;
         if (attempt === BOOTSTRAP_RETRY_DELAYS_MS.length - 1) {
+          // Le backend attend la préparation de l'environnement Linux : rien n'est en panne.
+          const waited = await waitForWslPreparation(
+            setInitializationMessage,
+            () => generation !== bootstrapGeneration.current,
+          );
+          if (generation !== bootstrapGeneration.current) return;
+          if (waited) {
+            attempt = 0;
+            continue;
+          }
           setInitializationError(err instanceof Error ? err.message : "Le service local ne répond pas.");
           setInitializationMessage("Le gestionnaire n’est pas encore prêt.");
           if (isDesktopRuntime()) {

@@ -83,6 +83,15 @@ class DistributionContentTests(unittest.TestCase):
         self.assertIn("COPY provision.sh /opt/sdk-manager/provision.sh", self.dockerfile)
         self.assertIn("chmod 0755 /opt/sdk-manager/provision.sh", self.dockerfile)
 
+    def test_provisioning_fails_when_docker_does_not_start(self):
+        # Un Docker arrêté laissait le poste annoncé « prêt » : la reprise automatique ne se
+        # déclenchait pas, et la version était enregistrée comme installée.
+        provisioning = (WSL_DIRECTORY / "provision.sh").read_text(encoding="utf-8")
+        docker_check = provisioning.index("systemctl is-active --quiet docker")
+        self.assertIn("exit 1", provisioning[docker_check : provisioning.index("done", docker_check)])
+        self.assertLess(docker_check, provisioning.index('> "$RELEASE_FILE"'))
+        self.assertNotIn('log "Docker n\'a pas démarré : voir', provisioning)
+
     def test_provisioning_never_touches_projects(self):
         provisioning = (WSL_DIRECTORY / "provision.sh").read_text(encoding="utf-8")
         self.assertNotIn("rm -rf", provisioning)

@@ -35,6 +35,14 @@ const PREPARE_STEP_LABELS = {
 };
 // Démarrage de Linux vérifié avant le plan : absent de la barre d'avancement, présent au journal.
 const WAKE_LABEL = "Démarrage de l'environnement Linux";
+// Disques d'imports interrompus : gardés ce temps-là après une installation réussie, puis supprimés.
+const ORPHAN_DISK_PREFIX = "ext4.vhdx.interrompu-";
+const ORPHAN_DISK_RETENTION_MS = 14 * 24 * 3600_000;
+// Commandes de la préparation, reconnues à leur nom (`$0` des scripts) : un essai abandonné après
+// un délai dépassé peut encore tourner quand Linux n'a pas pu être redémarré.
+const LEFTOVER_PATTERN = "install-backend|install-provision|write-provision-id|/opt/sdk-manager/provision\\.sh";
+// En dessous, la préparation est lente ou échoue : l'écran le dit avant de commencer.
+const LOW_FREE_MEMORY = 1024 ** 3;
 // Délais des commandes WSL. Un démarrage de Linux bloqué attendait auparavant les 10 minutes
 // par défaut à chaque lecture, puis l'écran affichait la commande au lieu de reprendre seul.
 const TIMEOUTS = {
@@ -47,6 +55,45 @@ const TIMEOUTS = {
   // Copie du backend par /mnt, provisionnement (démarrage de Docker).
   step: 15 * 60_000,
 };
+// Erreurs de Windows quand la virtualisation manque, en français comme en anglais
+// (« virtualisation », « virtualization ») : aucun nouvel essai n'y changerait rien.
+const VIRTUALIZATION_ERROR = /HCS_E_HYPERV_NOT_INSTALLED|0x80370102|virtuali[sz]ation/i;
+
+function isVirtualizationError(error) {
+  return VIRTUALIZATION_ERROR.test(String(error?.message || error || ""));
+}
+
+// Interroge le processeur et Windows. Un hyperviseur déjà actif (WSL, Hyper-V) masque l'option
+// du BIOS : `VirtualizationFirmwareEnabled` vaut alors faux, d'où la lecture de `HypervisorPresent`.
+const VIRTUALIZATION_PROBE =
+  "$c = Get-CimInstance Win32_ComputerSystem; " +
+  "$p = @(Get-CimInstance Win32_Processor | ForEach-Object { $_.VirtualizationFirmwareEnabled }); " +
+  "[pscustomobject]@{ hypervisor = $c.HypervisorPresent; firmware = $p } | ConvertTo-Json -Compress";
+
+/**
+ * État de la virtualisation : `enabled`, `disabled`, ou `unknown` quand la réponse est illisible.
+ *
+ * `disabled` exige une réponse nette : un poste dont le processeur ne renseigne pas l'option
+ * (null) n'est jamais bloqué sur une supposition.
+ */
+function parseVirtualization(output) {
+  let probe;
+  try {
+    probe = JSON.parse(decodeWslOutput(output).trim());
+  } catch {
+    return "unknown";
+  }
+  const firmware = [].concat(probe?.firmware ?? []);
+  if (probe?.hypervisor === true || firmware.includes(true)) return "enabled";
+  if (probe?.hypervisor === false && firmware.length > 0 && firmware.every((value) => value === false)) {
+    return "disabled";
+  }
+  return "unknown";
+}
+
+const VIRTUALIZATION_DISABLED_MESSAGE =
+  "La virtualisation est désactivée sur ce poste : l'environnement Linux ne peut pas démarrer sans elle.";
+
 /**
  * Pourquoi l'environnement Linux n'a pas démarré, en une phrase actionnable.
  *
@@ -57,7 +104,7 @@ const TIMEOUTS = {
  */
 function wslStartFailureReason(error) {
   const message = String(error?.message || error || "");
-  if (/HCS_E_HYPERV_NOT_INSTALLED|0x80370102|virtualis/i.test(message)) {
+  if (isVirtualizationError(message)) {
     return (
       "La virtualisation est désactivée sur ce poste : WSL ne peut plus démarrer. Active-la dans le BIOS ou l'UEFI, " +
       "puis vérifie le composant Windows « Plateforme d'ordinateur virtuel »."
@@ -191,6 +238,8 @@ class WslEnvironment {
     mountPath = WslEnvironment.mountedWindowsPath,
     onProgress = () => {},
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    memory = () => ({ total: os.totalmem(), free: os.freemem() }),
+    now = () => Date.now(),
   } = {}) {
     this.distribution = distribution;
     this.installRoot = installRoot;
@@ -199,9 +248,46 @@ class WslEnvironment {
     this.mountPath = mountPath;
     this.onProgress = onProgress;
     this.sleep = sleep;
+    this.memory = memory;
+    this.now = now;
+    // Dernière étape annoncée : un écran ouvert en cours de route reprend l'avancement là.
+    this.progress = null;
     // Préparation en cours, partagée : celle du démarrage et le clic sur « Préparer mon poste »
     // copiaient le même backend et le même script au même endroit, en même temps.
     this.preparing = null;
+    // La virtualisation ne s'active qu'au redémarrage : une fois constatée, elle n'est plus relue.
+    this.virtualizationEnabled = false;
+  }
+
+  /** Annonce une étape, et la garde pour un écran qui s'ouvrirait pendant la préparation. */
+  report(progress) {
+    this.progress = progress;
+    this.onProgress(progress);
+  }
+
+  /** Préparation en cours et son étape, sans lancer aucune commande : l'écran de chargement l'interroge souvent. */
+  preparation() {
+    return { preparing: Boolean(this.preparing), progress: this.preparing ? this.progress : null };
+  }
+
+  /** La virtualisation du processeur est-elle active ? Lue avant l'import, qui en dépend. */
+  async virtualization() {
+    if (this.virtualizationEnabled) return "enabled";
+    let state = "unknown";
+    try {
+      const { stdout } = await this.run(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", VIRTUALIZATION_PROBE],
+        {
+          timeout: TIMEOUTS.control,
+        },
+      );
+      state = parseVirtualization(stdout);
+    } catch {
+      state = "unknown";
+    }
+    this.virtualizationEnabled = state === "enabled";
+    return state;
   }
 
   async wslVersion() {
@@ -236,15 +322,45 @@ class WslEnvironment {
   /**
    * Met de côté le disque d'un import interrompu, que Windows refuserait d'écraser.
    *
-   * Appelé seulement quand la distribution n'est pas inscrite. Le disque est renommé, jamais
-   * supprimé : s'il contenait malgré tout des projets, ils restent récupérables.
+   * Appelé seulement quand la distribution n'est pas inscrite. Le disque est renommé, pas
+   * supprimé : s'il contenait malgré tout des projets, ils restent récupérables 14 jours.
    */
   setAsideOrphanDisk() {
     const disk = path.join(this.installRoot, "ext4.vhdx");
     if (!fs.existsSync(disk)) return;
-    const kept = `${disk}.interrompu-${Date.now()}`;
+    const kept = path.join(this.installRoot, `${ORPHAN_DISK_PREFIX}${this.now()}`);
     fs.renameSync(disk, kept);
     this.log(`Disque d'un import inachevé mis de côté : ${kept}.`);
+  }
+
+  /** Supprime, après une installation réussie, les disques mis de côté depuis plus de 14 jours. */
+  removeOldOrphanDisks() {
+    let names = [];
+    try {
+      names = fs.readdirSync(this.installRoot);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (!name.startsWith(ORPHAN_DISK_PREFIX)) continue;
+      const setAsideAt = Number(name.slice(ORPHAN_DISK_PREFIX.length));
+      if (!Number.isFinite(setAsideAt) || this.now() - setAsideAt < ORPHAN_DISK_RETENTION_MS) continue;
+      try {
+        fs.rmSync(path.join(this.installRoot, name), { force: true });
+        this.log(`Ancien disque d'import inachevé supprimé : ${name}.`);
+      } catch (error) {
+        this.log(`Ancien disque ${name} non supprimé : ${error.message}`);
+      }
+    }
+  }
+
+  /** Arrête ce qui reste d'un essai abandonné, quand Linux ne peut pas être redémarré. */
+  async stopLeftovers() {
+    await this.runInDistribution(["pkill", "-f", "--", LEFTOVER_PATTERN], {
+      asRoot: true,
+      allowFailure: true,
+      timeout: TIMEOUTS.wake,
+    });
   }
 
   async installedRelease() {
@@ -268,6 +384,11 @@ class WslEnvironment {
       distribution: this.distribution,
       distributionInstalled: installed,
       release: installed ? await this.installedRelease() : "",
+      // Lue seulement avant l'installation : une distribution déjà installée prouve qu'elle
+      // démarrait, et un arrêt ultérieur est expliqué par la bascule sur le backend Windows.
+      virtualization: installed ? "unknown" : await this.virtualization(),
+      memory: this.memory(),
+      ...this.preparation(),
     };
   }
 
@@ -318,19 +439,34 @@ class WslEnvironment {
    *
    * Seules les commandes sont rejouées (`error.command`) : une image corrompue ou un fichier
    * absent échouerait à l'identique. Chaque nouvel essai part d'un Linux redémarré, sauf quand
-   * le backend y tourne déjà : le couper laisserait l'application sans backend.
+   * le backend y tourne déjà : le couper laisserait l'application sans backend. Les restes de
+   * l'essai précédent sont alors arrêtés un par un.
    */
   async withRecovery(step, action, { restartAllowed = true } = {}) {
+    const label = PREPARE_STEP_LABELS[step] || WAKE_LABEL;
     const recoveries = restartAllowed
       ? [() => this.restartDistribution(), () => this.restartWsl()]
-      : [() => this.sleep(5000).then(() => true)];
+      : [
+          async () => {
+            await this.stopLeftovers();
+            await this.sleep(5000);
+            return true;
+          },
+        ];
     for (let attempt = 0; ; attempt += 1) {
       try {
         return await action(attempt);
       } catch (error) {
-        if (!error?.command || attempt >= recoveries.length) throw error;
-        this.log(`Étape « ${PREPARE_STEP_LABELS[step] || WAKE_LABEL} » interrompue (${error.message}) : nouvel essai.`);
+        // Virtualisation absente : seul l'utilisateur peut l'activer, un nouvel essai serait vain.
+        if (!error?.command || isVirtualizationError(error) || attempt >= recoveries.length) throw error;
+        this.log(`Étape « ${label} » interrompue (${error.message}) : nouvel essai.`);
         if (!(await recoveries[attempt]())) throw error;
+        // L'écran dit qu'un nouvel essai est en cours, au lieu d'une barre qui semble figée.
+        this.report({
+          ...(this.progress || { step, index: 0, total: 0 }),
+          label: `Nouvel essai : ${label}`,
+          retry: attempt + 1,
+        });
       }
     }
   }
@@ -495,6 +631,7 @@ class WslEnvironment {
     if (!this.preparing) {
       this.preparing = this.prepareOnce(options).finally(() => {
         this.preparing = null;
+        this.progress = null;
       });
     }
     return this.preparing;
@@ -503,12 +640,24 @@ class WslEnvironment {
   async prepareOnce({ version, backendSource, archive, checksum, provisionScript = "", restartAllowed = true }) {
     const state = await this.status();
     if (!state.wslInstalled) throw new Error("WSL n'est pas installé.");
+    // Constatée avant l'import : sans elle, l'import échouait après la vérification de l'image.
+    if (!state.distributionInstalled && state.virtualization === "disabled") {
+      this.log(VIRTUALIZATION_DISABLED_MESSAGE);
+      throw new Error(VIRTUALIZATION_DISABLED_MESSAGE);
+    }
+    if (state.memory.free < LOW_FREE_MEMORY) {
+      this.log(`Peu de mémoire libre au début de la préparation : ${Math.round(state.memory.free / 1024 ** 2)} Mo.`);
+    }
     const recovery = { restartAllowed };
     const failed = (label, error) => {
-      // Le journal et l'écran disent quelle étape a échoué, pas seulement quelle commande.
+      // Le journal garde la cause technique et la commande ; l'écran reçoit une phrase simple.
       this.log(`Échec de l'étape « ${label} » : ${error.message}`);
       if (error.command) this.log(`  Commande : ${error.command}`);
-      return error;
+      if (!error.command || isVirtualizationError(error)) return error;
+      const plain = new Error(`La préparation s'est arrêtée à l'étape « ${label} » après plusieurs essais.`);
+      plain.step = error.step;
+      plain.cause = error;
+      return plain;
     };
     // Linux bloqué au démarrage : repéré et relancé ici, avant les lectures qui fondent le plan.
     if (state.distributionInstalled) {
@@ -533,7 +682,7 @@ class WslEnvironment {
     const run = async (step, action) => {
       const index = planned.indexOf(step);
       if (index < 0) return;
-      this.onProgress({ step, label: PREPARE_STEP_LABELS[step], index: index + 1, total: planned.length });
+      this.report({ step, label: PREPARE_STEP_LABELS[step], index: index + 1, total: planned.length });
       try {
         await action();
       } catch (error) {
@@ -556,8 +705,10 @@ class WslEnvironment {
     await run("import", () => this.importDistribution({ archive, checksum }));
     await run("backend", () => recovered("backend", () => this.installBackend(backendSource)));
     await run("provision", () => recovered("provision", () => this.provision(version, provisionScript, provisionId)));
-    this.onProgress({ step: "done", label: PREPARE_STEP_LABELS.done, index: planned.length, total: planned.length });
-    return this.status();
+    this.report({ step: "done", label: PREPARE_STEP_LABELS.done, index: planned.length, total: planned.length });
+    this.removeOldOrphanDisks();
+    // Lu avant la fin de cet appel : sans cela, l'état rendu se dirait encore « en préparation ».
+    return { ...(await this.status()), preparing: false, progress: null };
   }
 
   backendCommand(port, instance, legacyWorkspace = "") {
@@ -682,6 +833,8 @@ module.exports = {
   legacyWindowsWorkspace,
   commandError,
   decodeWslOutput,
+  isVirtualizationError,
+  parseVirtualization,
   expectedChecksum,
   imageFiles,
   importArguments,

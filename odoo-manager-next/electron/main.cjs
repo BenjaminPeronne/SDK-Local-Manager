@@ -187,6 +187,8 @@ function installHandlers() {
   handle("backend-diagnostics", () => backend.diagnostics());
   handle("open-external", (url) => shell.openExternal(externalUrl(url)));
   handle("open-docker", openDocker);
+  // Le journal est demandé quand une préparation échoue : l'utilisateur le trouve en un clic.
+  handle("open-log-folder", () => shell.showItemInFolder(backend.logPath));
   // Seul le dossier des projets vient de l'interface : il désigne le disque à contrôler. Le
   // système est celui de l'ordinateur, pas celui du backend (Linux sous Windows).
   handle("disk-encryption", async (workspace) => ({
@@ -217,6 +219,11 @@ function installHandlers() {
   handle(
     "wsl-prepare",
     onWindows(() => prepareWslEnvironment()),
+  );
+  // Interrogé souvent par l'écran de chargement : aucune commande WSL n'est lancée.
+  handle(
+    "wsl-preparation",
+    onWindows(() => wsl.preparation()),
   );
   handle(
     "wsl-legacy-workspace",

@@ -4,6 +4,8 @@
 // 48 à 95 s à démarrer contre 4 à 6 s dans l'environnement Linux. L'utilisateur ne
 // voit qu'un bouton ; cette logique dit lequel afficher.
 
+import type { WslPrepareStep } from "./desktop";
+
 export interface WslStatus {
   /** Absent sous Windows ; faux quand le système ne connaît pas d'environnement Linux. */
   supported?: boolean;
@@ -13,10 +15,43 @@ export interface WslStatus {
   distribution: string;
   distributionInstalled: boolean;
   release: string;
+  /** Lue avant l'installation de l'environnement ; `unknown` quand Windows ne répond pas nettement. */
+  virtualization?: "enabled" | "disabled" | "unknown";
+  /** Mémoire de l'ordinateur, en octets. */
+  memory?: { total: number; free: number };
+  /** Vrai quand une préparation tourne déjà, lancée au démarrage de l'application. */
+  preparing?: boolean;
+  progress?: WslPrepareStep | null;
+}
+
+const GIB = 1024 ** 3;
+
+/**
+ * Avertissement sur la mémoire avant l'installation, ou une chaîne vide.
+ *
+ * Linux reçoit au plus la moitié de la mémoire de l'ordinateur : sous 8 Go, les projets Odoo
+ * y sont à l'étroit. Rien n'est bloqué, l'utilisateur est prévenu avant les minutes d'attente.
+ */
+export function memoryWarning(status: WslStatus | null): string {
+  if (!status?.memory || status.distributionInstalled) return "";
+  const gigabytes = (bytes: number) => Math.round((bytes / GIB) * 10) / 10;
+  if (status.memory.total < 8 * GIB) {
+    return `Cet ordinateur a peu de mémoire (${gigabytes(status.memory.total)} Go) : l'environnement fonctionnera, mais les projets pourront être lents. Ferme les autres applications pendant la préparation.`;
+  }
+  if (status.memory.free < 2 * GIB) {
+    return `Il reste peu de mémoire libre (${gigabytes(status.memory.free)} Go) : ferme les autres applications avant de commencer.`;
+  }
+  return "";
 }
 
 export type WslSetupStep =
-  "unsupported" | "install-wsl" | "outdated-wsl" | "install-environment" | "update-environment" | "ready";
+  | "unsupported"
+  | "virtualization-disabled"
+  | "install-wsl"
+  | "outdated-wsl"
+  | "install-environment"
+  | "update-environment"
+  | "ready";
 
 export interface WslSetupState {
   step: WslSetupStep;
@@ -44,6 +79,20 @@ export function wslSetupState(status: WslStatus | null, applicationVersion: stri
       title: "Environnement Linux indisponible",
       detail: "Cette version de l'application ne gère pas l'environnement Linux sur ce système.",
       actionLabel: "",
+      needsElevation: false,
+    };
+  }
+  // Bloquant avant tout le reste : sans virtualisation, l'environnement ne démarrera jamais, et
+  // seul l'utilisateur peut l'activer. Dit dès l'ouverture, au lieu d'après plusieurs minutes.
+  if (!status.distributionInstalled && status.virtualization === "disabled") {
+    return {
+      step: "virtualization-disabled",
+      title: "Activer la virtualisation",
+      detail:
+        "La virtualisation est désactivée sur cet ordinateur : l'environnement Linux ne peut pas démarrer sans elle. " +
+        "Elle s'active dans le BIOS, au démarrage de l'ordinateur (option « Intel VT-x », « AMD-V » ou « SVM »). " +
+        "Redémarre ensuite, et l'application reprendra ici.",
+      actionLabel: "Vérifier à nouveau",
       needsElevation: false,
     };
   }
@@ -106,17 +155,20 @@ export function wslSetupError(error: unknown): string {
   if (/ENOENT|introuvable|no such file/i.test(message)) {
     return "L'image de l'environnement est absente de cette installation. Retélécharge l'application complète.";
   }
-  if (/0x80370102|virtualis/i.test(message)) {
+  if (/0x80370102|HCS_E_HYPERV_NOT_INSTALLED|virtuali[sz]ation/i.test(message)) {
     return "La virtualisation est désactivée dans le BIOS de ce poste. Active-la, puis réessaie.";
   }
   // L'application a déjà redémarré l'environnement Linux et réessayé : il reste le redémarrage
-  // de l'ordinateur, que l'utilisateur fait seul. La commande en cause est dans le journal.
+  // de l'ordinateur, que l'utilisateur fait seul. La cause technique est dans le journal.
+  const retryAdvice =
+    "Redémarre l'ordinateur, puis clique à nouveau sur « Préparer mon poste ». " +
+    "Si cela se reproduit, ouvre le journal et envoie-le au support.";
+  if (/après plusieurs essais/i.test(message)) return `${message} ${retryAdvice}`;
   if (/délai imparti|sans message|interrompu|^Command failed/i.test(message)) {
-    return (
-      "La préparation s'est arrêtée malgré plusieurs essais. Redémarre l'ordinateur, puis clique " +
-      "à nouveau sur « Préparer mon poste ». Si cela se reproduit, envoie le journal du gestionnaire (fichier backend.log)."
-    );
+    return `La préparation s'est arrêtée malgré plusieurs essais. ${retryAdvice}`;
   }
+  // Erreur système brute (EACCES, EPERM…) : jamais affichée telle quelle.
+  if (/^(E[A-Z]{2,}\b|Error\b)/.test(message)) return `La préparation a échoué. ${retryAdvice}`;
   return message || "La préparation a échoué.";
 }
 
