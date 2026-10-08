@@ -147,6 +147,7 @@ from odoo_manager_core.project_creator import (
     SUPPORTED_ODOO_VERSIONS,
     abandoned_staging_entries,
     normalize_project_name,
+    repository_slug,
     validate_git_ref,
     validate_gitlab_repository,
     validate_new_project_name,
@@ -158,6 +159,7 @@ from odoo_manager_core.releases import RELEASES_PAGE, RELEASES_REPOSITORY, relea
 from odoo_manager_core.repositories import (
     REPOSITORY_COMMIT_RE,
     REPOSITORY_GIT_OPTIONS,
+    remote_branches,
     repository_clone_error,
     repository_tree_modules,
     sparse_checkout_pattern,
@@ -228,6 +230,7 @@ API_ENDPOINTS = {
         "/api/projects/{project}/database-restore",
         "/api/projects/{project}/database-retention",
         "/api/projects/{project}/repository/inspect",
+        "/api/projects/{project}/repository/branches",
         "/api/projects/{project}/module-zip/inspect",
         "/api/projects/{project}/module-zip",
     ),
@@ -278,6 +281,7 @@ API_ACTIONS = (
     "start_project",
     "stop_mailpit",
     "stop_project",
+    "switch_repository_branch",
     "uninstall_module",
     "update_all",
     "update_all_modules",
@@ -3241,6 +3245,10 @@ JOB_CANCEL_POLICIES = {
         False,
         "Le lien du module est remplacé en un instant ; l'arrêter laisserait le module sans version.",
     ),
+    "switch_repository_branch_job": (
+        True,
+        "Possible pendant la récupération depuis le serveur ; le remplacement des fichiers va à son terme.",
+    ),
     "import_zip_modules_job": (True, MODULE_FILES_CANCEL_HINT),
     "link_modules_job": (True, MODULE_FILES_CANCEL_HINT),
     "create_project_job": (
@@ -3305,6 +3313,7 @@ JOB_EXPECTED_DURATIONS = {
     "drop_database_job": 20,
     "delete_project_job": 30,
     "repository_modules_job": 60,
+    "switch_repository_branch_job": 60,
     "install_traefik_job": 60,
     "install_git_job": 120,
     "start_mailpit_job": 40,
@@ -4572,7 +4581,7 @@ def extend_database_retention_view(request):
 # déposent leurs fichiers : ce dossier n'est vidé que sans autre action en cours.
 MANAGER_FOLDERS = {
     "deleted_modules": (".odoo_manager_deleted_modules", "Modules retirés des projets"),
-    "backups": (".odoo_manager_backups", "Versions de modules remplacées lors des imports"),
+    "backups": (".odoo_manager_backups", "Versions de modules et de dépôts remplacées lors des imports"),
     "failures": (".odoo_manager_failures", "Journaux des commandes Odoo en échec"),
     "imports": (".odoo_manager_imports", "Fichiers temporaires d'imports et de restaurations"),
 }
@@ -6499,6 +6508,216 @@ def restore_module_source_job(job, project, module_name):
     job.result = {"kind": "restore_module_source", "module": module_name, "repository": label}
 
 
+# Clé SSH seule, sans saisie : un dépôt cloné à la main peut utiliser https ou un autre hôte.
+CHECKOUT_GIT_OPTIONS = REPOSITORY_GIT_OPTIONS[:2]
+ENTERPRISE_REPOSITORY_NAMES = ("odoo_entreprise", "odoo_enterprise")
+
+
+def switchable_repository(project, repository_id):
+    """Dépôt de la vue « Par dépôt » dont la branche peut changer, tel que l'interface le désigne.
+
+    - clone Git rangé dans addons-store : changement de branche sur place ;
+    - archive SDK rangée dans addons-store : remplacée par un clone de la branche choisie ;
+    - copie importée (`import:<url>#<branch>`) : ses modules sont réimportés depuis l'autre branche.
+    Odoo, Enterprise et les dépôts hors d'addons-store ne sont jamais modifiés.
+    """
+    project = validate_project(project)
+    repository_id = str(repository_id or "").strip()
+    if repository_id.startswith("import:"):
+        url, _, branch = repository_id.removeprefix("import:").rpartition("#")
+        url = validate_gitlab_repository(url)
+        modules = sorted(
+            name
+            for name, source in read_imported_sources(project).items()
+            if str(source.get("url") or "") == url and str(source.get("branch") or "") == branch
+        )
+        if not modules:
+            raise ValueError("Aucun module importé depuis ce dépôt : actualise la liste des modules.")
+        return {
+            "kind": "import",
+            "name": repository_slug(url),
+            "url": url,
+            "branch": branch,
+            "modules": modules,
+        }
+    root = Path(repository_id)
+    if not repository_id or not root.is_absolute():
+        raise ValueError("Dépôt invalide.")
+    variants = project_layout_variants(project)
+    finder = module_checkout_finder(variants)
+    if (
+        git_checkouts.normalized(root.parent) not in variants["storage"]
+        or root.name in ENTERPRISE_REPOSITORY_NAMES
+        or not finder.is_checkout(root)
+    ):
+        raise ValueError("Seuls les dépôts rangés dans addons-store du projet changent de branche.")
+    # Chemin écrit depuis le projet, pas résolu : les liens d'odoo/addons en sont calculés en relatif.
+    root = project_addons_storage_parent(project) / root.name
+    info = git_checkouts.read_checkout(root)
+    if not info:
+        raise RuntimeError(f"Lecture du dépôt {root.name} impossible.")
+    if info["source"] == "sdk":
+        try:
+            url = validate_gitlab_repository(info["remote"])
+        except ValueError:
+            raise ValueError(
+                f"L'archive {root.name} ne précise pas d'adresse sur le GitLab Sudokeys : "
+                "impossible de récupérer une autre branche."
+            ) from None
+        return {"kind": "sdk", "name": root.name, "root": root, "url": url, "branch": info["branch"]}
+    return {"kind": "git", "name": root.name, "root": root, "url": "", "branch": info["branch"]}
+
+
+def repository_branches(project, repository_id):
+    """Branches du dépôt d'origine, lues sur le serveur avec la clé SSH qui servira au changement."""
+    target = switchable_repository(project, repository_id)
+    creator = ProjectCreator(SETTINGS, WORKSPACE, project_service())
+    if target["kind"] == "git":
+        command = creator.git(
+            *CHECKOUT_GIT_OPTIONS, "-C", creator.command_path(target["root"]), "ls-remote", "--symref", "origin"
+        )
+    else:
+        command = creator.git(*REPOSITORY_GIT_OPTIONS, "ls-remote", "--symref", target["url"])
+    code, output = creator.project_service.capture(
+        [*command, "HEAD", "refs/heads/*"], cwd=creator.command_cwd, timeout=60
+    )
+    if code:
+        raise repository_clone_error(output)
+    return {"current": target["branch"], "kind": target["kind"], "branches": remote_branches(output)}
+
+
+def repository_branches_view(request):
+    payload = request.handler.read_json()
+    return repository_branches(request.param("project"), payload.get("repository", ""))
+
+
+def repository_module_names(creator, root):
+    try:
+        return {path.name for path in creator.module_directories(root)}
+    except OSError:
+        return set()
+
+
+def switch_checkout_branch(job, creator, root, branch):
+    """Passe un clone Git sur `branch`, sans jamais écraser une modification non enregistrée."""
+    path = creator.command_path(root)
+
+    def git(*arguments, timeout=60):
+        return creator.project_service.capture(
+            creator.git(*CHECKOUT_GIT_OPTIONS, "-C", path, *arguments), cwd=creator.command_cwd, timeout=timeout
+        )
+
+    code, changes = git("status", "--porcelain", "--untracked-files=no")
+    if code:
+        raise RuntimeError(f"Lecture de l'état du dépôt {root.name} impossible.")
+    changed = [line[3:].strip() for line in changes.splitlines() if line.strip()]
+    if changed:
+        raise RuntimeError(
+            f"{root.name} contient des fichiers modifiés et non enregistrés dans Git ({len(changed)}) : "
+            + ", ".join(changed[:8])
+            + (" …" if len(changed) > 8 else "")
+            + ". Enregistre-les (commit) ou annule-les, puis relance le changement de branche."
+        )
+    git_dir = git_checkouts.git_directory(root)
+    shallow = bool(git_dir) and (git_checkouts.common_directory(git_dir) / "shallow").exists()
+    job.add(f"Récupération de la branche {branch} de {root.name}…")
+    code, output = git(
+        "fetch",
+        *(("--depth", "1") if shallow else ()),
+        "--no-tags",
+        "origin",
+        f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
+        timeout=300,
+    )
+    if code:
+        raise repository_clone_error(output)
+    current = (git_checkouts.read_checkout(root) or {}).get("branch", "")
+    local = git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")[0] == 0
+    if current != branch:
+        if local:
+            code, output = git("checkout", "-q", branch)
+        else:
+            # Un clone d'une seule branche ne suit qu'elle : la nouvelle branche est ajoutée au suivi
+            # pour qu'un `git pull` lancé à la main fonctionne ensuite.
+            code, refspecs = git("config", "--get-all", "remote.origin.fetch")
+            if code or "refs/heads/*" not in refspecs:
+                git("remote", "set-branches", "--add", "origin", branch)
+            code, output = git("checkout", "-q", "-b", branch, "--track", f"origin/{branch}")
+        if code:
+            raise RuntimeError(f"Changement de branche refusé par Git : {output.strip()[-400:]}")
+    if local or current == branch:
+        code, output = git("merge", "--ff-only", "-q", f"origin/{branch}")
+        if code:
+            job.add(
+                f"Attention : la branche locale {branch} diffère de celle du serveur ; elle est gardée telle quelle."
+            )
+
+
+def replace_archive_with_clone(job, creator, project, root, url, branch):
+    """Remplace une archive SDK par un clone de `branch` ; l'archive est mise de côté, rétablie en cas d'échec."""
+    staging = project_staging_imports_root(project)
+    staging.mkdir(parents=True, exist_ok=True)
+    backup_root = WORKSPACE / ".odoo_manager_backups" / "repositories" / project
+    backup_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="repository-branch-", dir=staging) as temporary:
+        checkout = Path(temporary) / root.name
+        creator.clone(url, branch, checkout, log=job.add)
+        backup = unique_child(backup_root, root.name)
+        with job_control.protected(f"remplacement du dossier {root.name}"):
+            move_module_entry(root, backup)
+            try:
+                move_module_entry(checkout, root)
+            except BaseException:
+                if not (root.exists() or root.is_symlink()):
+                    move_module_entry(backup, root)
+                raise
+    job.add(f"Ancienne archive mise de côté : {backup}")
+
+
+def switch_repository_branch_job(job, project, repository_id, branch):
+    """Change la branche d'un dépôt de modules du projet, selon sa nature (voir switchable_repository)."""
+    target = switchable_repository(project, repository_id)
+    project = validate_project(project)
+    name, previous = target["name"], target["branch"]
+    if target["kind"] == "import":
+        if branch == previous:
+            raise ValueError(f"Les modules de {name} viennent déjà de la branche {branch}.")
+        job.add(f"Réimport de {len(target['modules'])} module(s) de {name} depuis la branche {branch}…")
+        repository_modules_job(job, project, target["url"], branch, target["modules"])
+        modules = target["modules"]
+    else:
+        if branch == previous and target["kind"] == "sdk":
+            raise ValueError(f"{name} est déjà sur la branche {branch}.")
+        creator = ProjectCreator(SETTINGS, WORKSPACE, project_service())
+        root = target["root"]
+        before = repository_module_names(creator, root)
+        try:
+            if target["kind"] == "git":
+                switch_checkout_branch(job, creator, root, branch)
+            else:
+                replace_archive_with_clone(job, creator, project, root, target["url"], branch)
+            # Les modules apparus sur la nouvelle branche sont reliés comme à la création du projet ;
+            # un lien déjà occupé (copie importée, autre dépôt) est laissé tel quel.
+            creator.link_modules(root, project_addons_link_parent(project), log=job.add, replace=False)
+        finally:
+            clear_project_module_cache(project)
+        after = repository_module_names(creator, root)
+        missing = sorted(before - after)
+        if missing:
+            job.add(
+                f"Absents de la branche {branch} ({len(missing)}) : {', '.join(missing)}. "
+                f"Odoo ne les trouvera plus tant que {name} reste sur cette branche."
+            )
+        modules = sorted(after)
+    job.add(
+        f"{name} : branche {previous or '?'} → {branch}."
+        if branch != previous
+        else f"{name} : branche {branch} mise à jour depuis le serveur."
+    )
+    job.add("Mets à jour les modules installés de ce dépôt dans la base Odoo pour qu'elle utilise ce code.")
+    job.result = {"kind": "repository_branch", "repository": name, "branch": branch, "modules": modules}
+
+
 def extract_zip_module_candidates(project, filename, upload):
     """Extrait un ZIP de modules dans la zone de préparation ; `upload` est son contenu ou son chemin.
 
@@ -7540,6 +7759,18 @@ def repository_modules_action(payload):
     )
 
 
+def switch_repository_branch_action(payload):
+    project = payload_project(payload)
+    branch = validate_git_ref(payload.get("branch"))
+    target = switchable_repository(project, payload.get("repository"))
+    return Job(
+        f"Changer de branche · {target['name']} → {branch}",
+        switch_repository_branch_job,
+        (project, str(payload.get("repository")), branch),
+        project=project,
+    )
+
+
 def restore_module_source_action(payload):
     project = payload_project(payload)
     module_name = str(payload.get("module", "") or "").strip()
@@ -7781,6 +8012,7 @@ def link_modules_action(payload):
 JOB_ACTIONS = {
     "repository_modules": repository_modules_action,
     "restore_module_source": restore_module_source_action,
+    "switch_repository_branch": switch_repository_branch_action,
     "start_project": project_job("Démarrer {project}", start_project_job),
     "stop_project": project_job("Arrêter {project}", stop_project_job),
     "update_project": project_job("MAJ projet {project}", update_project_job),
@@ -7914,6 +8146,7 @@ ROUTER = Router(
         api_route("POST", "/api/projects/{project}/database-restore", restore_database_upload),
         api_route("POST", "/api/projects/{project}/database-retention", extend_database_retention_view),
         api_route("POST", "/api/projects/{project}/repository/inspect", inspect_repository_view),
+        api_route("POST", "/api/projects/{project}/repository/branches", repository_branches_view),
         api_route("POST", "/api/projects/{project}/module-zip/inspect", inspect_module_zip_view),
         api_route("POST", "/api/projects/{project}/module-zip", import_module_zip_view),
         api_route("DELETE", "/api/errors", clear_errors_view),

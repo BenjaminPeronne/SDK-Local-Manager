@@ -16,6 +16,8 @@ const SLOW_READ_TIMEOUT_MS = 90_000;
 function apiTimeoutFor(path: string) {
   if (path.includes("/module-zip") || path.endsWith("/repository/inspect")) return UPLOAD_TIMEOUT_MS;
   if (/\/api\/projects\/[^/]+\/(modules|socle)(\?|\/|$)/.test(path)) return SLOW_READ_TIMEOUT_MS;
+  // Lecture des branches sur GitLab : jusqu'à 60 s côté serveur pour un dépôt lent à répondre.
+  if (path.endsWith("/repository/branches")) return SLOW_READ_TIMEOUT_MS;
   return API_TIMEOUT_MS;
 }
 

@@ -259,8 +259,8 @@ export function ModulesTab({
       {repositoryView && repositoryGroups.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-xs text-muted-foreground">
-            {repositoryGroups.filter((group) => group.repository).length} dépôt(s) · branche chargée affichée pour
-            chacun
+            {repositoryGroups.filter((group) => group.repository).length} dépôt(s) · clique sur une branche pour en
+            changer
           </span>
           <div className="flex items-center gap-1">
             <Button
@@ -420,10 +420,12 @@ export function ModulesTab({
           {repositoryView ? (
             repositoryGroups.length ? (
               <ModuleRepositoryGroups
+                createJob={createJob}
                 folding={folding}
                 groups={repositoryGroups}
                 onFold={foldGroup}
                 openUrl={openUrl}
+                projectName={projectName}
                 rowActions={rowActions}
                 searchActive={searchKey !== ""}
                 selectedModules={selectedModules}

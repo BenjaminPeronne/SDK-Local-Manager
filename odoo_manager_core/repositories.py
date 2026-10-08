@@ -49,6 +49,36 @@ REPOSITORY_GIT_OPTIONS = (
 
 REPOSITORY_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
+# Branches lues au plus dans un dépôt : au-delà, la recherche de la liste suffit à s'y retrouver.
+MAX_REMOTE_BRANCHES = 2000
+REMOTE_HEAD_RE = re.compile(r"^ref:\s*refs/heads/(\S+)\s+HEAD$")
+REMOTE_BRANCH_RE = re.compile(r"^[0-9a-f]{40}\s+refs/heads/(\S+)$")
+
+
+def natural_key(name):
+    """Tri naturel : 8.0 avant 10.0. Les morceaux alternent texte et nombre, donc restent comparables."""
+    return [int(part) if part.isdigit() else part.casefold() for part in re.split(r"(\d+)", name)]
+
+
+def remote_branches(ls_remote_output):
+    """Branches d'un `git ls-remote --symref <dépôt> HEAD refs/heads/*`, branche par défaut en tête.
+
+    Les autres lignes (avertissements SSH mêlés à la sortie) sont ignorées.
+    """
+    default = ""
+    names = set()
+    for line in str(ls_remote_output or "").splitlines():
+        line = line.strip()
+        head = REMOTE_HEAD_RE.match(line)
+        if head:
+            default = head.group(1)
+            continue
+        branch = REMOTE_BRANCH_RE.match(line)
+        if branch:
+            names.add(branch.group(1))
+    ordered = sorted(names, key=lambda name: (name != default, natural_key(name)))[:MAX_REMOTE_BRANCHES]
+    return [{"name": name, "default": name == default} for name in ordered]
+
 
 def sparse_checkout_pattern(path):
     """Motif sparse-checkout ne désignant que ce chemin exact, caractères spéciaux échappés."""

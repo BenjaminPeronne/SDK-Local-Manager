@@ -1,4 +1,7 @@
+import json
+import shutil
 import subprocess
+import unittest
 from pathlib import Path
 from unittest import mock
 
@@ -330,3 +333,155 @@ class RepositoryModulesTests(ModuleLayoutTests):
         with mock.patch.object(web, "module_dirs", side_effect=AssertionError("scan du projet")):
             job = self.run_import(["alpha"])
         self.assertEqual(job.result["modules"], ["alpha"])
+
+    def test_remote_branches_put_the_default_first_and_ignore_ssh_noise(self):
+        output = "\n".join(
+            (
+                "Warning: Permanently added 'gitlab.sudokeys.com' to the list of known hosts.",
+                "ref: refs/heads/master\tHEAD",
+                f"{COMMIT}\tHEAD",
+                f"{COMMIT}\trefs/heads/ti20914",
+                f"{COMMIT}\trefs/heads/Feature/x",
+                f"{COMMIT}\trefs/heads/10.0",
+                f"{COMMIT}\trefs/heads/8.0",
+                f"{COMMIT}\trefs/heads/master",
+            )
+        )
+        self.assertEqual(
+            [
+                {"name": "master", "default": True},
+                {"name": "8.0", "default": False},
+                {"name": "10.0", "default": False},
+                {"name": "Feature/x", "default": False},
+                {"name": "ti20914", "default": False},
+            ],
+            web.remote_branches(output),
+        )
+
+    def test_only_repositories_of_addons_store_can_switch_branch(self):
+        (self.project_root / "odoo/odoo/.git").mkdir()
+        enterprise = self.storage("odoo_entreprise")
+        (enterprise / ".git").mkdir(parents=True)
+        for repository in (self.project_root / "odoo/odoo", enterprise, Path("relative"), self.root / "elsewhere"):
+            with self.assertRaises(ValueError):
+                web.switchable_repository(self.project, str(repository))
+        with self.assertRaisesRegex(ValueError, "Aucun module importé"):
+            web.switchable_repository(self.project, f"import:{URL}#18.0")
+
+    def test_imported_copies_are_reimported_from_the_new_branch(self):
+        self.run_import(["alpha", "beta"])
+        (self.storage("alpha") / "code.py").write_text("old")
+        branches = []
+
+        def clone(command, **kwargs):
+            if "clone" in command:
+                branches.append(command[command.index("--branch") + 1])
+            return self.clone(command, **kwargs)
+
+        job = DummyJob()
+        with mock.patch.object(web.subprocess, "run", side_effect=clone):
+            web.switch_repository_branch_job(job, self.project, f"import:{URL}#18.0", "dev")
+
+        self.assertEqual(["dev"], branches)
+        self.assertEqual("new", (self.storage("alpha") / "code.py").read_text())
+        sources = web.read_imported_sources(self.project)
+        self.assertEqual({"dev"}, {sources[name]["branch"] for name in ("alpha", "beta")})
+        self.assertEqual(
+            {"kind": "repository_branch", "repository": "addons", "branch": "dev", "modules": ["alpha", "beta"]},
+            job.result,
+        )
+        with self.assertRaisesRegex(ValueError, "déjà de la branche dev"):
+            web.switch_repository_branch_job(DummyJob(), self.project, f"import:{URL}#dev", "dev")
+
+    def test_sdk_archive_is_replaced_by_a_clone_of_the_chosen_branch(self):
+        archive = self.storage("sdk-addons")
+        (archive / "alpha").mkdir(parents=True)
+        (archive / "alpha/__manifest__.py").write_text("{'name': 'Alpha'}")
+        (archive / "info.sdk").write_text(json.dumps({"active_branch": "18.0", "remotes": {"origin": URL}}))
+        (self.project_root / "odoo/addons/alpha").symlink_to("../addons-store/sdk-addons/alpha")
+
+        def clone(creator, repository, branch, destination, log=None):
+            self.assertEqual((URL, "dev"), (repository, branch))
+            for name in ("alpha", "gamma"):
+                (destination / name).mkdir(parents=True)
+                (destination / name / "__manifest__.py").write_text(f"{{'name': '{name}'}}")
+            (destination / ".git").mkdir()
+            (destination / ".git/HEAD").write_text("ref: refs/heads/dev\n")
+
+        job = DummyJob()
+        with mock.patch.object(web.ProjectCreator, "clone", autospec=True, side_effect=clone):
+            web.switch_repository_branch_job(job, self.project, str(web.safe_resolve(archive)), "dev")
+
+        self.assertEqual("dev", web.git_checkouts.read_checkout(archive)["branch"])
+        self.assertFalse((archive / "info.sdk").exists())
+        self.assertTrue((self.project_root / "odoo/addons/gamma/__manifest__.py").is_file(), job.lines)
+        backups = list((self.root / ".odoo_manager_backups/repositories" / self.project).iterdir())
+        self.assertEqual(1, len(backups))
+        self.assertTrue((backups[0] / "info.sdk").is_file())
+        self.assertEqual(["alpha", "gamma"], job.result["modules"])
+
+    @unittest.skipUnless(shutil.which("git"), "Git requis")
+    def test_git_clone_switches_branch_links_new_modules_and_keeps_local_changes(self):
+        def git(*arguments, cwd=None):
+            subprocess.run(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.org", *arguments],
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+            )
+
+        work = self.root / "work"
+        work.mkdir()
+        git("init", "-q", "-b", "master", cwd=work)
+        for name in ("alpha", "beta"):
+            (work / name).mkdir()
+            (work / name / "__manifest__.py").write_text(f"{{'name': '{name}'}}")
+        git("add", ".", cwd=work)
+        git("commit", "-q", "-m", "master", cwd=work)
+        git("checkout", "-q", "-b", "feature", cwd=work)
+        shutil.rmtree(work / "beta")
+        (work / "gamma").mkdir()
+        (work / "gamma/__manifest__.py").write_text("{'name': 'gamma'}")
+        git("add", "-A", ".", cwd=work)
+        git("commit", "-q", "-m", "feature", cwd=work)
+        git("checkout", "-q", "master", cwd=work)
+        origin = self.root / "origin.git"
+        git("clone", "-q", "--bare", str(work), str(origin))
+        clone = self.storage("addons-repo")
+        git("clone", "-q", "--depth", "1", "--single-branch", "--branch", "master", origin.as_uri(), str(clone))
+        for name in ("alpha", "beta"):
+            (self.project_root / "odoo/addons" / name).symlink_to(f"../addons-store/addons-repo/{name}")
+        repository = str(web.safe_resolve(clone))
+
+        branches = web.repository_branches(self.project, repository)
+        self.assertEqual("master", branches["current"])
+        self.assertEqual(
+            [{"name": "master", "default": True}, {"name": "feature", "default": False}], branches["branches"]
+        )
+
+        (clone / "alpha/__manifest__.py").write_text("{'name': 'changed'}")
+        with self.assertRaisesRegex(RuntimeError, "non enregistrés dans Git"):
+            web.switch_repository_branch_job(DummyJob(), self.project, repository, "feature")
+        self.assertEqual("master", web.git_checkouts.read_checkout(clone)["branch"])
+        git("checkout", "--", "alpha", cwd=clone)
+
+        job = DummyJob()
+        web.switch_repository_branch_job(job, self.project, repository, "feature")
+
+        self.assertEqual("feature", web.git_checkouts.read_checkout(clone)["branch"])
+        self.assertTrue((self.project_root / "odoo/addons/gamma/__manifest__.py").is_file())
+        self.assertTrue(any("Absents de la branche feature (1) : beta" in line for line in job.lines))
+        self.assertEqual(["alpha", "gamma"], job.result["modules"])
+        # La nouvelle branche est suivie : un `git pull` à la main fonctionne ensuite.
+        upstream = subprocess.run(
+            ["git", "-C", str(clone), "rev-parse", "--abbrev-ref", "feature@{upstream}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual("origin/feature", upstream.stdout.strip())
+
+        # Revenir sur master réutilise la branche locale.
+        web.switch_repository_branch_job(DummyJob(), self.project, repository, "master")
+        self.assertEqual("master", web.git_checkouts.read_checkout(clone)["branch"])
+        self.assertTrue((clone / "beta/__manifest__.py").is_file())

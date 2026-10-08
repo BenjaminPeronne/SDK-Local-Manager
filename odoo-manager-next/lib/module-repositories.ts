@@ -56,3 +56,33 @@ export function repositoryRevision(repository: ModuleRepository) {
   if (repository.commit) return { kind: "commit" as const, label: repository.commit.slice(0, 7) };
   return null;
 }
+
+/**
+ * Dépôt que remplacent les copies importées du groupe, quand elles en remplacent toutes un seul :
+ * l'en-tête du dépôt l'affiche une fois au lieu de le répéter sur chaque ligne.
+ */
+export function sharedReplacedRepository(modules: ModuleInfo[]) {
+  const labels = new Set<string>();
+  let count = 0;
+  for (const item of modules) {
+    if (!item.replaced_repository) continue;
+    labels.add(item.replaced_repository);
+    count += 1;
+  }
+  return labels.size === 1 ? { label: [...labels][0], count } : null;
+}
+
+/** Clone ou archive rangé dans le projet, ou copie importée : sa branche peut changer depuis la liste. */
+export function repositoryBranchSwitchable(repository: ModuleRepository) {
+  if (repository.standard) return false;
+  if (repository.source === "import") return true;
+  return (repository.source === "git" || repository.source === "sdk") && Boolean(repository.path);
+}
+
+export type RemoteBranch = { name: string; default: boolean };
+
+/** Branches dont le nom contient la recherche, sans tenir compte des majuscules ; l'ordre reçu est gardé. */
+export function filterBranches(branches: RemoteBranch[], search: string) {
+  const query = search.trim().toLocaleLowerCase();
+  return query ? branches.filter((branch) => branch.name.toLocaleLowerCase().includes(query)) : branches;
+}

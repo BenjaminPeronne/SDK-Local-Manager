@@ -1,6 +1,6 @@
 "use client";
 
-import { type Dispatch, type SetStateAction, useState } from "react";
+import { type Dispatch, type MouseEvent as ReactMouseEvent, type SetStateAction, useState } from "react";
 import {
   ChevronRight,
   ExternalLink,
@@ -11,13 +11,19 @@ import {
   Package,
   Tag,
 } from "lucide-react";
-import { type ModuleRepositoryGroup, repositoryRevision } from "@/lib/module-repositories";
-import type { ModuleRepository } from "@/lib/types";
+import {
+  type ModuleRepositoryGroup,
+  repositoryBranchSwitchable,
+  repositoryRevision,
+  sharedReplacedRepository,
+} from "@/lib/module-repositories";
+import type { Job, ModuleRepository } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ModuleRow, type ModuleRowActions } from "@/components/modules/module-row";
+import { RepositoryBranchPicker } from "@/components/modules/repository-branch-picker";
 
 // Au-delà, un dépôt s'ouvre replié : Odoo et Enterprise comptent des centaines de modules.
 const EXPANDED_GROUP_MAX_MODULES = 40;
@@ -71,10 +77,12 @@ function RevisionBadge({ repository }: { repository: ModuleRepository }) {
 }
 
 type ModuleRepositoryGroupsProps = {
+  createJob: (action: string, payload?: Record<string, unknown>) => Promise<Job | null>;
   folding: RepositoryFolding;
   groups: ModuleRepositoryGroup[];
   onFold: (groupId: string, expanded: boolean) => void;
   openUrl: (url?: string) => Promise<void>;
+  projectName?: string;
   rowActions: ModuleRowActions;
   /** Recherche en cours : tous les dépôts qui ont des résultats s'ouvrent. */
   searchActive: boolean;
@@ -86,10 +94,12 @@ type ModuleRepositoryGroupsProps = {
 
 /** Modules regroupés par dépôt d'origine, chaque dépôt avec sa branche et son adresse. */
 export function ModuleRepositoryGroups({
+  createJob,
   folding,
   groups,
   onFold,
   openUrl,
+  projectName,
   rowActions,
   searchActive,
   selectedModules,
@@ -123,39 +133,76 @@ export function ModuleRepositoryGroups({
         const webUrl = repository ? repositoryWebUrl(repository) : "";
         const contentId = `module-repository-${group.id || "none"}`;
         const Icon = !repository ? FolderOpen : repository.source === "odoo" ? Package : FolderGit2;
+        const replaced = sharedReplacedRepository(group.modules);
+        const switchable = Boolean(repository && projectName && repositoryBranchSwitchable(repository));
+        // Tout l'en-tête plie le dépôt, sauf ses contrôles (et le sélecteur de branche, rendu en portail).
+        const foldFromHeader = (event: ReactMouseEvent<HTMLElement>) => {
+          const target = event.target as HTMLElement;
+          if (target.closest("button, a, input, label, [role=dialog], [role=menu]")) return;
+          if (window.getSelection()?.toString()) return;
+          onFold(group.id, !expanded);
+        };
         return (
           <section key={group.id || "none"} className="border-t first:border-t-0" aria-label={`Dépôt ${name}`}>
-            <div className="flex min-w-0 items-start gap-3 bg-muted/40 px-3 py-2.5">
+            <div
+              className="flex min-w-0 cursor-pointer items-start gap-3 bg-muted/40 px-3 py-2.5"
+              onClick={foldFromHeader}
+            >
               <Checkbox
-                className="mt-0.5"
+                className="mt-1"
                 aria-label={`Sélectionner les modules de ${name}`}
                 checked={selectedCount === 0 ? false : selectedCount === group.modules.length ? true : "indeterminate"}
                 onCheckedChange={(checked) => toggleGroupSelection(group, checked === true)}
               />
-              <button
-                type="button"
-                className="grid min-w-0 flex-1 gap-0.5 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-expanded={expanded}
-                aria-controls={contentId}
-                onClick={() => onFold(group.id, !expanded)}
-              >
-                <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                  <ChevronRight
-                    className={cn(
-                      "h-4 w-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none",
-                      expanded && "rotate-90",
-                    )}
-                    aria-hidden="true"
-                  />
-                  <Icon
-                    className={cn("h-4 w-4 shrink-0", repository ? "text-primary" : "text-muted-foreground")}
-                    aria-hidden="true"
-                  />
-                  <span className={cn("min-w-0 break-all font-semibold", !repository && "text-muted-foreground")}>
-                    {name}
-                  </span>
-                  {repository && <RevisionBadge repository={repository} />}
-                </span>
+              <div className="grid min-w-0 flex-1 gap-0.5">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <button
+                    type="button"
+                    className="flex min-w-0 items-center gap-2 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-expanded={expanded}
+                    aria-controls={contentId}
+                    onClick={() => onFold(group.id, !expanded)}
+                  >
+                    <ChevronRight
+                      className={cn(
+                        "h-4 w-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none",
+                        expanded && "rotate-90",
+                      )}
+                      aria-hidden="true"
+                    />
+                    <Icon
+                      className={cn("h-4 w-4 shrink-0", repository ? "text-primary" : "text-muted-foreground")}
+                      aria-hidden="true"
+                    />
+                    <span className={cn("min-w-0 break-all font-semibold", !repository && "text-muted-foreground")}>
+                      {name}
+                    </span>
+                  </button>
+                  {repository &&
+                    (switchable && projectName ? (
+                      <RepositoryBranchPicker
+                        createJob={createJob}
+                        moduleCount={group.modules.length}
+                        projectName={projectName}
+                        repository={repository}
+                      />
+                    ) : (
+                      <RevisionBadge repository={repository} />
+                    ))}
+                  {replaced && (
+                    <Badge
+                      variant="warning"
+                      className="max-w-full shrink-0"
+                      title={`Copies importées à la place de la version de ${replaced.label}, qui reste en place : « Revenir à la version du dépôt », dans le menu d’un module, la rétablit.`}
+                    >
+                      <span className="truncate">
+                        {replaced.count === group.modules.length
+                          ? `Remplace ${replaced.label}`
+                          : `${replaced.count} remplacent ${replaced.label}`}
+                      </span>
+                    </Badge>
+                  )}
+                </div>
                 {/* Aligné sur le nom : chevron (16 px) + écart (8) + icône (16) + écart (8). */}
                 <span className="block truncate pl-12 text-xs text-muted-foreground" title={repository?.remote}>
                   {repository ? (
@@ -173,13 +220,17 @@ export function ModuleRepositoryGroups({
                     "Copies ajoutées à la main, depuis un ZIP ou un dossier"
                   )}
                 </span>
-              </button>
+              </div>
+              <span className="shrink-0 whitespace-nowrap pt-1 text-xs tabular-nums text-muted-foreground">
+                {group.modules.length} module{group.modules.length > 1 ? "s" : ""} · {group.installed} installé
+                {group.installed > 1 ? "s" : ""}
+              </span>
               {webUrl && (
                 <Button
                   type="button"
                   size="icon"
                   variant="ghost"
-                  className="-my-1 h-7 w-7 shrink-0"
+                  className="h-7 w-7 shrink-0"
                   title={`Ouvrir ${repository?.remote_label} dans le navigateur`}
                   aria-label={`Ouvrir le dépôt ${name} dans le navigateur`}
                   onClick={() => void openUrl(webUrl)}
@@ -187,12 +238,6 @@ export function ModuleRepositoryGroups({
                   <ExternalLink className="h-3.5 w-3.5" />
                 </Button>
               )}
-              <span className="shrink-0 pt-0.5 text-right text-xs tabular-nums text-muted-foreground">
-                {group.modules.length} module{group.modules.length > 1 ? "s" : ""}
-                <span className="block">
-                  {group.installed} installé{group.installed > 1 ? "s" : ""}
-                </span>
-              </span>
             </div>
             {expanded && (
               <div id={contentId} className="min-w-0 border-t">
@@ -202,6 +247,7 @@ export function ModuleRepositoryGroups({
                     actions={rowActions}
                     module={module}
                     selected={selectedModules.has(module.name)}
+                    replacedShownAbove={replaced?.label}
                     showLocations={showLocations}
                     workspace={workspace}
                   />

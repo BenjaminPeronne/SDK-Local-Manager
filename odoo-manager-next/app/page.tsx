@@ -428,9 +428,15 @@ export default function Home() {
     for (const job of relevantJobs) {
       if (job.result?.kind === "module_update") return [];
       if (job.result?.kind === "repository_modules") return job.result.modules || [];
+      // Après un changement de branche, seuls les modules installés sont à mettre à jour.
+      if (job.result?.kind === "repository_branch")
+        return (job.result.modules || []).filter((name) => {
+          const state = moduleByName.get(name)?.state;
+          return state === "installed" || state === "to upgrade";
+        });
     }
     return [];
-  }, [jobs, selectedProject?.name]);
+  }, [jobs, moduleByName, selectedProject?.name]);
   const filteredModuleNames = useMemo(
     () => moduleFilters.filtered.map((module) => module.name),
     [moduleFilters.filtered],

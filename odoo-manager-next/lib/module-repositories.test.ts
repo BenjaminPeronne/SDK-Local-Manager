@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { groupModulesByRepository, NO_REPOSITORY_GROUP, repositoryRevision } from "./module-repositories.ts";
+import {
+  filterBranches,
+  groupModulesByRepository,
+  NO_REPOSITORY_GROUP,
+  repositoryBranchSwitchable,
+  repositoryRevision,
+  sharedReplacedRepository,
+} from "./module-repositories.ts";
 import type { ModuleInfo, ModuleRepository } from "./types.ts";
 
 function repository(id: string, values: Partial<ModuleRepository> = {}): ModuleRepository {
@@ -58,4 +65,36 @@ test("the loaded revision is the branch, then the tag, then the short commit", (
     label: "4ca6a55",
   });
   assert.equal(repositoryRevision(repository("a")), null);
+});
+
+test("the replaced repository is shown once when every replacing copy shares it", () => {
+  const copy = (name: string, replaced = "") => ({ ...module(name, "import"), replaced_repository: replaced });
+  assert.deepEqual(
+    sharedReplacedRepository([copy("a", "gazdom-addons (master)"), copy("b", "gazdom-addons (master)"), copy("c")]),
+    { label: "gazdom-addons (master)", count: 2 },
+  );
+  assert.equal(sharedReplacedRepository([copy("a", "x (master)"), copy("b", "y (18.0)")]), null);
+  assert.equal(sharedReplacedRepository([copy("a")]), null);
+});
+
+test("only project repositories and imported copies can switch branch", () => {
+  assert.equal(repositoryBranchSwitchable(repository("addons")), true);
+  assert.equal(repositoryBranchSwitchable(repository("archive", { source: "sdk" })), true);
+  assert.equal(repositoryBranchSwitchable(repository("import:x#dev", { source: "import", path: "" })), true);
+  assert.equal(repositoryBranchSwitchable(repository("odoo", { source: "odoo", standard: true })), false);
+  assert.equal(repositoryBranchSwitchable(repository("enterprise", { standard: true })), false);
+  assert.equal(repositoryBranchSwitchable(repository("unknown", { path: "" })), false);
+});
+
+test("branch search ignores case and keeps the server order", () => {
+  const branches = [
+    { name: "master", default: true },
+    { name: "TI20914-fix", default: false },
+    { name: "ti20915", default: false },
+  ];
+  assert.deepEqual(
+    filterBranches(branches, " ti209 ").map((branch) => branch.name),
+    ["TI20914-fix", "ti20915"],
+  );
+  assert.equal(filterBranches(branches, "").length, 3);
 });
