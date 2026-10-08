@@ -97,10 +97,16 @@ function fakeEnvironment({
   version = "2.4.12.0",
   backendId = "",
   provisionId = "",
+  running = [],
+  fail = () => null,
 } = {}) {
   const calls = [];
   const runner = async (executable, args) => {
-    calls.push([executable, ...args].join(" "));
+    const call = [executable, ...args].join(" ");
+    calls.push(call);
+    const failure = fail(call, calls);
+    if (failure) throw failure;
+    if (args.includes("--running")) return { stdout: utf16(running.join("\r\n") + "\r\n"), stderr: "", code: 0 };
     if (args.includes("--version")) return { stdout: utf16(`Version WSL : ${version}\r\n`), stderr: "", code: 0 };
     if (args.includes("--list")) return { stdout: utf16(distributions.join("\r\n") + "\r\n"), stderr: "", code: 0 };
     if (args.includes("cat")) {
@@ -640,32 +646,253 @@ test("a silent failure says how the command stopped, not the whole script", () =
   assert.equal(explained.message, "cp: can't stat '/mnt/c/x'");
 });
 
-test("a failed preparation step is named in the log with its command", async () => {
+// Échec silencieux de wsl.exe, tel que le runner le produit : la commande est connue.
+const silentFailure = () =>
+  Object.assign(new Error("wsl.exe s'est arrêté sans message (code 1)."), { command: "wsl.exe -d SDK-Manager" });
+
+async function preparedWith(environmentOptions, prepareOptions = {}) {
   const build = backendBuild();
+  const script = path.join(build.directory, "provision.sh");
+  fs.writeFileSync(script, "#!/bin/sh\n");
+  const logs = [];
+  const fake = fakeEnvironment({ distributions: ["SDK-Manager"], release: "0.5.0", ...environmentOptions });
+  const environment = new WslEnvironment({
+    runner: fake.runner,
+    installRoot: "C:\\data\\wsl",
+    mountPath: () => "/mnt/c/Program Files/SDK Local Manager/resources/wsl/provision.sh",
+    log: (line) => logs.push(line),
+    sleep: async () => {},
+  });
+  const run = () =>
+    environment.prepare({
+      version: "0.6.0",
+      backendSource: build.directory,
+      archive: "C:\\img.wsl",
+      checksum: "C:\\img.wsl.sha256",
+      provisionScript: script,
+      ...prepareOptions,
+    });
+  return {
+    ...fake,
+    logs,
+    environment,
+    run,
+    cleanup: () => fs.rmSync(build.directory, { recursive: true, force: true }),
+  };
+}
+
+test("a step stopped silently is replayed after restarting the distribution", async () => {
+  // Cas réel : la copie du script s'arrêtait sans message et l'écran affichait la commande.
+  const context = await preparedWith({
+    fail: (call, calls) =>
+      call.includes("install-provision") && calls.filter((c) => c.includes("install-provision")).length === 1
+        ? silentFailure()
+        : null,
+  });
   try {
-    const logs = [];
-    const failure = Object.assign(new Error("wsl.exe s'est arrêté sans message (code 1)."), {
-      command: "wsl.exe -d SDK-Manager",
-    });
-    const runner = async (executable, args) => {
-      if (args[0] === "--version") return { stdout: utf16("Version WSL : 2.6.1.0\r\n"), stderr: "", code: 0 };
-      if (args[0] === "--list") return { stdout: utf16("SDK-Manager\r\n"), stderr: "", code: 0 };
-      if (args.includes("cat")) return { stdout: Buffer.from(""), stderr: "", code: 0 };
-      throw failure;
-    };
-    const wsl = new WslEnvironment({
-      installRoot: build.directory,
-      runner,
-      log: (line) => logs.push(line),
-      mountPath: () => "/mnt/c/app",
-    });
-    await assert.rejects(
-      wsl.prepare({ version: "0.6.0", backendSource: build.directory }),
-      (error) => error.step === "backend",
+    await context.run();
+    assert.ok(context.calls.includes("wsl.exe --terminate SDK-Manager"));
+    assert.ok(context.calls.every((call) => !call.includes("--shutdown")));
+    assert.equal(context.calls.filter((call) => call.includes("install-provision")).length, 2);
+    assert.ok(context.calls.some((call) => call.includes("SDK_MANAGER_VERSION=0.6.0")));
+    assert.ok(context.logs.some((line) => line.includes("nouvel essai")));
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("a step that keeps failing restarts WSL once, then names the step in the log", async () => {
+  const context = await preparedWith({ fail: (call) => (call.includes("install-provision") ? silentFailure() : null) });
+  try {
+    await assert.rejects(context.run(), (error) => error.step === "provision" && /sans message/.test(error.message));
+    assert.ok(context.calls.includes("wsl.exe --terminate SDK-Manager"));
+    assert.ok(context.calls.includes("wsl.exe --shutdown"));
+    assert.equal(context.calls.filter((call) => call.includes("install-provision")).length, 3);
+    assert.ok(context.logs.some((line) => line.includes("Configuration de Docker et Git") && line.includes("code 1")));
+    assert.ok(context.logs.some((line) => line.includes("Commande : wsl.exe -d SDK-Manager")));
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("WSL is never shut down while another distribution is running", async () => {
+  const context = await preparedWith({
+    running: ["SDK-Manager", "docker-desktop"],
+    fail: (call) => (call.includes("install-provision") ? silentFailure() : null),
+  });
+  try {
+    await assert.rejects(context.run());
+    assert.ok(context.calls.every((call) => !call.includes("--shutdown")));
+    assert.ok(context.logs.some((line) => line.includes("docker-desktop")));
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("the distribution is not restarted while the backend runs in it", async () => {
+  const context = await preparedWith(
+    {
+      fail: (call, calls) =>
+        call.includes("install-provision") && calls.filter((c) => c.includes("install-provision")).length === 1
+          ? silentFailure()
+          : null,
+    },
+    { restartAllowed: false },
+  );
+  try {
+    await context.run();
+    assert.ok(context.calls.every((call) => !call.includes("--terminate") && !call.includes("--shutdown")));
+    assert.equal(context.calls.filter((call) => call.includes("install-provision")).length, 2);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("a Linux stuck while starting is restarted before anything else", async () => {
+  // Délai dépassé sur le premier démarrage : sans délai court, chaque lecture attendait 10 minutes.
+  const context = await preparedWith({
+    fail: (call, calls) =>
+      call.endsWith("--exec true") && calls.filter((c) => c.endsWith("--exec true")).length === 1
+        ? Object.assign(new Error("wsl.exe n'a pas répondu dans le délai imparti."), { command: call })
+        : null,
+  });
+  try {
+    await context.run();
+    const terminate = context.calls.indexOf("wsl.exe --terminate SDK-Manager");
+    const firstStep = context.calls.findIndex((call) => call.includes("install-provision"));
+    assert.ok(terminate >= 0 && terminate < firstStep);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("two preparations at once share a single run", async () => {
+  // Le démarrage de l'application et le clic sur « Préparer mon poste » se chevauchaient.
+  const context = await preparedWith({});
+  try {
+    const [first, second] = await Promise.all([context.run(), context.run()]);
+    assert.deepEqual(first, second);
+    assert.equal(context.calls.filter((call) => call.includes("install-provision")).length, 1);
+    await context.run();
+    assert.equal(
+      context.calls.filter((call) => call.includes("install-provision")).length,
+      2,
+      "une fois terminée, une préparation se relance",
     );
-    assert.ok(logs.some((line) => line.includes("Copie du gestionnaire") && line.includes("code 1")));
-    assert.ok(logs.some((line) => line.includes("Commande : wsl.exe -d SDK-Manager")));
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("a failure that is not a command is not replayed", async () => {
+  const context = await preparedWith({}, { backendSource: path.join(os.tmpdir(), "absent-backend") });
+  try {
+    await assert.rejects(context.run(), /ENOENT/);
+    assert.ok(context.calls.every((call) => !call.includes("--terminate")));
+  } finally {
+    context.cleanup();
+  }
+});
+
+test("an interrupted import is cleaned up before the next attempt", async () => {
+  const build = backendBuild();
+  const archive = path.join(build.directory, "image.wsl");
+  fs.writeFileSync(archive, "image");
+  fs.writeFileSync(archive + ".sha256", createHash("sha256").update("image").digest("hex") + "\n");
+  const distributions = [];
+  const { calls, runner } = fakeEnvironment({
+    distributions,
+    fail: (call, all) => {
+      if (call.includes("--from-file")) {
+        distributions.splice(0, distributions.length, "SDK-Manager");
+        if (all.filter((c) => c.includes("--from-file")).length === 1) return silentFailure();
+      }
+      return null;
+    },
+  });
+  const environment = new WslEnvironment({
+    runner,
+    installRoot: path.join(build.directory, "wsl"),
+    mountPath: () => "/mnt/c/app",
+    sleep: async () => {},
+  });
+  try {
+    await environment.prepare({
+      version: "0.6.0",
+      backendSource: build.directory,
+      archive,
+      checksum: archive + ".sha256",
+    });
+    const unregister = calls.indexOf("wsl.exe --unregister SDK-Manager");
+    const imports = calls.map((call, index) => (call.includes("--from-file") ? index : -1)).filter((i) => i >= 0);
+    assert.equal(imports.length, 2);
+    assert.ok(unregister > imports[0] && unregister < imports[1]);
   } finally {
     fs.rmSync(build.directory, { recursive: true, force: true });
+  }
+});
+
+function imageIn(directory) {
+  const archive = path.join(directory, "image.wsl");
+  fs.writeFileSync(archive, "image");
+  fs.writeFileSync(archive + ".sha256", createHash("sha256").update("image").digest("hex") + "\n");
+  return { archive, checksum: archive + ".sha256" };
+}
+
+test("an environment hidden by a failed list is never replaced", async () => {
+  // `wsl --list` en échec passager : la préparation croyait l'environnement absent. Désinscrire
+  // ce qu'elle trouvait ensuite aurait effacé les projets de l'utilisateur.
+  const build = backendBuild();
+  const { calls, runner } = fakeEnvironment({
+    distributions: ["SDK-Manager"],
+    fail: (call, all) =>
+      call === "wsl.exe --list --quiet" && all.filter((c) => c === call).length === 1 ? new Error("illisible") : null,
+  });
+  const environment = new WslEnvironment({
+    runner,
+    installRoot: path.join(build.directory, "wsl"),
+    mountPath: () => "/mnt/c/app",
+    sleep: async () => {},
+  });
+  try {
+    await environment.prepare({ version: "0.6.0", backendSource: build.directory, ...imageIn(build.directory) });
+    assert.ok(calls.every((call) => !call.includes("--unregister") && !call.includes("--from-file")));
+  } finally {
+    fs.rmSync(build.directory, { recursive: true, force: true });
+  }
+});
+
+test("the disk of an interrupted import is set aside, never deleted", async () => {
+  const build = backendBuild();
+  const installRoot = path.join(build.directory, "wsl");
+  fs.mkdirSync(installRoot);
+  fs.writeFileSync(path.join(installRoot, "ext4.vhdx"), "ancien disque");
+  const { calls, runner } = fakeEnvironment({ distributions: [] });
+  const environment = new WslEnvironment({ runner, installRoot, mountPath: () => "/mnt/c/app", sleep: async () => {} });
+  try {
+    await environment.prepare({ version: "0.6.0", backendSource: build.directory, ...imageIn(build.directory) });
+    const kept = fs.readdirSync(installRoot).filter((name) => name.startsWith("ext4.vhdx.interrompu-"));
+    assert.equal(kept.length, 1);
+    assert.equal(fs.readFileSync(path.join(installRoot, kept[0]), "utf8"), "ancien disque");
+    assert.ok(calls.some((call) => call.includes("--from-file")));
+  } finally {
+    fs.rmSync(build.directory, { recursive: true, force: true });
+  }
+});
+
+test("a Linux that never starts is named in the log", async () => {
+  const context = await preparedWith({
+    fail: (call) =>
+      call.endsWith("--exec true")
+        ? Object.assign(new Error("wsl.exe n'a pas répondu dans le délai imparti."), { command: call })
+        : null,
+  });
+  try {
+    await assert.rejects(context.run(), /délai imparti/);
+    assert.ok(
+      context.logs.some((line) => line.includes("Démarrage de l'environnement Linux") && line.includes("Échec")),
+    );
+  } finally {
+    context.cleanup();
   }
 });

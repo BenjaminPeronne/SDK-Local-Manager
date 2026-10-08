@@ -33,6 +33,20 @@ const PREPARE_STEP_LABELS = {
   provision: "Configuration de Docker et Git",
   done: "Environnement prêt",
 };
+// Démarrage de Linux vérifié avant le plan : absent de la barre d'avancement, présent au journal.
+const WAKE_LABEL = "Démarrage de l'environnement Linux";
+// Délais des commandes WSL. Un démarrage de Linux bloqué attendait auparavant les 10 minutes
+// par défaut à chaque lecture, puis l'écran affichait la commande au lieu de reprendre seul.
+const TIMEOUTS = {
+  // Démarrage de la distribution et petites lectures : quelques secondes d'habitude.
+  wake: 3 * 60_000,
+  // `wsl --terminate`, `--shutdown`, `--unregister`.
+  control: 2 * 60_000,
+  // Import de l'image : plusieurs minutes sur un disque lent, antivirus compris.
+  import: 30 * 60_000,
+  // Copie du backend par /mnt, provisionnement (démarrage de Docker).
+  step: 15 * 60_000,
+};
 /**
  * Pourquoi l'environnement Linux n'a pas démarré, en une phrase actionnable.
  *
@@ -176,6 +190,7 @@ class WslEnvironment {
     log = () => {},
     mountPath = WslEnvironment.mountedWindowsPath,
     onProgress = () => {},
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   } = {}) {
     this.distribution = distribution;
     this.installRoot = installRoot;
@@ -183,6 +198,10 @@ class WslEnvironment {
     this.log = log;
     this.mountPath = mountPath;
     this.onProgress = onProgress;
+    this.sleep = sleep;
+    // Préparation en cours, partagée : celle du démarrage et le clic sur « Préparer mon poste »
+    // copiaient le même backend et le même script au même endroit, en même temps.
+    this.preparing = null;
   }
 
   async wslVersion() {
@@ -203,9 +222,34 @@ class WslEnvironment {
     }
   }
 
+  /**
+   * La distribution est-elle inscrite ? Sans tolérance : une liste illisible lève une erreur.
+   *
+   * `distributions()` rend une liste vide quand `wsl --list` échoue ; s'y fier avant de
+   * désinscrire, c'était risquer d'effacer un environnement existant et ses projets.
+   */
+  async isRegistered() {
+    const { stdout } = await this.run("wsl.exe", ["--list", "--quiet"], { timeout: TIMEOUTS.control });
+    return parseDistributions(stdout).some((name) => name.toLowerCase() === this.distribution.toLowerCase());
+  }
+
+  /**
+   * Met de côté le disque d'un import interrompu, que Windows refuserait d'écraser.
+   *
+   * Appelé seulement quand la distribution n'est pas inscrite. Le disque est renommé, jamais
+   * supprimé : s'il contenait malgré tout des projets, ils restent récupérables.
+   */
+  setAsideOrphanDisk() {
+    const disk = path.join(this.installRoot, "ext4.vhdx");
+    if (!fs.existsSync(disk)) return;
+    const kept = `${disk}.interrompu-${Date.now()}`;
+    fs.renameSync(disk, kept);
+    this.log(`Disque d'un import inachevé mis de côté : ${kept}.`);
+  }
+
   async installedRelease() {
     try {
-      const { stdout } = await this.runInDistribution(["cat", RELEASE_PATH]);
+      const { stdout } = await this.runInDistribution(["cat", RELEASE_PATH], { timeout: TIMEOUTS.wake });
       return decodeWslOutput(stdout).trim();
     } catch {
       return "";
@@ -230,6 +274,65 @@ class WslEnvironment {
   runInDistribution(command, options = {}) {
     const user = options.asRoot ? ["-u", "root"] : [];
     return this.run("wsl.exe", ["-d", this.distribution, ...user, "--exec", ...command], options);
+  }
+
+  /** Démarre la distribution, avec un délai court : un Linux bloqué au démarrage est repéré vite. */
+  async wake() {
+    await this.runInDistribution(["true"], { timeout: TIMEOUTS.wake });
+  }
+
+  /** Arrête la distribution du gestionnaire seule, sans toucher aux autres distributions du poste. */
+  async restartDistribution() {
+    this.log(`Redémarrage de l'environnement ${this.distribution}.`);
+    await this.run("wsl.exe", ["--terminate", this.distribution], { allowFailure: true, timeout: TIMEOUTS.control });
+    await this.sleep(3000);
+    return true;
+  }
+
+  /**
+   * Arrête tout WSL, ce que fait un redémarrage de l'ordinateur, mais seulement si aucune autre
+   * distribution ne tourne : Docker Desktop ou un Ubuntu ouvert par l'utilisateur seraient coupés.
+   */
+  async restartWsl() {
+    let running = [];
+    try {
+      const { stdout } = await this.run("wsl.exe", ["--list", "--running", "--quiet"], { timeout: TIMEOUTS.control });
+      running = parseDistributions(stdout);
+    } catch {
+      running = [];
+    }
+    const others = running.filter((name) => name.toLowerCase() !== this.distribution.toLowerCase());
+    if (others.length) {
+      this.log(`WSL n'est pas redémarré : d'autres distributions tournent (${others.join(", ")}).`);
+      return false;
+    }
+    this.log("Redémarrage complet de WSL.");
+    await this.run("wsl.exe", ["--shutdown"], { allowFailure: true, timeout: TIMEOUTS.control });
+    await this.sleep(5000);
+    return true;
+  }
+
+  /**
+   * Exécute une étape, et la rejoue quand une commande WSL a échoué : délai dépassé, Linux arrêté
+   * en cours de route (mémoire saturée, mise en veille de la distribution), sortie inattendue.
+   *
+   * Seules les commandes sont rejouées (`error.command`) : une image corrompue ou un fichier
+   * absent échouerait à l'identique. Chaque nouvel essai part d'un Linux redémarré, sauf quand
+   * le backend y tourne déjà : le couper laisserait l'application sans backend.
+   */
+  async withRecovery(step, action, { restartAllowed = true } = {}) {
+    const recoveries = restartAllowed
+      ? [() => this.restartDistribution(), () => this.restartWsl()]
+      : [() => this.sleep(5000).then(() => true)];
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await action(attempt);
+      } catch (error) {
+        if (!error?.command || attempt >= recoveries.length) throw error;
+        this.log(`Étape « ${PREPARE_STEP_LABELS[step] || WAKE_LABEL} » interrompue (${error.message}) : nouvel essai.`);
+        if (!(await recoveries[attempt]())) throw error;
+      }
+    }
   }
 
   /** Installe WSL lui-même. Une seule élévation, et Windows peut demander un redémarrage. */
@@ -258,14 +361,37 @@ class WslEnvironment {
       throw new Error("L'image de l'environnement ne correspond pas à son empreinte : installation refusée.");
     }
     fs.mkdirSync(this.installRoot, { recursive: true });
-    await this.run(
-      "wsl.exe",
-      importArguments({
-        archive,
-        distribution: this.distribution,
-        location: this.installRoot,
-      }),
-    );
+    let alreadyRegistered = false;
+    await this.withRecovery("import", async (attempt) => {
+      if (await this.isRegistered()) {
+        // Au premier essai, une distribution inscrite est celle de l'utilisateur, que la liste
+        // n'avait pas montrée : elle n'est jamais remplacée.
+        if (attempt === 0) {
+          alreadyRegistered = true;
+          return;
+        }
+        // Après un essai de cet import, c'est la distribution qu'il vient d'inscrire, encore vide.
+        this.log(`Import précédent inachevé : ${this.distribution} est désinscrite avant un nouvel essai.`);
+        await this.run("wsl.exe", ["--unregister", this.distribution], {
+          allowFailure: true,
+          timeout: TIMEOUTS.control,
+        });
+      }
+      if (!(await this.isRegistered())) this.setAsideOrphanDisk();
+      await this.run(
+        "wsl.exe",
+        importArguments({
+          archive,
+          distribution: this.distribution,
+          location: this.installRoot,
+        }),
+        { timeout: TIMEOUTS.import },
+      );
+    });
+    if (alreadyRegistered) {
+      this.log(`Environnement ${this.distribution} déjà inscrit : import ignoré.`);
+      return;
+    }
     // Disque creux : l'espace libéré dans la distribution revient à Windows.
     await this.run("wsl.exe", ["--manage", this.distribution, "--set-sparse", "true"], { allowFailure: true });
     this.log(`Environnement ${this.distribution} installé dans ${this.installRoot}.`);
@@ -294,13 +420,18 @@ class WslEnvironment {
       // Emplacement des versions précédentes : fichier unique directement dans /opt/sdk-manager.
       `rm -f ${SDK_DIRECTORY}/${BACKEND_EXECUTABLE}`,
     ].join("\n");
-    await this.runInDistribution(["sh", "-c", script, "install-backend", mounted, buildId], { asRoot: true });
+    await this.runInDistribution(["sh", "-c", script, "install-backend", mounted, buildId], {
+      asRoot: true,
+      timeout: TIMEOUTS.step,
+    });
     this.log(`Backend installé dans l'environnement (${buildId.slice(0, 12)}).`);
   }
 
   async installedBackendId() {
     try {
-      const { stdout } = await this.runInDistribution(["cat", `${BACKEND_DIRECTORY}/${BUILD_ID_FILE}`]);
+      const { stdout } = await this.runInDistribution(["cat", `${BACKEND_DIRECTORY}/${BUILD_ID_FILE}`], {
+        timeout: TIMEOUTS.wake,
+      });
       return decodeWslOutput(stdout).trim();
     } catch {
       return "";
@@ -309,7 +440,7 @@ class WslEnvironment {
 
   async installedProvisionId() {
     try {
-      const { stdout } = await this.runInDistribution(["cat", PROVISION_ID_FILE]);
+      const { stdout } = await this.runInDistribution(["cat", PROVISION_ID_FILE], { timeout: TIMEOUTS.wake });
       return decodeWslOutput(stdout).trim();
     } catch {
       return "";
@@ -333,13 +464,19 @@ class WslEnvironment {
         `chmod 0755 ${PROVISION_PATH}.tmp`,
         `mv ${PROVISION_PATH}.tmp ${PROVISION_PATH}`,
       ].join("\n");
-      await this.runInDistribution(["sh", "-c", copy, "install-provision", mounted], { asRoot: true });
+      await this.runInDistribution(["sh", "-c", copy, "install-provision", mounted], {
+        asRoot: true,
+        timeout: TIMEOUTS.step,
+      });
     }
-    await this.runInDistribution(["env", `SDK_MANAGER_VERSION=${version}`, "sh", PROVISION_PATH], { asRoot: true });
+    await this.runInDistribution(["env", `SDK_MANAGER_VERSION=${version}`, "sh", PROVISION_PATH], {
+      asRoot: true,
+      timeout: TIMEOUTS.step,
+    });
     if (scriptId) {
       await this.runInDistribution(
         ["sh", "-c", `printf '%s\\n' "$1" > ${PROVISION_ID_FILE}`, "write-provision-id", scriptId],
-        { asRoot: true },
+        { asRoot: true, timeout: TIMEOUTS.wake },
       );
     }
     this.log(`Environnement provisionné en version ${version}.`);
@@ -350,10 +487,35 @@ class WslEnvironment {
    *
    * Le backend est comparé par l'empreinte de son exécutable, pas par le numéro de version :
    * deux builds d'une même version (0.5.0-build8, build9…) embarquent des backends différents.
+   *
+   * Un seul appel à la fois : un second appel pendant une préparation en reçoit le résultat.
+   * `restartAllowed` est faux quand le backend tourne déjà dans la distribution.
    */
-  async prepare({ version, backendSource, archive, checksum, provisionScript = "" }) {
+  prepare(options) {
+    if (!this.preparing) {
+      this.preparing = this.prepareOnce(options).finally(() => {
+        this.preparing = null;
+      });
+    }
+    return this.preparing;
+  }
+
+  async prepareOnce({ version, backendSource, archive, checksum, provisionScript = "", restartAllowed = true }) {
     const state = await this.status();
     if (!state.wslInstalled) throw new Error("WSL n'est pas installé.");
+    const recovery = { restartAllowed };
+    const failed = (label, error) => {
+      // Le journal et l'écran disent quelle étape a échoué, pas seulement quelle commande.
+      this.log(`Échec de l'étape « ${label} » : ${error.message}`);
+      if (error.command) this.log(`  Commande : ${error.command}`);
+      return error;
+    };
+    // Linux bloqué au démarrage : repéré et relancé ici, avant les lectures qui fondent le plan.
+    if (state.distributionInstalled) {
+      await this.withRecovery("wake", () => this.wake(), recovery).catch((error) => {
+        throw failed(WAKE_LABEL, error);
+      });
+    }
     // Le plan est établi avant d'agir : l'écran annonce le nombre d'étapes dès le départ,
     // au lieu de laisser l'utilisateur devant une attente de durée inconnue.
     const expected = await sha256OfFile(path.join(backendSource, BACKEND_EXECUTABLE));
@@ -375,17 +537,25 @@ class WslEnvironment {
       try {
         await action();
       } catch (error) {
-        // Le journal et l'écran disent quelle étape a échoué, pas seulement quelle commande.
         error.step = step;
-        this.log(`Échec de l'étape « ${PREPARE_STEP_LABELS[step]} » : ${error.message}`);
-        if (error.command) this.log(`  Commande : ${error.command}`);
-        throw error;
+        throw failed(PREPARE_STEP_LABELS[step], error);
       }
     };
 
+    // Les étapes suivantes sont rejouables : le backend est permuté d'un bloc, le
+    // provisionnement vérifie chaque point avant d'agir.
+    const recovered = (step, action) =>
+      this.withRecovery(
+        step,
+        async () => {
+          await this.wake();
+          await action();
+        },
+        recovery,
+      );
     await run("import", () => this.importDistribution({ archive, checksum }));
-    await run("backend", () => this.installBackend(backendSource));
-    await run("provision", () => this.provision(version, provisionScript, provisionId));
+    await run("backend", () => recovered("backend", () => this.installBackend(backendSource)));
+    await run("provision", () => recovered("provision", () => this.provision(version, provisionScript, provisionId)));
     this.onProgress({ step: "done", label: PREPARE_STEP_LABELS.done, index: planned.length, total: planned.length });
     return this.status();
   }
@@ -489,7 +659,8 @@ function defaultRunner(executable, args, options = {}) {
       args,
       { windowsHide: true, encoding: "buffer", maxBuffer: 8 * 1024 * 1024, timeout: options.timeout ?? 600000 },
       (error, stdout, stderr) => {
-        const code = error?.code ?? 0;
+        // Délai dépassé ou processus tué : `error.code` est nul, ce qui passait pour un succès.
+        const code = !error ? 0 : typeof error.code === "number" ? error.code : 1;
         if (error && !options.allowFailure) {
           reject(commandError(executable, error, stdout, stderr));
           return;

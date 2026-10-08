@@ -71,11 +71,15 @@ function wslResources() {
   };
 }
 
-/** Prépare l'environnement Linux pour la version courante, puis dit si le backend peut y tourner. */
-async function prepareWslEnvironment() {
+/**
+ * Prépare l'environnement Linux pour la version courante, puis dit si le backend peut y tourner.
+ *
+ * Redémarrer la distribution pour reprendre une étape bloquée couperait un backend qui y tourne
+ * déjà : ce n'est permis que tant que le backend en service est celui de Windows.
+ */
+async function prepareWslEnvironment({ restartAllowed = !backend?.command } = {}) {
   const resources = wslResources();
-  const state = await wsl.prepare({ version: app.getVersion(), ...resources });
-  return state;
+  return wsl.prepare({ version: app.getVersion(), ...resources, restartAllowed });
 }
 
 /** Dossier de projets de l'ancien backend Windows : chemin Windows et vue depuis la distribution. */
@@ -323,7 +327,8 @@ async function start() {
       // Le backend de ce build doit être en place avant de démarrer : une mise à jour de
       // l'application change le backend sans forcément changer le numéro de version.
       options.beforeStart = () =>
-        prepareWslEnvironment().catch((error) => {
+        // Le backend n'est pas encore lancé : la distribution peut être redémarrée.
+        prepareWslEnvironment({ restartAllowed: true }).catch((error) => {
           fs.appendFileSync(path.join(logDir, "backend.log"), `Préparation de l'environnement : ${error.message}\n`);
         });
       // Virtualisation désactivée, « Plateforme d'ordinateur virtuel » retirée : le backend
