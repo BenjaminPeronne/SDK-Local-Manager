@@ -97,7 +97,7 @@ from odoo_manager_core.job_queue import (
 from odoo_manager_core.manifests import (
     MANIFEST_FILENAMES,
     MANIFEST_RECORD_MARKER,
-    ODOO_SERIES_VERSION_RE,
+    manifest_series_mismatch,
     manifest_version_key,
     module_graph_from_paths,
     module_graph_from_records,
@@ -5390,12 +5390,31 @@ def ensure_relative_module_link(job, project, module_name, storage_path, replace
     return True
 
 
+def incompatible_module_candidates(candidates, odoo_version):
+    """Modules prévus pour une autre série d'Odoo que le projet : {nom: série}."""
+    incompatible = {}
+    for candidate in candidates:
+        series = manifest_series_mismatch(read_repository_manifest(candidate), odoo_version)
+        if series:
+            incompatible[Path(candidate).name] = series
+    return incompatible
+
+
 def install_module_candidates(job, project, candidates, replace_existing=False):
     storage_parent = project_addons_storage_parent(project)
     link_parent = project_addons_link_parent(project)
 
     if not candidates:
         raise RuntimeError("Aucun module Odoo trouve dans ce dossier.")
+    odoo_version = project_odoo_version(project)
+    incompatible = incompatible_module_candidates(candidates, odoo_version)
+    if incompatible:
+        raise RuntimeError(
+            f"Import annulé avant toute modification : le projet {project} est en Odoo {odoo_version}.\n"
+            + "\n".join(f"• {name} : prévu pour Odoo {series}." for name, series in incompatible.items())
+            + "\nVérifie le projet choisi, ou prends la version du module faite pour Odoo "
+            + f"{odoo_version}."
+        )
 
     job.add(f"Dossier addons-store modules: {storage_parent}")
     job.add(f"Dossier liens Odoo: {link_parent}")
@@ -6193,9 +6212,9 @@ def repository_module_plans(project, modules, states, odoo_version):
         if manifest and not manifest.get("installable", True):
             plan["reason"] = "Marqué non installable dans son manifeste."
             continue
-        series = ODOO_SERIES_VERSION_RE.match(version)
-        if series and odoo_version and series.group(1) != odoo_version:
-            plan["reason"] = f"Prévu pour Odoo {series.group(1)}, le projet est en Odoo {odoo_version}."
+        series = manifest_series_mismatch(manifest, odoo_version)
+        if series:
+            plan["reason"] = f"Prévu pour Odoo {series}, le projet est en Odoo {odoo_version}."
             continue
 
         storage = storage_parent / name
@@ -6779,9 +6798,12 @@ def extract_zip_module_candidates(project, filename, upload):
 def inspect_zip_modules(project, filename, upload):
     import_dir, candidates, skipped_links = extract_zip_module_candidates(project, filename, upload)
     try:
+        odoo_version = project_odoo_version(project)
         return {
             "modules": [candidate.name for candidate in candidates],
             "ignored_symlinks": len(skipped_links),
+            "odoo_version": odoo_version,
+            "incompatible": incompatible_module_candidates(candidates, odoo_version),
         }
     finally:
         shutil.rmtree(import_dir, ignore_errors=True)

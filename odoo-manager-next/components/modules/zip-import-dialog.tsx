@@ -40,6 +40,8 @@ export function ZipImportDialog({
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [zipModuleCandidates, setZipModuleCandidates] = useState<string[]>([]);
   const [selectedZipModules, setSelectedZipModules] = useState<Set<string>>(new Set());
+  const [incompatibleZipModules, setIncompatibleZipModules] = useState<Record<string, string>>({});
+  const [projectOdooVersion, setProjectOdooVersion] = useState("");
   const [inspectingZip, setInspectingZip] = useState(false);
   const zipInputRef = useRef<HTMLInputElement>(null);
   const zipInspectionGeneration = useRef(0);
@@ -83,6 +85,8 @@ export function ZipImportDialog({
     setZipFile(null);
     setZipModuleCandidates([]);
     setSelectedZipModules(new Set());
+    setIncompatibleZipModules({});
+    setProjectOdooVersion("");
     setInspectingZip(false);
     if (zipInputRef.current) zipInputRef.current.value = "";
   }
@@ -91,6 +95,7 @@ export function ZipImportDialog({
     setZipFile(file || null);
     setZipModuleCandidates([]);
     setSelectedZipModules(new Set());
+    setIncompatibleZipModules({});
     if (!file || !selectedProject) {
       setInspectingZip(false);
       return;
@@ -105,10 +110,19 @@ export function ZipImportDialog({
         { method: "POST", body: form },
       );
       if (generation !== zipInspectionGeneration.current) return;
+      const incompatible = result.incompatible ?? {};
+      const importable = result.modules.filter((name) => !(name in incompatible));
       setZipModuleCandidates(result.modules);
-      setSelectedZipModules(new Set(result.modules));
+      setIncompatibleZipModules(incompatible);
+      setProjectOdooVersion(result.odoo_version ?? "");
+      setSelectedZipModules(new Set(importable));
       if (!result.modules.length) {
         pushToast("error", "Aucun module Odoo détecté dans cette archive.");
+      } else if (!importable.length) {
+        pushToast(
+          "error",
+          `Aucun module de cette archive n’est prévu pour Odoo ${result.odoo_version}. Vérifie le projet choisi.`,
+        );
       } else if (result.ignored_symlinks) {
         pushToast(
           "info",
@@ -122,6 +136,7 @@ export function ZipImportDialog({
       if (generation === zipInspectionGeneration.current) setInspectingZip(false);
     }
   }
+  const importableZipModules = zipModuleCandidates.filter((name) => !(name in incompatibleZipModules));
   function toggleZipModule(moduleName: string, checked: boolean) {
     setSelectedZipModules((current) => {
       const next = new Set(current);
@@ -131,7 +146,7 @@ export function ZipImportDialog({
     });
   }
   function toggleAllZipModules(checked: boolean) {
-    setSelectedZipModules(checked ? new Set(zipModuleCandidates) : new Set());
+    setSelectedZipModules(checked ? new Set(importableZipModules) : new Set());
   }
 
   return (
@@ -148,6 +163,12 @@ export function ZipImportDialog({
           <DialogDescription>
             Analyse l’archive, choisis les modules à ajouter au projet, puis confirme l’import.
           </DialogDescription>
+          {selectedProject && (
+            <p className="text-sm">
+              Projet cible : <span className="font-medium">{selectedProject.name}</span>
+              {projectOdooVersion && <span className="text-muted-foreground"> · Odoo {projectOdooVersion}</span>}
+            </p>
+          )}
         </DialogHeader>
         <div className="grid gap-4">
           <FilePicker
@@ -169,34 +190,51 @@ export function ZipImportDialog({
               <label className="flex cursor-pointer items-start gap-3 border-b bg-muted/40 p-3 text-sm">
                 <Checkbox
                   className="mt-0.5"
+                  disabled={!importableZipModules.length}
                   checked={
-                    selectedZipModules.size > 0 && selectedZipModules.size < zipModuleCandidates.length
+                    selectedZipModules.size > 0 && selectedZipModules.size < importableZipModules.length
                       ? "indeterminate"
-                      : selectedZipModules.size === zipModuleCandidates.length
+                      : importableZipModules.length > 0 && selectedZipModules.size === importableZipModules.length
                   }
                   onCheckedChange={(checked) => toggleAllZipModules(checked === true)}
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block font-medium">Sélectionner tous les modules détectés</span>
                   <span className="block text-xs text-muted-foreground">
-                    {selectedZipModules.size}/{zipModuleCandidates.length} module(s) sélectionné(s)
+                    {selectedZipModules.size}/{importableZipModules.length} module(s) sélectionné(s)
                   </span>
                 </span>
               </label>
               <div className="max-h-64 overflow-y-auto p-2">
-                {zipModuleCandidates.map((moduleName) => (
-                  <label
-                    key={moduleName}
-                    className="flex min-w-0 cursor-pointer items-start gap-3 rounded-md p-2 text-sm hover:bg-hover"
-                  >
-                    <Checkbox
-                      className="mt-0.5"
-                      checked={selectedZipModules.has(moduleName)}
-                      onCheckedChange={(checked) => toggleZipModule(moduleName, checked === true)}
-                    />
-                    <span className="min-w-0 break-all font-mono">{moduleName}</span>
-                  </label>
-                ))}
+                {zipModuleCandidates.map((moduleName) => {
+                  const otherVersion = incompatibleZipModules[moduleName];
+                  return (
+                    <label
+                      key={moduleName}
+                      className={
+                        otherVersion
+                          ? "flex min-w-0 cursor-not-allowed items-start gap-3 rounded-md p-2 text-sm opacity-70"
+                          : "flex min-w-0 cursor-pointer items-start gap-3 rounded-md p-2 text-sm hover:bg-hover"
+                      }
+                    >
+                      <Checkbox
+                        className="mt-0.5"
+                        disabled={Boolean(otherVersion)}
+                        checked={selectedZipModules.has(moduleName)}
+                        onCheckedChange={(checked) => toggleZipModule(moduleName, checked === true)}
+                      />
+                      <span className="min-w-0">
+                        <span className="block break-all font-mono">{moduleName}</span>
+                        {otherVersion && (
+                          <span className="block text-xs text-destructive">
+                            Prévu pour Odoo {otherVersion}, ce projet est en Odoo {projectOdooVersion} : il empêcherait
+                            Odoo d’afficher ses icônes. Importe-le dans un projet Odoo {otherVersion}.
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             </div>
           )}

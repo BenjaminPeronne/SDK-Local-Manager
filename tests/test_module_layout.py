@@ -431,6 +431,26 @@ class ModuleLayoutTests(unittest.TestCase):
         self.assertTrue(any("Liens symboliques internes ignores" in line for line in job.lines))
         self.assertTrue(any("Modules sélectionnés pour l'import: 1" in line for line in job.lines))
 
+    def test_zip_import_refuses_module_made_for_another_odoo_version(self):
+        archive_buffer = io.BytesIO()
+        with zipfile.ZipFile(archive_buffer, "w") as archive:
+            archive.writestr("tracking/__manifest__.py", "{'name': 'Tracking', 'version': '19.0.1.11.0'}\n")
+            archive.writestr("helper/__manifest__.py", "{'name': 'Helper', 'version': '17.0.1.0.0'}\n")
+
+        with mock.patch.object(web, "project_odoo_version", return_value="17.0"):
+            inspection = web.inspect_zip_modules(self.project, "modules.zip", archive_buffer.getvalue())
+            self.assertEqual({"tracking": "19.0"}, inspection["incompatible"])
+            self.assertEqual("17.0", inspection["odoo_version"])
+
+            job = DummyJob()
+            with self.assertRaisesRegex(RuntimeError, "tracking : prévu pour Odoo 19.0"):
+                web.import_zip_modules_job(job, self.project, "modules.zip", archive_buffer.getvalue())
+
+        # Tout ou rien : le module compatible n'est pas importé non plus.
+        for name in ("tracking", "helper"):
+            self.assertFalse((self.project_root / "odoo" / "addons-store" / name).exists())
+            self.assertFalse((self.project_root / "odoo" / "addons" / name).is_symlink())
+
     def test_safe_extract_zip_rejects_path_traversal(self):
         archive_buffer = io.BytesIO()
         with zipfile.ZipFile(archive_buffer, "w") as archive:

@@ -424,6 +424,9 @@ export type PendingModuleOperation = {
 export type ZipInspection = {
   modules: string[];
   ignored_symlinks: number;
+  odoo_version: string;
+  // Modules prévus pour une autre version d'Odoo que le projet : nom -> version visée.
+  incompatible: Record<string, string>;
 };
 
 export type BackendDiagnostics = {

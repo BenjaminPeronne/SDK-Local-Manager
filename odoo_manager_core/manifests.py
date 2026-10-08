@@ -166,6 +166,18 @@ MAX_MANIFEST_BYTES = 512 * 1024
 ODOO_SERIES_VERSION_RE = re.compile(r"^(\d+\.\d+)\.\d+\.\d+\.\d+$")
 
 
+def manifest_series_mismatch(manifest, odoo_version):
+    """Série Odoo visée par le manifeste (« 19.0 ») quand elle diffère du projet, sinon chaîne vide.
+
+    Odoo refuse au démarrage tout manifeste d'une autre série, et cette erreur casse alors
+    le chargement des icônes et fichiers statiques de tous les modules du projet.
+    """
+    series = ODOO_SERIES_VERSION_RE.match(str(manifest.get("version") or ""))
+    if series and odoo_version and series.group(1) != odoo_version:
+        return series.group(1)
+    return ""
+
+
 def manifest_version_key(version):
     parts = re.findall(r"\d+", str(version or ""))
     return tuple(int(part) for part in parts) if parts else None
