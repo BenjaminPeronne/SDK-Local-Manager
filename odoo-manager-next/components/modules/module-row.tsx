@@ -20,7 +20,8 @@ export type ModuleRowActions = {
   requestDeleteCode: (moduleNames: string[]) => void;
   requestTranslationReset: (moduleNames: string[]) => void;
   requestUninstall: (moduleNames: string[]) => void;
-  restoreRepositoryVersion: (name: string) => void;
+  /** Rétablit la version du dépôt que remplacent ces copies importées (un module ou tout un dépôt). */
+  restoreRepositoryVersions: (names: string[]) => void;
   toggleFromRow: (event: ReactMouseEvent<HTMLElement>, name: string) => void;
   toggleSelection: (name: string, checked: boolean) => void;
 };
@@ -187,7 +188,7 @@ export const ModuleRow = memo(function ModuleRow({
               </DropdownMenu.Item>
             )}
             {module.replaced_repository && (
-              <DropdownMenu.Item onSelect={() => actions.restoreRepositoryVersion(module.name)}>
+              <DropdownMenu.Item onSelect={() => actions.restoreRepositoryVersions([module.name])}>
                 <Undo2 className="h-4 w-4" />
                 Revenir à la version du dépôt {module.replaced_repository}
               </DropdownMenu.Item>

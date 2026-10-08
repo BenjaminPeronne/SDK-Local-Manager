@@ -144,8 +144,8 @@ export function ModulesTab({
       requestDeleteCode,
       requestTranslationReset,
       requestUninstall,
-      restoreRepositoryVersion: (name) =>
-        void createJob("restore_module_source", { project: projectName, module: name }),
+      restoreRepositoryVersions: (names) =>
+        void createJob("restore_module_source", { project: projectName, modules: names.join(",") }),
       toggleFromRow: toggleModuleFromRow,
       toggleSelection: toggleModuleSelection,
     }),
@@ -162,6 +162,16 @@ export function ModulesTab({
     ],
   );
   const repositoryView = moduleFilters.view === "repository";
+  // Les en-têtes de dépôt se collent sous l'en-tête du tableau, masqué (hauteur 0) sur écran étroit.
+  // Ref de rappel : l'onglet démonte et remonte le tableau, la mesure suit chaque montage.
+  const [tableHeaderHeight, setTableHeaderHeight] = useState(0);
+  const tableHeaderRef = useCallback((element: HTMLDivElement | null) => {
+    if (!element) return;
+    const observer = new ResizeObserver(() => setTableHeaderHeight(element.offsetHeight));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const stickyTop = stickyHeader ? projectHeaderHeight + projectTabsHeight : 0;
   const repositoryGroups = useMemo(
     () => (repositoryView ? groupModulesByRepository(moduleFilters.filtered, moduleRepositories) : []),
     [moduleFilters.filtered, moduleRepositories, repositoryView],
@@ -406,8 +416,9 @@ export function ModulesTab({
               des coins arrondis collés en haut laisseraient voir les lignes qui défilent derrière. */}
         <RefinedPanel className="overflow-clip">
           <div
+            ref={tableHeaderRef}
             className="z-10 hidden border-b bg-card xl:sticky xl:block"
-            style={{ top: stickyHeader ? projectHeaderHeight + projectTabsHeight : 0 }}
+            style={{ top: stickyTop }}
           >
             <div className={cn("grid items-center gap-3 bg-muted/60 px-3 py-2", REFINED_LABEL, REFINED_MODULE_COLUMNS)}>
               <div>Module</div>
@@ -431,6 +442,7 @@ export function ModulesTab({
                 selectedModules={selectedModules}
                 setSelectedModules={setSelectedModules}
                 showLocations={showModuleLocations}
+                stickyTop={stickyTop + tableHeaderHeight}
                 workspace={overview?.workspace}
               />
             ) : (

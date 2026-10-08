@@ -6452,48 +6452,65 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
         }
 
 
-def restore_module_source_job(job, project, module_name):
-    """Rend au module la version du dépôt qu'un import depuis Git avait remplacée.
+def restore_module_source_job(job, project, module_names):
+    """Rend aux modules (« a,b ») la version du dépôt qu'un import depuis Git avait remplacée.
 
-    La copie importée est mise de côté avec les autres versions remplacées, le lien d'origine
-    d'odoo/addons est recréé tel qu'il était.
+    Chaque copie importée est mise de côté avec les autres versions remplacées, le lien d'origine
+    d'odoo/addons est recréé tel qu'il était. Tous les modules sont vérifiés avant le premier
+    changement ; chaque retour est ensuite complet ou annulé.
     """
     project = validate_project(project)
-    validate_modules(module_name)
-    replaced_link = str((read_imported_sources(project).get(module_name) or {}).get("replaced_link") or "")
-    if not replaced_link:
-        raise RuntimeError(f"{module_name} ne remplace la version d'aucun dépôt : rien à rétablir.")
-    original = replaced_module_path(project, replaced_link)
-    if original is None:
-        raise RuntimeError(
-            f"La version d'origine de {module_name} est introuvable ({replaced_link}) : "
-            "son dépôt a été déplacé ou supprimé. La copie importée reste en place."
-        )
+    names = module_name_list(module_names)
+    sources = read_imported_sources(project)
     link_parent = project_addons_link_parent(project)
-    link = link_parent / module_name
-    storage = project_addons_storage_parent(project) / module_name
-    if addon_link_status(link, storage)[0] != "matching":
-        raise RuntimeError(f"{module_name} n'utilise plus sa copie importée : rien n'est modifié.")
-    label = module_source_label(project, original)
-    with job_control.protected(f"retour de {module_name} à la version du dépôt"):
-        backup = backup_existing_module(job, project, storage)
-        try:
-            remove_module_entry(link)
-            create_addon_link(link, replaced_link)
-        except BaseException:
-            move_module_entry(backup, storage)
-            if not (link.exists() or link.is_symlink()):
-                create_addon_link(link, Path(os.path.relpath(storage, link_parent)))
-            raise
-        finally:
-            clear_project_module_cache(project)
+    plans = []
+    for module_name in names:
+        replaced_link = str((sources.get(module_name) or {}).get("replaced_link") or "")
+        if not replaced_link:
+            raise RuntimeError(f"{module_name} ne remplace la version d'aucun dépôt : rien à rétablir.")
+        original = replaced_module_path(project, replaced_link)
+        if original is None:
+            raise RuntimeError(
+                f"La version d'origine de {module_name} est introuvable ({replaced_link}) : "
+                "son dépôt a été déplacé ou supprimé. La copie importée reste en place."
+            )
+        link = link_parent / module_name
+        storage = project_addons_storage_parent(project) / module_name
+        if addon_link_status(link, storage)[0] != "matching":
+            raise RuntimeError(f"{module_name} n'utilise plus sa copie importée : rien n'est modifié.")
+        plans.append((module_name, replaced_link, link, storage, module_source_label(project, original)))
+    restored = []
     try:
-        forget_imported_sources(project, [module_name])
-    except OSError:
-        pass
-    job.add(f"{module_name} : version du dépôt {label} rétablie ({link} -> {replaced_link}).")
-    job.add("Mets à jour ce module dans la base Odoo pour qu'elle utilise cette version.")
-    job.result = {"kind": "restore_module_source", "module": module_name, "repository": label}
+        for module_name, replaced_link, link, storage, label in plans:
+            with job_control.protected(f"retour de {module_name} à la version du dépôt"):
+                backup = backup_existing_module(job, project, storage)
+                try:
+                    remove_module_entry(link)
+                    create_addon_link(link, replaced_link)
+                except BaseException:
+                    move_module_entry(backup, storage)
+                    if not (link.exists() or link.is_symlink()):
+                        create_addon_link(link, Path(os.path.relpath(storage, link_parent)))
+                    raise
+            restored.append(module_name)
+            job.add(f"{module_name} : version du dépôt {label} rétablie ({link} -> {replaced_link}).")
+    finally:
+        clear_project_module_cache(project)
+        try:
+            forget_imported_sources(project, restored)
+        except OSError:
+            pass
+    job.add(
+        "Mets à jour ce module dans la base Odoo pour qu'elle utilise cette version."
+        if len(restored) == 1
+        else f"Mets à jour ces {len(restored)} modules dans la base Odoo pour qu'elle utilise ces versions."
+    )
+    job.result = {
+        "kind": "restore_module_source",
+        "module": restored[0],
+        "modules": restored,
+        "repository": plans[0][4],
+    }
 
 
 # Clé SSH seule, sans saisie : un dépôt cloné à la main peut utiliser https ou un autre hôte.
@@ -7761,12 +7778,13 @@ def switch_repository_branch_action(payload):
 
 def restore_module_source_action(payload):
     project = payload_project(payload)
-    module_name = str(payload.get("module", "") or "").strip()
-    validate_modules(module_name)
+    # `modules` (« a,b ») rétablit tout un dépôt d'un coup ; `module` reste accepté pour un seul.
+    names = module_name_list(str(payload.get("modules") or payload.get("module") or "").strip())
+    target = names[0] if len(names) == 1 else f"{len(names)} modules"
     return Job(
-        f"Revenir à la version du dépôt · {module_name}",
+        f"Revenir à la version du dépôt · {target}",
         restore_module_source_job,
-        (project, module_name),
+        (project, ",".join(names)),
         project=project,
     )
 

@@ -220,6 +220,32 @@ class RepositoryModulesTests(ModuleLayoutTests):
         with self.assertRaisesRegex(RuntimeError, "rien à rétablir"):
             web.restore_module_source_job(DummyJob(), self.project, "alpha")
 
+    def test_whole_repository_is_restored_at_once_after_checking_every_module(self):
+        links = {}
+        for name in ("alpha", "beta"):
+            other = self.storage(f"caritel_v18/addons/{name}")
+            other.mkdir(parents=True)
+            (other / "__manifest__.py").write_text(f"{{'name': '{name}', 'version': '18.0.1.0.0'}}")
+            links[name] = f"../addons-store/caritel_v18/addons/{name}"
+            (self.project_root / "odoo/addons" / name).symlink_to(links[name])
+        self.run_import(["alpha", "beta"])
+
+        # Un module sans version de dépôt à rétablir : refus avant toute modification.
+        with self.assertRaisesRegex(RuntimeError, "ghost ne remplace"):
+            web.restore_module_source_job(DummyJob(), self.project, "alpha,ghost")
+        self.assertEqual(Path("../addons-store/alpha"), Path((self.project_root / "odoo/addons/alpha").readlink()))
+
+        job = DummyJob()
+        web.restore_module_source_job(job, self.project, "beta,alpha")
+
+        for name in ("alpha", "beta"):
+            self.assertEqual(Path(links[name]), Path((self.project_root / "odoo/addons" / name).readlink()))
+            self.assertFalse(self.storage(name).exists())
+        self.assertEqual(["alpha", "beta"], job.result["modules"])
+        self.assertEqual({}, web.read_imported_sources(self.project))
+        action = web.restore_module_source_action({"project": self.project, "modules": "beta,alpha"})
+        self.assertEqual("Revenir à la version du dépôt · 2 modules", action.title)
+
     def test_enterprise_module_of_another_repository_stays_blocked(self):
         enterprise = self.storage("caritel_v18/addons-store/odoo_entreprise/alpha")
         enterprise.mkdir(parents=True)
