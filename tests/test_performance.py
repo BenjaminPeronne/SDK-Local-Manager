@@ -202,9 +202,8 @@ class PerformancePayloadTests(unittest.TestCase):
         self.assertEqual("critical", payload["status"])
         self.assertTrue(payload["can_apply"])
         self.assertEqual({"memory": 4 * GIB, "cpus": 6, "swap": 2 * GIB}, payload["recommended"])
-        self.assertEqual("", payload["wslconfig"])
 
-    def test_windows_payload_gives_the_wslconfig_to_copy(self):
+    def test_windows_payload_leaves_the_application_to_apply(self):
         service = Mock()
         service.docker_resources.return_value = (8 * GIB, 16)
         with (
@@ -215,7 +214,7 @@ class PerformancePayloadTests(unittest.TestCase):
             payload = web.performance_payload()
 
         self.assertFalse(payload["can_apply"])
-        self.assertEqual("[wsl2]\nmemory=10GB\nprocessors=14\nswap=2GB\n", payload["wslconfig"])
+        self.assertEqual({"memory": 10 * GIB, "cpus": 14, "swap": 2 * GIB}, payload["recommended"])
 
     def test_wsl_payload_recommends_from_the_windows_computer(self):
         service = Mock()
@@ -231,7 +230,6 @@ class PerformancePayloadTests(unittest.TestCase):
         self.assertEqual(("wsl", "low"), (payload["environment"], payload["status"]))
         self.assertEqual({"memory": 20 * GIB, "cpus": 10, "swap": 4 * GIB}, payload["recommended"])
         self.assertFalse(payload["can_apply"])
-        self.assertEqual("[wsl2]\nmemory=20GB\nprocessors=10\nswap=4GB\n", payload["wslconfig"])
 
     def test_native_linux_docker_needs_nothing(self):
         service = Mock()

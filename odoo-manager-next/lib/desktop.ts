@@ -35,6 +35,8 @@ export interface DesktopBridge {
   wslImportSshKey?(): Promise<{ ok: boolean; key: string; alreadyPresent?: boolean }>;
   wslOpenEditor?(project: string): Promise<void>;
   wslOpenExplorer?(project: string): Promise<void>;
+  /** Donne ces ressources à WSL, donc à Docker, puis relance l'application. */
+  wslApplyResources?(resources: { memory: number; cpus: number; swap: number }): Promise<void>;
   /** S'abonne à l'avancement de la préparation ; la fonction rendue se désabonne. */
   onWslProgress?(callback: (step: WslPrepareStep) => void): () => void;
   // Mise à jour en un clic.

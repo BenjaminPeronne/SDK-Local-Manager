@@ -12,6 +12,7 @@ const WSL_CAPABILITIES = [
   "wslImportSshKey",
   "wslOpenEditor",
   "wslOpenExplorer",
+  "wslApplyResources",
   "onWslProgress",
 ];
 

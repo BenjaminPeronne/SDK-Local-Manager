@@ -10,6 +10,9 @@ const {
   wslStartFailureReason,
   legacyWindowsWorkspace,
   backendCommand,
+  mergeWslConfig,
+  parseWslSize,
+  wslResourcesRequest,
   commandError,
   decodeWslOutput,
   expectedChecksum,
@@ -1073,5 +1076,80 @@ test("low free memory is written to the log before preparing", async () => {
     assert.ok(context.logs.some((line) => line.includes("Peu de mémoire libre") && line.includes("512 Mo")));
   } finally {
     context.cleanup();
+  }
+});
+
+const GIB = 1024 ** 3;
+const RESOURCES = { memory: 20 * GIB, cpus: 10, swap: 4 * GIB };
+
+test(".wslconfig is created with the recommended resources", () => {
+  assert.equal(mergeWslConfig("", RESOURCES), "[wsl2]\r\nmemory=20GB\r\nprocessors=10\r\nswap=4GB\r\n");
+});
+
+test(".wslconfig keeps other settings and never lowers a larger value", () => {
+  const original = [
+    "# réglages perso",
+    "[wsl2]",
+    "memory = 24GB",
+    "processors=4 # limité",
+    "networkingMode=mirrored",
+    "",
+    "[experimental]",
+    "autoMemoryReclaim=gradual",
+    "",
+  ].join("\n");
+  assert.equal(
+    mergeWslConfig(original, RESOURCES),
+    [
+      "# réglages perso",
+      "[wsl2]",
+      "memory = 24GB",
+      "processors=10",
+      "networkingMode=mirrored",
+      "swap=4GB",
+      "",
+      "[experimental]",
+      "autoMemoryReclaim=gradual",
+      "",
+    ].join("\r\n"),
+  );
+});
+
+test(".wslconfig without a [wsl2] section gets one at the end", () => {
+  assert.equal(
+    mergeWslConfig("[experimental]\nsparseVhd=true\n", RESOURCES),
+    "[experimental]\r\nsparseVhd=true\r\n\r\n[wsl2]\r\nmemory=20GB\r\nprocessors=10\r\nswap=4GB\r\n",
+  );
+});
+
+test("WSL sizes are read with or without the B", () => {
+  assert.equal(parseWslSize("8GB"), 8 * GIB);
+  assert.equal(parseWslSize("8192MB"), 8 * GIB);
+  assert.equal(parseWslSize("8g"), 8 * GIB);
+  assert.equal(parseWslSize("beaucoup"), 0);
+});
+
+test("requested resources never exceed the computer", () => {
+  const computer = { totalMemory: 32 * GIB, cpuCount: 12 };
+  assert.deepEqual(wslResourcesRequest(RESOURCES, computer), RESOURCES);
+  assert.throws(() => wslResourcesRequest({ ...RESOURCES, memory: 40 * GIB }, computer), /Mémoire/);
+  assert.throws(() => wslResourcesRequest({ ...RESOURCES, memory: 1.5 * GIB }, computer), /Mémoire/);
+  assert.throws(() => wslResourcesRequest({ ...RESOURCES, cpus: 16 }, computer), /processeurs/);
+  assert.throws(() => wslResourcesRequest({ ...RESOURCES, swap: "4GB" }, computer), /Swap/);
+});
+
+test("writing the resources keeps a copy of the original .wslconfig", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-wslconfig-"));
+  try {
+    const file = path.join(directory, ".wslconfig");
+    fs.writeFileSync(file, "[wsl2]\nmemory=8GB\n");
+    const environment = new WslEnvironment({ installRoot: directory });
+    assert.equal(environment.writeResources(RESOURCES, file), true);
+    assert.equal(fs.readFileSync(file, "utf8"), "[wsl2]\r\nmemory=20GB\r\nprocessors=10\r\nswap=4GB\r\n");
+    assert.equal(fs.readFileSync(file + ".sdk-manager.bak", "utf8"), "[wsl2]\nmemory=8GB\n");
+    // Déjà réglé : rien n'est réécrit.
+    assert.equal(environment.writeResources(RESOURCES, file), false);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
   }
 });

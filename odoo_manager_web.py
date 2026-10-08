@@ -4925,18 +4925,6 @@ DOCKER_DESKTOP_STOP_SECONDS = 180
 DOCKER_DESKTOP_START_SECONDS = 300
 
 
-def wslconfig_text(recommended):
-    """Contenu de %UserProfile%\\.wslconfig qui donne ces ressources à WSL, donc à Docker."""
-    if not recommended:
-        return ""
-    return (
-        "[wsl2]\n"
-        f"memory={recommended['memory'] // performance.GIB}GB\n"
-        f"processors={recommended['cpus']}\n"
-        f"swap={recommended['swap'] // performance.GIB}GB\n"
-    )
-
-
 def performance_payload():
     system = platform_id()
     if system == "linux" and performance.running_in_wsl():
@@ -4961,8 +4949,8 @@ def performance_payload():
         "recommended": recommended,
         "status": status,
         # Le fichier de Docker Desktop n'est lu qu'au moment d'appliquer : macOS demande alors l'autorisation.
+        # Sous Windows, c'est l'application qui écrit .wslconfig et redémarre WSL.
         "can_apply": bool(environment == "macos" and recommended and memory),
-        "wslconfig": wslconfig_text(recommended) if environment in {"windows", "wsl"} else "",
         "postgres": performance.postgres_settings(memory, cpus) if memory else None,
         "tune_postgres": SETTINGS.tune_postgres,
     }

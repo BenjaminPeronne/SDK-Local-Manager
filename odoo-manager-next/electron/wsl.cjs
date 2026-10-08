@@ -151,6 +151,70 @@ function decodeWslOutput(value) {
   return text.replace(/^\uFEFF/, "").replace(/\r/g, "");
 }
 
+const GIB = 1024 ** 3;
+// Tailles de .wslconfig : « 8GB », « 8192MB », « 512M »…
+const WSL_SIZE = /^(\d+(?:\.\d+)?)\s*([KMGT]?)B?$/i;
+const WSL_SIZE_UNITS = { "": 1, K: 1024, M: 1024 ** 2, G: GIB, T: 1024 ** 4 };
+
+/** Taille d'un réglage de .wslconfig en octets, 0 si elle est illisible. */
+function parseWslSize(value) {
+  const match = WSL_SIZE.exec(String(value ?? "").trim());
+  return match ? Number(match[1]) * WSL_SIZE_UNITS[match[2].toUpperCase()] : 0;
+}
+
+/**
+ * Ressources demandées par l'interface, vérifiées : jamais plus que l'ordinateur n'en a.
+ * La mémoire et le swap sont des Go entiers, comme les écrit le calcul de la recommandation.
+ */
+function wslResourcesRequest(value, { totalMemory = os.totalmem(), cpuCount = os.cpus().length } = {}) {
+  const memory = Number(value?.memory);
+  const cpus = Number(value?.cpus);
+  const swap = Number(value?.swap);
+  if (!Number.isInteger(memory / GIB) || memory < 2 * GIB || memory > totalMemory)
+    throw new Error("Mémoire demandée invalide.");
+  if (!Number.isInteger(cpus) || cpus < 1 || cpus > cpuCount) throw new Error("Nombre de processeurs invalide.");
+  if (!Number.isInteger(swap / GIB) || swap < 0 || swap > 64 * GIB) throw new Error("Swap demandé invalide.");
+  return { memory, cpus, swap };
+}
+
+/**
+ * Contenu de .wslconfig avec la mémoire, les processeurs et le swap dans [wsl2], le reste intact.
+ *
+ * Une valeur déjà plus grande, posée par l'utilisateur ou un autre outil, est gardée : le réglage
+ * n'enlève jamais de ressources. Les autres réglages et les commentaires sont conservés.
+ */
+function mergeWslConfig(text, { memory, cpus, swap }) {
+  const lines = String(text || "").split(/\r?\n/);
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  const wanted = [
+    ["memory", `${memory / GIB}GB`, memory, parseWslSize],
+    ["processors", String(cpus), cpus, (value) => Number.parseInt(value, 10) || 0],
+    ["swap", `${swap / GIB}GB`, swap, parseWslSize],
+  ];
+  let start = lines.findIndex((line) => /^\s*\[wsl2\]\s*$/i.test(line));
+  if (start < 0) {
+    if (lines.length) lines.push("");
+    lines.push("[wsl2]");
+    start = lines.length - 1;
+  }
+  const sectionEnd = () => {
+    const next = lines.findIndex((line, index) => index > start && /^\s*\[/.test(line));
+    let end = next < 0 ? lines.length : next;
+    // Les nouvelles lignes vont après le dernier réglage de la section, pas après ses lignes vides.
+    while (end - 1 > start && !lines[end - 1].trim()) end -= 1;
+    return end;
+  };
+  for (const [key, written, bytes, parse] of wanted) {
+    const end = sectionEnd();
+    const pattern = new RegExp(`^\\s*${key}\\s*=\\s*([^#;]*)`, "i");
+    const index = lines.findIndex((line, position) => position > start && position < end && pattern.test(line));
+    if (index < 0) lines.splice(end, 0, `${key}=${written}`);
+    else if (parse(pattern.exec(lines[index])[1].trim()) < bytes) lines[index] = `${key}=${written}`;
+  }
+  // Fichier Windows : fins de ligne Windows.
+  return lines.join("\r\n") + "\r\n";
+}
+
 function parseDistributions(output) {
   return decodeWslOutput(output)
     .split("\n")
@@ -711,6 +775,36 @@ class WslEnvironment {
     return { ...(await this.status()), preparing: false, progress: null };
   }
 
+  /**
+   * Écrit dans .wslconfig la mémoire, les processeurs et le swap à donner à WSL, donc à Docker.
+   *
+   * Le fichier d'origine est copié une fois en `.sdk-manager.bak`, et remplacé d'un bloc.
+   * WSL ne relit ce fichier qu'à son redémarrage : voir `shutdown`.
+   */
+  writeResources(resources, file) {
+    let original = "";
+    try {
+      original = decodeWslOutput(fs.readFileSync(file)).replace(/\n/g, "\r\n");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    const text = mergeWslConfig(original, resources);
+    if (text === original) return false;
+    const backup = file + ".sdk-manager.bak";
+    if (original && !fs.existsSync(backup)) fs.copyFileSync(file, backup);
+    const temporary = file + ".sdk-manager.tmp";
+    fs.writeFileSync(temporary, text, "utf8");
+    fs.renameSync(temporary, file);
+    this.log(`Ressources de WSL écrites dans ${file} : ${text.trim().replace(/\r?\n/g, " ")}`);
+    return true;
+  }
+
+  /** Arrête tout WSL : au prochain démarrage, il relit .wslconfig. */
+  async shutdown() {
+    this.log("Arrêt de WSL pour appliquer ses nouvelles ressources.");
+    await this.run("wsl.exe", ["--shutdown"], { allowFailure: true, timeout: TIMEOUTS.control });
+  }
+
   backendCommand(port, instance, legacyWorkspace = "") {
     return backendCommand({
       distribution: this.distribution,
@@ -831,6 +925,9 @@ module.exports = {
   PREPARE_STEP_LABELS,
   wslStartFailureReason,
   legacyWindowsWorkspace,
+  mergeWslConfig,
+  parseWslSize,
+  wslResourcesRequest,
   commandError,
   decodeWslOutput,
   isVirtualizationError,

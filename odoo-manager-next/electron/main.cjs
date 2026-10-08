@@ -33,6 +33,7 @@ const {
   WslEnvironment,
   imageFiles,
   legacyWindowsWorkspace,
+  wslResourcesRequest,
   wslStartFailureReason,
 } = require("./wsl.cjs");
 
@@ -169,6 +170,26 @@ async function openDocker() {
   });
 }
 
+/**
+ * Donne à WSL, donc à Docker, la mémoire et les processeurs recommandés, puis relance l'application.
+ *
+ * Le fichier est écrit avant tout arrêt : une erreur laisse l'application et les projets en place.
+ * WSL ne relit ses réglages qu'à son redémarrage, qui coupe le backend quand il y tourne : il est
+ * arrêté proprement d'abord, puis l'application redémarre et relance le tout.
+ */
+async function applyWslResources(request) {
+  const resources = wslResourcesRequest(request);
+  wsl.writeResources(resources, path.join(app.getPath("home"), ".wslconfig"));
+  const dockerDesktop = !backend.command;
+  await backend.stop();
+  await wsl.shutdown();
+  // Backend Windows : Docker est celui de Docker Desktop, arrêté avec WSL.
+  if (dockerDesktop) await openDocker().catch((error) => backend.log(`Docker Desktop : ${error.message}`));
+  quitting = true;
+  app.relaunch();
+  app.exit(0);
+}
+
 function installHandlers() {
   const handle = (name, callback) =>
     ipcMain.handle("sdk:" + name, (event, ...args) => {
@@ -228,6 +249,10 @@ function installHandlers() {
   handle(
     "wsl-legacy-workspace",
     onWindows(() => windowsWorkspaceSeenFromWsl()),
+  );
+  handle(
+    "wsl-apply-resources",
+    onWindows((resources) => applyWslResources(resources)),
   );
   handle("relaunch", () => {
     app.relaunch();

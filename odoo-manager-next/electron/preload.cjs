@@ -14,6 +14,7 @@ const wslCapabilities =
         wslImportSshKey: () => ipcRenderer.invoke("sdk:wsl-import-ssh-key"),
         wslOpenEditor: (project) => ipcRenderer.invoke("sdk:wsl-open-editor", project),
         wslOpenExplorer: (project) => ipcRenderer.invoke("sdk:wsl-open-explorer", project),
+        wslApplyResources: (resources) => ipcRenderer.invoke("sdk:wsl-apply-resources", resources),
         // Avancement de la préparation. Seule la charge utile passe au rendu, jamais l'événement IPC.
         onWslProgress: (callback) => {
           const listener = (_event, step) => callback(step);

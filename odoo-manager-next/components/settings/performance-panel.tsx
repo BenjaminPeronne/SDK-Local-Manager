@@ -1,8 +1,9 @@
 "use client";
 
 import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
-import { Copy, Cpu, Database, Gauge, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
+import { Cpu, Database, Gauge, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 import { api } from "@/lib/api";
+import { desktopBridge, desktopErrorMessage } from "@/lib/desktop";
 import { isJobActive } from "@/lib/jobs";
 import type { Job, ManagerSettings, PerformanceReport, Toast } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +66,7 @@ export function PerformancePanel({
   const [report, setReport] = useState<PerformanceReport | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [restarting, setRestarting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -93,14 +95,26 @@ export function PerformancePanel({
   const docker = report?.docker;
   const recommended = report?.recommended;
   const badge = report ? STATUS_BADGES[report.status] : null;
+  // Sous Windows, Docker reçoit la mémoire de WSL : l'application la règle elle-même, puis redémarre.
+  const applyOnWindows = Boolean(
+    recommended &&
+    (report?.environment === "wsl" || report?.environment === "windows") &&
+    desktopBridge()?.wslApplyResources,
+  );
+  const canApply = Boolean(report?.can_apply || applyOnWindows);
 
-  async function copyWslConfig() {
-    if (!report?.wslconfig) return;
+  async function applyRecommendation() {
+    if (!applyOnWindows) {
+      void createJob("apply_docker_resources");
+      return;
+    }
+    setRestarting(true);
     try {
-      await navigator.clipboard.writeText(report.wslconfig);
-      pushToast("success", "Contenu de .wslconfig copié.");
-    } catch {
-      pushToast("error", "Copie impossible : sélectionne le texte à la main.");
+      // L'application se ferme et redémarre : la promesse ne se résout qu'en cas d'échec.
+      await desktopBridge()!.wslApplyResources!(recommended!);
+    } catch (err) {
+      setRestarting(false);
+      pushToast("error", desktopErrorMessage(err, "Réglage des ressources impossible."));
     }
   }
 
@@ -153,7 +167,7 @@ export function PerformancePanel({
               <Notice tone="danger" icon={TriangleAlert} title="Docker manque de mémoire">
                 Avec moins de 3 Go, Odoo et sa base se disputent la mémoire : Odoo peut s’arrêter en pleine restauration
                 ou mise à jour.
-                {report.can_apply ? " Applique la recommandation ci-dessous." : ""}
+                {canApply ? " Applique la recommandation ci-dessous." : ""}
               </Notice>
             )}
 
@@ -164,36 +178,26 @@ export function PerformancePanel({
               </p>
             )}
 
-            {report.can_apply && report.status !== "ok" && (
+            {canApply && report.status !== "ok" && (
               <div className="flex flex-col gap-2 rounded-md border bg-muted/35 p-3 sm:flex-row sm:items-center">
                 <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-                  Docker Desktop redémarre pour prendre les nouveaux réglages : les projets démarrés s’arrêtent, tu
-                  pourras les redémarrer ensuite.
+                  {applyOnWindows
+                    ? "L’application redémarre pour prendre les nouveaux réglages : les projets démarrés s’arrêtent, tu pourras les redémarrer ensuite. Les autres environnements Linux ouverts sur ce poste s’arrêtent aussi."
+                    : "Docker Desktop redémarre pour prendre les nouveaux réglages : les projets démarrés s’arrêtent, tu pourras les redémarrer ensuite."}
                 </p>
                 <ConfirmButton
-                  label={applying ? "Réglage en cours…" : "Appliquer la recommandation"}
-                  confirmLabel="Confirmer : Docker redémarre"
-                  disabled={Boolean(applying) || !docker?.available}
-                  icon={applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gauge className="h-4 w-4" />}
-                  onConfirm={() => void createJob("apply_docker_resources")}
+                  label={restarting ? "Redémarrage…" : applying ? "Réglage en cours…" : "Appliquer la recommandation"}
+                  confirmLabel={applyOnWindows ? "Confirmer : l’application redémarre" : "Confirmer : Docker redémarre"}
+                  disabled={Boolean(applying) || restarting || (!applyOnWindows && !docker?.available)}
+                  icon={
+                    applying || restarting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Gauge className="h-4 w-4" />
+                    )
+                  }
+                  onConfirm={() => void applyRecommendation()}
                 />
-              </div>
-            )}
-
-            {report.wslconfig && report.status !== "ok" && (
-              <div className="grid gap-2 rounded-md border bg-muted/35 p-3">
-                <p className="text-xs text-muted-foreground">
-                  Sous Windows, Docker reçoit la mémoire de WSL. Crée ou complète le fichier{" "}
-                  <span className="font-mono">.wslconfig</span> de ton dossier utilisateur Windows avec ces lignes, puis
-                  redémarre l’ordinateur.
-                </p>
-                <pre className="overflow-x-auto rounded border bg-background p-2 font-mono text-xs">
-                  {report.wslconfig}
-                </pre>
-                <Button size="sm" variant="outline" className="justify-self-start" onClick={() => void copyWslConfig()}>
-                  <Copy className="h-4 w-4" />
-                  Copier
-                </Button>
               </div>
             )}
           </>

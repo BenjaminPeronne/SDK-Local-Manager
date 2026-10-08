@@ -463,9 +463,8 @@ export type PerformanceReport = {
   docker: { available: boolean; memory: number; cpus: number };
   recommended: { memory: number; cpus: number; swap: number } | null;
   status: "ok" | "low" | "critical" | "unknown";
+  /** macOS : le backend règle Docker Desktop. Sous Windows, c'est l'application (wslApplyResources). */
   can_apply: boolean;
-  /** Contenu de .wslconfig à recopier sous Windows. */
-  wslconfig: string;
   postgres: Record<string, string> | null;
   tune_postgres: boolean;
 };
