@@ -1951,6 +1951,37 @@ class ProjectServiceTests(unittest.TestCase):
                 content = f"services:\n  db:\n    image: {image}\n"
                 self.assertEqual((content, "", ""), use_pgvector_postgres_image(content))
 
+    def test_pgvector_is_trusted_through_root_in_the_postgres_container(self):
+        def capture(command, cwd=None, timeout=10):
+            self.runner.captures.append((list(command), cwd, timeout))
+            return 0, "changed\n"
+
+        logs = []
+        with patch.object(self.service, "capture", side_effect=capture):
+            changed = self.service.trust_pgvector_extension("DEMO", log=logs.append)
+
+        self.assertTrue(changed)
+        command = self.runner.captures[-1][0]
+        self.assertEqual(["exec", "-u", "root", "postgresql-DEMO", "sh", "-c"], command[1:7])
+        self.assertIn("trusted = true", command[-1])
+        self.assertTrue(any("pgvector" in line for line in logs))
+
+    def test_pgvector_trust_is_silent_when_already_done_or_not_applicable(self):
+        # 0 sans « changed » : déjà fait ; 3 : PostgreSQL trop ancien ; 4 : image sans pgvector.
+        for code in (0, 3, 4):
+            with self.subTest(code=code):
+                logs = []
+                with patch.object(self.service, "capture", return_value=(code, "")):
+                    self.assertFalse(self.service.trust_pgvector_extension("DEMO", log=logs.append))
+                self.assertEqual([], logs)
+
+    def test_pgvector_trust_failure_is_reported_without_stopping_the_action(self):
+        logs = []
+        with patch.object(self.service, "capture", return_value=(1, "No such container: postgresql-DEMO")):
+            self.assertFalse(self.service.trust_pgvector_extension("DEMO", log=logs.append))
+
+        self.assertTrue(any("No such container" in line for line in logs))
+
     def test_orphan_report_expressions_of_the_module_are_deleted_through_the_postgres_role(self):
         def capture(command, cwd=None, timeout=10):
             self.runner.captures.append((list(command), cwd, timeout))
@@ -2069,9 +2100,11 @@ class OdooStartupRepairTests(unittest.TestCase):
             patch.object(self.service, "wait_for_container"),
             patch.object(self.service, "wait_for_odoo_container_initialization"),
             patch.object(self.service, "tune_postgres"),
+            patch.object(self.service, "trust_pgvector_extension") as trust,
         ):
             self.service.start_project_containers("DEMO", log=lambda _line: None)
 
+        trust.assert_called_once_with("DEMO", log=ANY)
         self.assertEqual(["DEMO", "DEMO"], attempts)
         self.assertTrue(any(command[-2:] == ["start", "odoo-DEMO"] for command, _cwd, _t in self.runner.captures))
         self.assertGreaterEqual(cleanup.call_count, 1)

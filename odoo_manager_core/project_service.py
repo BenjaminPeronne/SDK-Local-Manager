@@ -474,6 +474,19 @@ PYTHON_EXCEPTION_LINE_RE = re.compile(r"\b[A-Za-z_][\w.]*(?:Error|Exception|Faul
 POSTGRES_EXTENSION_UNAVAILABLE_RE = re.compile(
     r'extension "[\w-]+" is not available|could not open extension control file', re.IGNORECASE
 )
+# Marque pgvector « trusted » dans le conteneur PostgreSQL : le rôle d'Odoo, propriétaire de ses bases,
+# peut alors créer l'extension lui-même, comme le fait le module ai à son installation depuis Odoo.
+# Fichier de l'image, modifié dans la couche du conteneur : conservé aux redémarrages, perdu à la
+# recréation, d'où une vérification à chaque démarrage. Codes : 0 déjà fait ou fait (« changed »
+# affiché), 3 PostgreSQL < 13 (clé inconnue, l'extension deviendrait inutilisable), 4 pas de pgvector.
+PGVECTOR_TRUST_SCRIPT = r"""
+major=$(pg_config --version 2>/dev/null | sed -n 's/^PostgreSQL \([0-9][0-9]*\).*/\1/p')
+[ -n "$major" ] && [ "$major" -ge 13 ] || exit 3
+control="$(pg_config --sharedir)/extension/vector.control"
+[ -f "$control" ] || exit 4
+grep -Eq '^[[:space:]]*trusted[[:space:]]*=' "$control" && exit 0
+printf '\ntrusted = true\n' >> "$control" && echo changed
+"""
 PGVECTOR_IMAGE_REQUIRED_MESSAGE = (
     "L'IA d'Odoo a besoin de l'extension « vector », absente du serveur de bases PostgreSQL de ce projet. "
     "Dans le docker-compose.yml du projet, remplace l'image PostgreSQL par pgvector/pgvector de la même version "
@@ -2708,6 +2721,26 @@ class ProjectService:
             raise RuntimeError(f"Installation de l'extension PostgreSQL {extension} impossible : {output.strip()}")
         self.log(log, f"Extension PostgreSQL {extension} installée.")
 
+    def trust_pgvector_extension(self, project, log=None):
+        """Autorise le rôle d'Odoo à créer l'extension vector dans ses bases (installation du module ai).
+
+        Sans cela, installer l'IA depuis Odoo échoue : seul un superutilisateur peut créer une extension
+        non « trusted ». Ne donne aucun autre droit au rôle d'Odoo. Sans effet si PostgreSQL n'a pas
+        pgvector ou est trop ancien ; ne fait jamais échouer l'action en cours. Retourne True si modifié.
+        """
+        code, output = self.capture(
+            self.docker("exec", "-u", "root", f"postgresql-{project}", "sh", "-c", PGVECTOR_TRUST_SCRIPT),
+            timeout=20,
+        )
+        if code == 0 and "changed" in output:
+            self.log(log, "IA d'Odoo : Odoo peut maintenant activer lui-même la recherche par similarité (pgvector).")
+            return True
+        if code not in {0, 3, 4}:
+            self.log(
+                log, f"Autorisation de pgvector pour Odoo non appliquée : {output.strip()[-300:] or f'code {code}'}"
+            )
+        return False
+
     def run_create_postgres_extension(self, project, db_name, extension):
         return self.capture(
             self.docker(
@@ -2757,6 +2790,7 @@ class ProjectService:
             compose.write_text(content, encoding="utf-8")
             raise RuntimeError(f"Impossible de recréer le conteneur PostgreSQL sur l'image {image}.")
         self.wait_for_postgres(project, log=log)
+        self.trust_pgvector_extension(project, log=log)
         return True
 
     def odoo_addons_paths(self, project):
@@ -3728,6 +3762,7 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
         except RuntimeError as exc:
             # Un projet doit démarrer même avec les réglages d'origine de PostgreSQL.
             self.log(log, f"Réglages PostgreSQL non appliqués : {exc}")
+        self.trust_pgvector_extension(project, log=log)
 
     def start_project(self, project, log=None):
         self.start_project_containers(project, log=log)
@@ -3775,6 +3810,8 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
 
         self.log(log, "Redémarrage compose...")
         self.compose_up_project(project, path, log=log, recreate_changed=True)
+        # Un conteneur PostgreSQL recréé sur une nouvelle image a perdu cette autorisation.
+        self.trust_pgvector_extension(project, log=log)
         # Un conteneur recréé sur la nouvelle image repart sans serveur Odoo : il est relancé
         # s'il tournait avant la mise à jour.
         if odoo_was_serving and self.odoo_server_state(container) != "running":
