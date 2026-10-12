@@ -21,7 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PureWindowsPath
@@ -159,8 +159,10 @@ from odoo_manager_core.releases import RELEASES_PAGE, RELEASES_REPOSITORY, relea
 from odoo_manager_core.repositories import (
     REPOSITORY_COMMIT_RE,
     REPOSITORY_GIT_OPTIONS,
+    RepositoryBranchMissing,
     remote_branches,
     repository_clone_error,
+    repository_search_sources,
     repository_tree_modules,
     sparse_checkout_pattern,
 )
@@ -267,6 +269,7 @@ API_ACTIONS = (
     "install_traefik",
     "link_modules",
     "migrate_project",
+    "module_sources",
     "neutralize_database",
     "regenerate_assets",
     "repair_enterprise_links",
@@ -3192,6 +3195,7 @@ MODULE_FILES_CANCEL_HINT = (
 )
 # (arrêt possible, ce que fait l'arrêt ou pourquoi il est impossible), par fonction d'action.
 JOB_CANCEL_POLICIES = {
+    "module_sources_job": (True, "La recherche s’arrête ; rien n’a été modifié dans le projet."),
     "start_project_job": (
         True,
         "Les conteneurs et le serveur Odoo démarrés par cette action sont arrêtés ; ce qui tournait déjà reste démarré.",
@@ -6262,6 +6266,22 @@ def inspect_repository_modules(project, url, branch, db_name=""):
     project = validate_project(project)
     url = validate_gitlab_repository(url)
     branch = validate_git_ref(branch)
+    commit, modules, manifests_read = read_repository_modules(project, url, branch)
+    states = installed_modules(project, db_name) if db_name else {}
+    odoo_version = project_odoo_version(project)
+    return {
+        "commit": commit,
+        "odoo_version": odoo_version,
+        "manifests_read": manifests_read,
+        "modules": repository_module_plans(project, modules, states, odoo_version),
+    }
+
+
+def read_repository_modules(project, url, branch, wanted=None):
+    """Commit d'une branche et ses modules, lus sans télécharger leur code ; URL et branche déjà validées.
+
+    `wanted` limite la liste aux modules de ces noms : seuls leurs manifestes sont alors téléchargés.
+    """
     creator = ProjectCreator(SETTINGS, WORKSPACE, project_service())
     staging = project_staging_imports_root(project)
     staging.mkdir(parents=True, exist_ok=True)
@@ -6301,6 +6321,8 @@ def inspect_repository_modules(project, url, branch, db_name=""):
         if code:
             raise RuntimeError("Lecture de l’arborescence du dépôt impossible.")
         found, symlink_paths = repository_tree_modules(tree, repository_name)
+        if wanted is not None:
+            found = [item for item in found if item[1] in wanted]
         manifests = {}
         if found:
             # Checkout clairsemé limité aux manifestes : Git récupère ces fichiers en un seul
@@ -6334,14 +6356,140 @@ def inspect_repository_modules(project, url, branch, db_name=""):
         }
         for path, name, _file in sorted(found, key=lambda item: (item[1].lower(), item[0]))
     ]
-    states = installed_modules(project, db_name) if db_name else {}
+    return commit, modules, bool(manifests)
+
+
+MODULE_SOURCE_WORKERS = 6
+MODULE_SOURCE_PLAN_FIELDS = ("name", "path", "title", "version", "action", "reason", "warning", "replaces")
+
+
+def workspace_repository_entries():
+    """(projet, version Odoo, URL, branche) des dépôts rangés ou importés dans chaque projet.
+
+    Le code d'Odoo et d'Enterprise est laissé de côté : il est fourni avec le projet, pas module par module.
+    """
+    entries = []
+    for name in project_service().list_projects():
+        version = project_odoo_version(name)
+        storage = project_addons_storage_parent(name)
+        standard = {str(safe_resolve(storage / folder)) for folder in ("odoo_entreprise", "odoo_enterprise")}
+        for root in storage_checkouts(name, project_layout_variants(name)):
+            info = git_checkouts.read_checkout(root) or {}
+            if root not in standard and info.get("remote"):
+                entries.append((name, version, info["remote"], info.get("branch") or ""))
+        for origin in read_imported_sources(name).values():
+            if origin.get("url"):
+                entries.append((name, version, str(origin["url"]), str(origin.get("branch") or "")))
+    return entries
+
+
+def module_search_sources(project, odoo_version):
+    sources = []
+    for source in repository_search_sources(workspace_repository_entries(), project, odoo_version):
+        try:
+            validate_gitlab_repository(source["url"])
+        except ValueError:
+            continue
+        branches = []
+        for branch in source["branches"]:
+            try:
+                branches.append(validate_git_ref(branch))
+            except ValueError:
+                continue
+        if branches:
+            sources.append({**source, "branches": branches})
+    return sources
+
+
+def read_source_modules(project, source, wanted):
+    """Lit les branches du dépôt dans l'ordre, chacune pour les seuls modules absents des précédentes.
+
+    Renvoie (branche, commit, modules) par branche lue ; RepositoryBranchMissing si aucune n'existe.
+    """
+    reads, remaining, missing = [], set(wanted), False
+    for branch in source["branches"]:
+        if not remaining:
+            break
+        try:
+            commit, modules, _manifests_read = read_repository_modules(project, source["url"], branch, remaining)
+        except RepositoryBranchMissing:
+            missing = True
+            continue
+        reads.append((branch, commit, modules))
+        remaining -= {module["name"] for module in modules}
+    if missing and not reads:
+        raise RepositoryBranchMissing("Aucune des branches cherchées n’existe dans ce dépôt.")
+    return reads
+
+
+def module_sources_job(job, project, names):
+    """Cherche des modules dans les dépôts déjà utilisés par les projets, plusieurs dépôts à la fois."""
     odoo_version = project_odoo_version(project)
-    return {
-        "commit": commit,
-        "odoo_version": odoo_version,
-        "manifests_read": bool(manifests),
-        "modules": repository_module_plans(project, modules, states, odoo_version),
+    wanted = set(names)
+    # Posé dès le départ : l'interface reconnaît la recherche en cours parmi les actions du projet.
+    job.result = {"kind": "module_sources", "searched": sorted(wanted), "odoo_version": odoo_version}
+    sources = module_search_sources(project, odoo_version)
+    if not sources:
+        raise ValueError(
+            "Aucun dépôt GitLab n’est utilisé par tes projets : importe ces modules depuis l’adresse de leur dépôt."
+        )
+    job.add(f"Recherche de {len(wanted)} module(s) dans {len(sources)} dépôt(s) déjà utilisés par tes projets…")
+    job_progress.span(f"Lecture de {len(sources)} dépôts", end=99, expected=len(sources) * 2)
+    repositories, failures, missing_branch = [], [], []
+    executor = ThreadPoolExecutor(max_workers=MODULE_SOURCE_WORKERS)
+    try:
+        futures = {executor.submit(read_source_modules, project, source, wanted): source for source in sources}
+        for done, future in enumerate(as_completed(futures), 1):
+            source = futures[future]
+            branches = ", ".join(source["branches"])
+            job_progress.measure(done, len(sources))
+            try:
+                reads = future.result()
+            except RepositoryBranchMissing:
+                missing_branch.append(source["label"])
+                job.add(f"· {source['label']} : pas de branche {branches}")
+                continue
+            except Exception as exc:
+                failures.append({"label": source["label"], "branch": branches, "error": str(exc)})
+                job.add(f"⚠ {source['label']} ({branches}) : {exc}")
+                continue
+            if not any(modules for _branch, _commit, modules in reads):
+                job.add(f"· {source['label']} ({branches}) : aucun")
+                continue
+            for branch, commit, modules in reads:
+                if not modules:
+                    continue
+                plans = repository_module_plans(project, modules, {}, odoo_version)
+                repositories.append(
+                    {
+                        "url": source["url"],
+                        "label": source["label"],
+                        "branch": branch,
+                        "in_project": source["in_project"],
+                        "commit": commit,
+                        "modules": [
+                            {field: plan.get(field, "") for field in MODULE_SOURCE_PLAN_FIELDS} for plan in plans
+                        ],
+                    }
+                )
+                job.add(f"✓ {source['label']} ({branch}) : {', '.join(sorted({plan['name'] for plan in plans}))}")
+    finally:
+        # Un arrêt demandé n'attend pas les lectures en cours : leurs dossiers temporaires se nettoient seuls.
+        executor.shutdown(wait=False, cancel_futures=True)
+    if failures and len(failures) == len(sources):
+        # Même refus partout (clé SSH, réseau) : une seule erreur claire plutôt qu'un dépôt après l'autre.
+        raise RuntimeError(failures[0]["error"])
+    found = {module["name"] for repository in repositories for module in repository["modules"]}
+    job.result = {
+        **job.result,
+        "repositories": sorted(
+            repositories, key=lambda repository: (repository["label"].casefold(), repository["branch"])
+        ),
+        "failures": sorted(failures, key=lambda failure: failure["label"].casefold()),
+        "missing_branch": sorted(missing_branch, key=str.casefold),
+        "scanned": len(sources),
     }
+    job.add(f"{len(found)} module(s) sur {len(wanted)} trouvés dans {len(repositories)} dépôt(s).")
 
 
 def repository_modules_job(job, project, url, branch, names, commit=""):
@@ -7786,6 +7934,19 @@ def repository_modules_action(payload):
     )
 
 
+def module_sources_action(payload):
+    project = payload_project(payload)
+    names = module_name_list(str(payload.get("modules") or "").strip())
+    # Lecture seule : la recherche ne bloque ni le démarrage du projet ni ses autres actions.
+    return unfinished_job(module_sources_job, project) or Job(
+        f"Chercher des modules dans tes dépôts · {project}",
+        module_sources_job,
+        (project, names),
+        project=project,
+        resources=(),
+    )
+
+
 def switch_repository_branch_action(payload):
     project = payload_project(payload)
     branch = validate_git_ref(payload.get("branch"))
@@ -8039,6 +8200,7 @@ def link_modules_action(payload):
 
 JOB_ACTIONS = {
     "repository_modules": repository_modules_action,
+    "module_sources": module_sources_action,
     "restore_module_source": restore_module_source_action,
     "switch_repository_branch": switch_repository_branch_action,
     "start_project": project_job("Démarrer {project}", start_project_job),

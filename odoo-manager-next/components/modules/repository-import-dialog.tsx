@@ -562,7 +562,11 @@ function WantedModulesSummary({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p>
           <span className="font-medium">
-            {total > 1 ? `${found} des ${total} modules manquants` : "Le module manquant"}
+            {total === 1
+              ? "Le module manquant"
+              : found === total
+                ? `Les ${total} modules manquants`
+                : `${found} des ${total} modules manquants`}
           </span>{" "}
           {found > 1 ? "sont" : "est"} dans ce dépôt.{" "}
           {importable > 0 &&

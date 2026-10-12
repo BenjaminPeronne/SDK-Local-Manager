@@ -36,6 +36,7 @@ import {
   sendSystemNotification,
 } from "@/lib/desktop-runtime";
 import { isJobActive, isJobUnfinished, PROJECT_ARRIVAL_PREFIXES } from "@/lib/jobs";
+import { latestModuleSourcesJob, type ModuleSourceGroup } from "@/lib/module-sources";
 import { moduleRepositoryUrlError, socleAppInstalled } from "@/lib/modules";
 import { noticeSnoozed } from "@/lib/notice-snooze";
 import { fallbackManagerSettings, firstOdooDatabase } from "@/lib/projects";
@@ -185,6 +186,7 @@ export default function Home() {
   const [desktopRuntime, setDesktopRuntime] = useState(false);
   const [repositoryOpen, setRepositoryOpen] = useState(false);
   const [repositoryWantedModules, setRepositoryWantedModules] = useState<string[]>([]);
+  const [importingModuleSources, setImportingModuleSources] = useState(false);
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [repositoryBranch, setRepositoryBranch] = useState("");
   const [gitlabStatus, setGitlabStatus] = useState<GitLabStatus | null>(null);
@@ -737,7 +739,7 @@ export default function Home() {
   }, [refreshModules]);
 
   async function createJob(action: string, payload: Record<string, unknown> = {}) {
-    const useGlobalLoading = action !== "repository_modules";
+    const useGlobalLoading = action !== "repository_modules" && action !== "module_sources";
     if (useGlobalLoading) setLoading(true);
     void requestTaskNotificationPermission().catch(() => {
       // The in-app completion toast remains available if system notifications are refused.
@@ -794,6 +796,32 @@ export default function Home() {
   function openRepositoryImport(wantedModules: string[] = []) {
     setRepositoryWantedModules(wantedModules);
     setRepositoryOpen(true);
+  }
+
+  /** Un import par dépôt trouvé : les actions d'un même projet s'enchaînent, chacune tout ou rien. */
+  async function importModuleSources(groups: ModuleSourceGroup[]) {
+    if (!selectedProject || importingModuleSources) return;
+    setImportingModuleSources(true);
+    try {
+      let created = 0;
+      for (const group of groups) {
+        const job = await createJob("repository_modules", {
+          project: selectedProject.name,
+          url: group.repository.url,
+          branch: group.repository.branch,
+          modules: group.modules.map((module) => module.name).join(","),
+          // Le serveur refuse l'import si la branche a bougé depuis la recherche.
+          commit: group.repository.commit,
+        });
+        if (job) created += 1;
+      }
+      if (created) {
+        setDependenciesOpen(false);
+        setActiveTab("logs");
+      }
+    } finally {
+      setImportingModuleSources(false);
+    }
   }
 
   function openZipImport() {
@@ -1367,6 +1395,10 @@ export default function Home() {
     return () => window.removeEventListener("keydown", backToWelcomeOnEscape);
   }, [selectedModules, selectedProject, selectedProjectOnline, showWelcome]);
   const canUseDb = Boolean(selectedDb && odooDatabases.includes(selectedDb));
+  const moduleSourcesJob = useMemo(
+    () => latestModuleSourcesJob(jobs, selectedProject?.name),
+    [jobs, selectedProject?.name],
+  );
   const lastRepositoryImportId = useMemo(
     () =>
       Math.max(
@@ -2126,6 +2158,19 @@ export default function Home() {
           } catch {
             pushToast("error", "Copie impossible dans le presse-papiers.");
           }
+        }}
+        sourcesJob={moduleSourcesJob}
+        importingSources={importingModuleSources}
+        onSearchSources={(missing) => {
+          if (selectedProject)
+            void createJob("module_sources", { project: selectedProject.name, modules: missing.join(",") });
+        }}
+        onImportSources={(groups) => void importModuleSources(groups)}
+        onReviewSource={(group) => {
+          setDependenciesOpen(false);
+          setRepositoryUrl(group.repository.url);
+          setRepositoryBranch(group.repository.branch);
+          openRepositoryImport(group.modules.map((module) => module.name));
         }}
       />
 

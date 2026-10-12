@@ -364,6 +364,34 @@ export type RepositoryModule = {
   replaces?: string;
 };
 
+/** Module retrouvé par la recherche dans les dépôts des projets, avec l'action prévue à l'import. */
+export type ModuleSourcePlan = Pick<
+  RepositoryModule,
+  "name" | "path" | "title" | "version" | "action" | "reason" | "warning" | "replaces"
+>;
+
+export type ModuleSourceRepository = {
+  url: string;
+  /** Adresse courte : gitlab.sudokeys.com/OCA/edi. */
+  label: string;
+  branch: string;
+  /** Dépôt déjà utilisé par le projet. */
+  in_project: boolean;
+  commit: string;
+  modules: ModuleSourcePlan[];
+};
+
+/** Résultat de l'action module_sources ; seuls kind, searched et odoo_version existent pendant la recherche. */
+export type ModuleSourcesResult = {
+  kind: "module_sources";
+  searched: string[];
+  odoo_version: string;
+  repositories?: ModuleSourceRepository[];
+  failures?: { label: string; branch: string; error: string }[];
+  missing_branch?: string[];
+  scanned?: number;
+};
+
 export type RepositoryInspection =
   | { status: "idle" }
   | { status: "loading"; key: string }

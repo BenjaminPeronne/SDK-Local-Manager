@@ -3,6 +3,7 @@
 import posixpath
 import re
 
+from odoo_manager_core.git_checkouts import remote_label
 from odoo_manager_core.manifests import MANIFEST_FILENAMES
 
 REPOSITORY_SKIPPED_DIRS = frozenset({".git", "__pycache__", "node_modules"})
@@ -103,6 +104,52 @@ def repository_tree_modules(tree_output, repository_name):
     return [(path, name, manifest_files.get(path, MANIFEST_FILENAMES[0])) for path, name in found.items()], symlinks
 
 
+class RepositoryBranchMissing(RuntimeError):
+    """La branche ou le tag demandé n'existe pas dans le dépôt."""
+
+
+# Branches lues au plus par dépôt : chacune ne sert qu'aux modules absents des précédentes.
+MAX_SEARCH_BRANCHES = 3
+
+
+def repository_search_sources(entries, project, odoo_version):
+    """Dépôts où chercher les modules manquants d'un projet, avec les branches à lire dans l'ordre.
+
+    `entries` : (projet, version Odoo du projet, URL, branche) de chaque dépôt rangé ou importé dans
+    les projets. Viennent la branche que le projet utilise déjà, puis celle qui porte le nom de la
+    version (branche stable des dépôts OCA), puis celles des autres projets de la même version, les
+    plus utilisées d'abord : une branche de travail ne fournit ainsi que ce que la branche stable n'a
+    pas. Les dépôts du projet passent en tête.
+    """
+    sources = {}
+    for entry_project, entry_version, url, branch in entries:
+        label = remote_label(url)
+        if not label:
+            continue
+        source = sources.setdefault(
+            label.casefold(), {"url": url, "label": label, "own": "", "same": {}, "mine": False}
+        )
+        if entry_project == project:
+            source["mine"] = True
+            source["own"] = source["own"] or branch
+        if branch and odoo_version and entry_version == odoo_version:
+            source["same"][branch] = source["same"].get(branch, 0) + 1
+    result = []
+    for source in sources.values():
+        others = sorted(source["same"], key=lambda name: (-source["same"][name], natural_key(name)))
+        branches = list(dict.fromkeys(name for name in (source["own"], odoo_version, *others) if name))
+        if branches:
+            result.append(
+                {
+                    "url": source["url"],
+                    "label": source["label"],
+                    "branches": branches[:MAX_SEARCH_BRANCHES],
+                    "in_project": source["mine"],
+                }
+            )
+    return sorted(result, key=lambda source: (not source["in_project"], source["label"].casefold()))
+
+
 def repository_clone_error(stderr):
     details = str(stderr or "").casefold()
     if any(
@@ -123,7 +170,7 @@ def repository_clone_error(stderr):
             "not found in upstream origin",
         )
     ):
-        return RuntimeError("La branche ou le tag demandé est introuvable dans ce dépôt.")
+        return RepositoryBranchMissing("La branche ou le tag demandé est introuvable dans ce dépôt.")
     if any(
         marker in details
         for marker in ("could not resolve hostname", "failed to connect", "connection timed out", "connection refused")
