@@ -97,7 +97,27 @@ class RestoreSqlTests(unittest.TestCase):
         self.assertIn("SET value = 'new-uuid'", sql)
         self.assertIn("'new''secret'", sql)
         self.assertIn("'2026-10-05 21:00:00'", sql)
+        self.assertIn("WHERE NOT EXISTS (SELECT 1 FROM ir_config_parameter WHERE key = 'database.uuid')", sql)
+        self.assertNotIn("web.base.url", sql)
+
+    def test_restored_database_links_point_to_the_project_address(self):
+        sql = database_restore.restored_urls_sql("http://dev.client.localhost")
+
+        self.assertIn("SET value = 'http://dev.client.localhost'", sql)
         self.assertIn("WHERE NOT EXISTS (SELECT 1 FROM ir_config_parameter WHERE key = 'web.base.url')", sql)
+        # report.url n'est corrigé que s'il existe : sans lui, Odoo prend web.base.url.
+        self.assertIn("SET value = 'http://127.0.0.1:8069'", sql)
+        self.assertNotIn("SELECT 'report.url'", sql)
+
+    def test_local_urls_only_replace_unreachable_addresses(self):
+        sql = database_restore.local_urls_sql("http://dev.client_v19.localhost:8080")
+
+        self.assertIn("SET value = 'http://dev.client_v19.localhost:8080'", sql)
+        self.assertIn("'http://localhost:8069', 'http://localhost:8069/', 'http://127.0.0.1:8069'", sql)
+        self.assertIn(r"value ~* '^https?://dev\.client_v19\.localhost(:[0-9]+)?/?$'", sql)
+        self.assertIn("to_regclass('public.ir_config_parameter') IS NULL", sql)
+        self.assertIn("value !~ ':8069/?$'", sql)
+        self.assertTrue(sql.rstrip().endswith("FROM sdk_local_urls ORDER BY key;"))
 
     def test_empty_database_matches_odoo_and_quotes_names(self):
         self.assertEqual(

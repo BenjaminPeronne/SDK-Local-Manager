@@ -3763,6 +3763,55 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
             # Un projet doit démarrer même avec les réglages d'origine de PostgreSQL.
             self.log(log, f"Réglages PostgreSQL non appliqués : {exc}")
         self.trust_pgvector_extension(project, log=log)
+        self.align_database_urls(project, log=log)
+
+    def align_database_urls(self, project, log=None):
+        """Fait pointer les liens des bases (e-mails, portail, PDF) vers l'adresse locale du projet.
+
+        Les bases restaurées par les versions précédentes gardent http://localhost:8069, injoignable :
+        l'invitation au portail menait nulle part. Toutes les bases sont vues en une seule commande,
+        avant le démarrage d'Odoo qui garde ces paramètres en mémoire. Ne fait jamais échouer le démarrage.
+        """
+        base_url = self.project_url(project).rstrip("/")
+        try:
+            names = self._postgres_lines(
+                project,
+                "postgres",
+                "select datname from pg_database where not datistemplate and datname <> 'postgres' order by datname;",
+            )
+            if not names:
+                return
+            sql = database_restore.local_urls_sql(base_url)
+            arguments = []
+            for name in names:
+                arguments += ["-c", f"\\connect {database_restore.sql_identifier(name)}", "-c", sql]
+            code, output = self.capture(
+                self.docker(
+                    "exec",
+                    f"postgresql-{project}",
+                    "psql",
+                    "-X",
+                    "-q",
+                    "-At",
+                    "-U",
+                    "postgres",
+                    "-d",
+                    "postgres",
+                    *arguments,
+                ),
+                timeout=60,
+            )
+        except (OSError, RuntimeError) as exc:
+            self.log(log, f"Liens des bases non vérifiés : {exc}")
+            return
+        if code != 0:
+            self.log(log, f"Liens des bases non vérifiés : {output.strip()[-300:]}")
+            return
+        fixed = sorted(
+            {line.split("|", 1)[0] for line in output.splitlines() if "|" in line and line.split("|", 1)[0] in names}
+        )
+        for name in fixed:
+            self.log(log, f"Liens de la base {name} (e-mails, portail, PDF) dirigés vers {base_url}")
 
     def start_project(self, project, log=None):
         self.start_project_containers(project, log=log)

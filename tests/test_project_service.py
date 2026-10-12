@@ -1982,6 +1982,46 @@ class ProjectServiceTests(unittest.TestCase):
 
         self.assertTrue(any("No such container" in line for line in logs))
 
+    def test_database_links_are_aligned_in_every_database_with_one_command(self):
+        commands = []
+
+        def capture(command, cwd=None, timeout=10):
+            command = list(command)
+            commands.append(command)
+            if "port" in command:
+                return 1, ""
+            if "-Atc" in command:
+                return 0, "client_a\nclient_b"
+            return 0, "client_a|report.url\nclient_a|web.base.url\nintrus|web.base.url"
+
+        logs = []
+        with patch.object(self.service, "capture", side_effect=capture):
+            self.service.align_database_urls("DEMO", log=logs.append)
+
+        align = commands[-1]
+        self.assertEqual(['\\connect "client_a"', '\\connect "client_b"'], [arg for arg in align if "connect" in arg])
+        self.assertEqual(4, align.count("-c"))
+        self.assertIn("http://dev.DEMO.localhost", align[-1])
+        self.assertEqual(
+            ["Liens de la base client_a (e-mails, portail, PDF) dirigés vers http://dev.DEMO.localhost"], logs
+        )
+
+    def test_database_links_check_never_blocks_the_start(self):
+        for listing, align in (((1, "connection refused"), (0, "")), ((0, "client_a"), (1, "psql: erreur"))):
+            with self.subTest(listing=listing, align=align):
+
+                def capture(command, cwd=None, timeout=10, listing=listing, align=align):
+                    command = list(command)
+                    if "psql" not in command:
+                        return 1, ""
+                    return listing if "-Atc" in command else align
+
+                logs = []
+                with patch.object(self.service, "capture", side_effect=capture):
+                    self.service.align_database_urls("DEMO", log=logs.append)
+                self.assertEqual(1, len(logs))
+                self.assertTrue(logs[0].startswith("Liens des bases non vérifiés"))
+
     def test_orphan_report_expressions_of_the_module_are_deleted_through_the_postgres_role(self):
         def capture(command, cwd=None, timeout=10):
             self.runner.captures.append((list(command), cwd, timeout))
@@ -2101,10 +2141,12 @@ class OdooStartupRepairTests(unittest.TestCase):
             patch.object(self.service, "wait_for_odoo_container_initialization"),
             patch.object(self.service, "tune_postgres"),
             patch.object(self.service, "trust_pgvector_extension") as trust,
+            patch.object(self.service, "align_database_urls") as align,
         ):
             self.service.start_project_containers("DEMO", log=lambda _line: None)
 
         trust.assert_called_once_with("DEMO", log=ANY)
+        align.assert_called_once_with("DEMO", log=ANY)
         self.assertEqual(["DEMO", "DEMO"], attempts)
         self.assertTrue(any(command[-2:] == ["start", "odoo-DEMO"] for command, _cwd, _t in self.runner.captures))
         self.assertGreaterEqual(cleanup.call_count, 1)

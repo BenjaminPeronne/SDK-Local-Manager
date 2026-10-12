@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import ANY, Mock, PropertyMock, call, patch
 
 import odoo_manager_web as web
-from odoo_manager_core import command_output, job_progress, job_queue
+from odoo_manager_core import command_output, database_restore, job_progress, job_queue
 from odoo_manager_core.config import ManagerSettings
 from odoo_manager_core.http_routes import RouteRequest
 from odoo_manager_core.traefik import reset_traefik_entrypoint_cache
@@ -561,6 +561,7 @@ class DatabaseRestoreTests(unittest.TestCase):
         service.postgres_server_version.return_value = 160000
         service.load_database_dump.return_value = 0
         service.run_postgres_sql.return_value = ["361"]
+        service.project_url.return_value = "http://dev.demo.localhost/"
         return service
 
     def run_restore(self, service, neutralize=True, databases=((), ("demo_restore",))):
@@ -594,6 +595,11 @@ class DatabaseRestoreTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertFalse(backup_left)
         service.start_project_containers.assert_called_once_with("DEMO", log=job.add)
+        # Les liens des e-mails (invitation au portail) mènent au projet, pas à localhost:8069.
+        self.assertIn(
+            call("DEMO", "demo_restore", database_restore.restored_urls_sql("http://dev.demo.localhost")),
+            service.run_postgres_sql.call_args_list,
+        )
         service.stop_odoo_server.assert_called_once_with("DEMO", log=job.add)
         service.create_restore_database.assert_called_once_with("DEMO", "demo_restore", [], log=job.add)
         options = service.load_database_dump.call_args.kwargs["options"]

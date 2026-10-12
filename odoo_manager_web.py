@@ -4140,6 +4140,9 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
         if copy:
             job.add("Nouvel identifiant de base (copie)...")
             service.run_postgres_sql(project, db_name, database_restore.copy_parameters_sql())
+        base_url = service.project_url(project).rstrip("/")
+        job.add(f"Liens des e-mails et du portail dirigés vers {base_url}")
+        service.run_postgres_sql(project, db_name, database_restore.restored_urls_sql(base_url))
         if neutralize:
             # Avant qu'Odoo n'ouvre la base, même si la neutralisation complète échoue ensuite.
             job.add("Désactivation des crons métier et des serveurs de messagerie...")

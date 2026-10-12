@@ -152,17 +152,8 @@ def restore_session_options(server_version_num, memory_bytes=0, cpus=0):
     return " ".join(f"-c {name}={value}" for name, value in options)
 
 
-def copy_parameters_sql(now=None, database_uuid=None, database_secret=None):
-    """SQL qui donne à la base restaurée l'identité d'une copie, comme le fait Odoo."""
-    now = now or datetime.now(UTC).replace(tzinfo=None)
-    values = {
-        "database.secret": str(database_secret or uuid.uuid4()),
-        "database.uuid": str(database_uuid or uuid.uuid1()),
-        "database.create_date": now.strftime("%Y-%m-%d %H:%M:%S"),
-        "web.base.url": "http://localhost:8069",
-        "base.login_cooldown_after": "10",
-        "base.login_cooldown_duration": "60",
-    }
+def parameters_sql(values):
+    """SQL qui écrit chaque paramètre système (ir_config_parameter), créé s'il manque."""
     statements = []
     for key, value in values.items():
         key_literal = sql_literal(key)
@@ -177,6 +168,79 @@ def copy_parameters_sql(now=None, database_uuid=None, database_secret=None):
             f"WHERE NOT EXISTS (SELECT 1 FROM ir_config_parameter WHERE key = {key_literal});"
         )
     return "\n".join(statements)
+
+
+def copy_parameters_sql(now=None, database_uuid=None, database_secret=None):
+    """SQL qui donne à la base restaurée l'identité d'une copie, comme le fait Odoo."""
+    now = now or datetime.now(UTC).replace(tzinfo=None)
+    return parameters_sql(
+        {
+            "database.secret": str(database_secret or uuid.uuid4()),
+            "database.uuid": str(database_uuid or uuid.uuid1()),
+            "database.create_date": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "base.login_cooldown_after": "10",
+            "base.login_cooldown_duration": "60",
+        }
+    )
+
+
+# Adresse par défaut d'Odoo, injoignable ici : les projets ne sont servis que par Traefik.
+ODOO_DEFAULT_BASE_URLS = ("http://localhost:8069", "http://127.0.0.1:8069")
+# Dans son conteneur, Odoo écoute sur 8069 : wkhtmltopdf y lit les styles des rapports PDF.
+LOCAL_REPORT_URL = "http://127.0.0.1:8069"
+LOCAL_REPORT_URL_RE = r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?/?$"
+
+
+def restored_urls_sql(base_url):
+    """SQL qui fait pointer les liens d'une base restaurée vers ce poste.
+
+    web.base.url sert aux liens des e-mails (invitation au portail, réinitialisation du mot de
+    passe…) : celle de la production ou http://localhost:8069 mènent ailleurs ou nulle part.
+    report.url, s'il existe, vise le serveur de production : les PDF perdraient leur mise en page.
+    """
+    return (
+        parameters_sql({"web.base.url": base_url})
+        + "\n"
+        + f"UPDATE ir_config_parameter SET value = {sql_literal(LOCAL_REPORT_URL)}, write_uid = 1, "
+        "write_date = now() AT TIME ZONE 'UTC' WHERE key = 'report.url';"
+    )
+
+
+def local_urls_sql(base_url):
+    """SQL qui corrige, dans la base courante, les adresses injoignables depuis ce poste.
+
+    Ne touche que l'adresse par défaut d'Odoo ou une ancienne adresse du projet (port de Traefik
+    changé) pour web.base.url, et une adresse locale sur un autre port qu'Odoo pour report.url :
+    une adresse choisie à la main (tunnel vers un téléphone…) est gardée. Sans effet sur une base
+    qui n'est pas une base Odoo ; renvoie une ligne « base|paramètre » par valeur corrigée.
+    """
+    host = re.match(r"^https?://([^/:]+)", base_url)
+    host_pattern = "^https?://" + re.escape(host.group(1) if host else base_url) + "(:[0-9]+)?/?$"
+    defaults = ", ".join(sql_literal(url + suffix) for url in ODOO_DEFAULT_BASE_URLS for suffix in ("", "/"))
+    url = sql_literal(base_url)
+    report_url = sql_literal(LOCAL_REPORT_URL)
+    return f"""CREATE TEMP TABLE sdk_local_urls (key text);
+DO $sdk$
+BEGIN
+  IF to_regclass('public.ir_config_parameter') IS NULL THEN
+    RETURN;
+  END IF;
+  WITH changed AS (
+    UPDATE ir_config_parameter SET value = {url}, write_uid = 1, write_date = now() AT TIME ZONE 'UTC'
+    WHERE key = 'web.base.url' AND value <> {url}
+      AND (value IN ({defaults}) OR value ~* {sql_literal(host_pattern)})
+    RETURNING key
+  )
+  INSERT INTO sdk_local_urls SELECT key FROM changed;
+  WITH changed AS (
+    UPDATE ir_config_parameter SET value = {report_url}, write_uid = 1, write_date = now() AT TIME ZONE 'UTC'
+    WHERE key = 'report.url' AND value ~* {sql_literal(LOCAL_REPORT_URL_RE)} AND value !~ ':8069/?$'
+    RETURNING key
+  )
+  INSERT INTO sdk_local_urls SELECT key FROM changed;
+END
+$sdk$;
+SELECT current_database() || '|' || key FROM sdk_local_urls ORDER BY key;"""
 
 
 def sql_literal(value):
