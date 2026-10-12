@@ -8,8 +8,9 @@ import type { DependencyReport } from "@/lib/types";
  * Dépendances manquantes de la base sélectionnée, relues à chaque changement de base.
  *
  * Une erreur de lecture (PostgreSQL arrêté) ne remonte pas en alerte : le rapport reste vide.
+ * Un changement de `revision` (dernier import terminé) relit aussi le rapport.
  */
-export function useDatabaseDependencies(project: string | undefined, db: string, enabled: boolean) {
+export function useDatabaseDependencies(project: string | undefined, db: string, enabled: boolean, revision = 0) {
   const [report, setReport] = useState<DependencyReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -35,7 +36,7 @@ export function useDatabaseDependencies(project: string | undefined, db: string,
   useEffect(() => {
     const timer = window.setTimeout(() => void refresh(), 0);
     return () => window.clearTimeout(timer);
-  }, [refresh]);
+  }, [refresh, revision]);
 
   // Le rapport d'une autre base n'est jamais affiché pour la base courante.
   const current = report && report.project === project && report.db === db ? report : null;

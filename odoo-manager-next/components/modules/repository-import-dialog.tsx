@@ -5,6 +5,7 @@ import { ChevronDown, CloudDownload, KeyRound, Loader2, RefreshCcw, Search, X } 
 import { api } from "@/lib/api";
 import type { GitLabStatus } from "@/lib/desktop";
 import { normalizeSearchText } from "@/lib/format";
+import { matchWantedModules } from "@/lib/module-repositories";
 import type { Job, Project, RepositoryInspection, RepositoryModule } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,8 @@ type RepositoryImportDialogProps = {
   setGitlabStatus: Dispatch<SetStateAction<GitLabStatus | null>>;
   setRepositoryBranch: Dispatch<SetStateAction<string>>;
   setRepositoryUrl: Dispatch<SetStateAction<string>>;
+  /** Modules manquants de la base : cochés d'office quand le dépôt les contient. */
+  wantedModules: string[];
 };
 
 export function RepositoryImportDialog({
@@ -64,6 +67,7 @@ export function RepositoryImportDialog({
   setGitlabStatus,
   setRepositoryBranch,
   setRepositoryUrl,
+  wantedModules,
 }: RepositoryImportDialogProps) {
   const [repositorySubmitting, setRepositorySubmitting] = useState(false);
   const [repositoryInspection, setRepositoryInspection] = useState<RepositoryInspection>({ status: "idle" });
@@ -71,6 +75,7 @@ export function RepositoryImportDialog({
   const [repositoryFilter, setRepositoryFilter] = useState("");
   const [repositoryInspectionAttempt, setRepositoryInspectionAttempt] = useState(0);
   const [repositorySource, setRepositorySource] = useState<RepositorySource>("ssh");
+  const [onlyWanted, setOnlyWanted] = useState(true);
   async function submitRepositoryModules() {
     if (!selectedProject || repositorySubmitting) return;
     setRepositorySubmitting(true);
@@ -165,19 +170,34 @@ export function RepositoryImportDialog({
       </label>
     );
   }
+  const wantedMatch = useMemo(
+    () =>
+      repositoryInspection.status === "ready" && wantedModules.length
+        ? matchWantedModules(repositoryInspection.modules, wantedModules)
+        : null,
+    [repositoryInspection, wantedModules],
+  );
+  const wantedFound = wantedMatch ? wantedMatch.importable.length + wantedMatch.blocked.length : 0;
+  // Sans aucun module manquant dans ce dépôt, le filtre viderait la liste : tout reste affiché.
+  const repositoryBaseModules = useMemo(() => {
+    if (!wantedMatch || !onlyWanted || !wantedFound) return repositoryReadyModules;
+    const names = new Set([...wantedMatch.importable, ...wantedMatch.blocked]);
+    return repositoryReadyModules.filter((module) => names.has(module.name));
+  }, [onlyWanted, repositoryReadyModules, wantedFound, wantedMatch]);
   const repositoryVisibleModules = useMemo(() => {
     const query = normalizeSearchText(repositoryFilter.trim());
     return query
-      ? repositoryReadyModules.filter((module) =>
+      ? repositoryBaseModules.filter((module) =>
           normalizeSearchText(`${module.name} ${module.title} ${module.path}`).includes(query),
         )
-      : repositoryReadyModules;
-  }, [repositoryFilter, repositoryReadyModules]);
+      : repositoryBaseModules;
+  }, [repositoryFilter, repositoryBaseModules]);
   const repositoryVisibleSelectable = repositoryVisibleModules.filter((module) => module.action !== "blocked");
   const repositoryVisibleBlocked = repositoryVisibleModules.filter((module) => module.action === "blocked");
   useEffect(() => {
     if (!open) return;
     setRepositorySource("ssh");
+    setOnlyWanted(true);
     // Proposition par défaut : la branche qui porte le nom de la version Odoo du projet.
     setRepositoryBranch((current) => current || selectedProject?.odoo_version || "");
     // Compte GitLab connecté : la recherche remplace la saisie d'une URL.
@@ -224,7 +244,7 @@ export function RepositoryImportDialog({
             odooVersion: result.odoo_version,
             manifestsRead: result.manifests_read,
           });
-          setRepositorySelection(new Set());
+          setRepositorySelection(new Set(matchWantedModules(result.modules, wantedModules).importable));
         })
         .catch((err) => {
           if (!cancelled) {
@@ -362,6 +382,14 @@ export function RepositoryImportDialog({
                     Versions illisibles pour ce dépôt : la compatibilité Odoo sera vérifiée pendant l’import.
                   </p>
                 )}
+                {wantedMatch && (
+                  <WantedModulesSummary
+                    match={wantedMatch}
+                    total={wantedMatch.importable.length + wantedMatch.blocked.length + wantedMatch.absent.length}
+                    onlyWanted={onlyWanted}
+                    onToggle={() => setOnlyWanted((current) => !current)}
+                  />
+                )}
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="relative min-w-48 flex-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -369,7 +397,7 @@ export function RepositoryImportDialog({
                       className="pl-9"
                       value={repositoryFilter}
                       onChange={(event) => setRepositoryFilter(event.target.value)}
-                      placeholder={`Filtrer les ${repositoryReadyModules.length} modules`}
+                      placeholder={`Filtrer les ${repositoryBaseModules.length} modules`}
                       aria-label="Filtrer les modules du dépôt"
                     />
                   </div>
@@ -439,7 +467,7 @@ export function RepositoryImportDialog({
                   </>
                 ) : (
                   <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-                    {repositoryReadyModules.length
+                    {repositoryBaseModules.length
                       ? "Aucun module ne correspond au filtre."
                       : "Aucun module Odoo trouvé dans ce dépôt."}
                   </p>
@@ -497,5 +525,70 @@ export function RepositoryImportDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Début de phrase : « Ils » ou « Il » quand le compte couvre tous les modules trouvés, sinon le nombre. */
+function countLead(count: number, found: number) {
+  if (count < found) return String(count);
+  return count > 1 ? "Ils" : "Il";
+}
+
+function WantedModulesSummary({
+  match,
+  total,
+  onlyWanted,
+  onToggle,
+}: {
+  match: ReturnType<typeof matchWantedModules>;
+  total: number;
+  onlyWanted: boolean;
+  onToggle: () => void;
+}) {
+  const found = match.importable.length + match.blocked.length;
+  if (!found) {
+    return (
+      <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+        {total > 1
+          ? `Aucun des ${total} modules manquants n’est dans ce dépôt. Essaie un autre dépôt ou une autre branche.`
+          : "Le module manquant n’est pas dans ce dépôt. Essaie un autre dépôt ou une autre branche."}
+      </p>
+    );
+  }
+  const importable = match.importable.length;
+  const blocked = match.blocked.length;
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p>
+          <span className="font-medium">
+            {total > 1 ? `${found} des ${total} modules manquants` : "Le module manquant"}
+          </span>{" "}
+          {found > 1 ? "sont" : "est"} dans ce dépôt.{" "}
+          {importable > 0 &&
+            `${countLead(importable, found)} ${importable > 1 ? "sont déjà cochés" : "est déjà coché"}. `}
+          {blocked > 0 &&
+            `${countLead(blocked, found)} ${blocked > 1 ? "ne peuvent pas être importés" : "ne peut pas être importé"} : la raison est indiquée sur ${blocked > 1 ? "leur" : "sa"} ligne.`}
+        </p>
+        <Button type="button" size="sm" variant="outline" onClick={onToggle}>
+          {onlyWanted ? "Voir tous les modules" : "Seulement les manquants"}
+        </Button>
+      </div>
+      {match.absent.length > 0 && (
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+            Pas dans ce dépôt ({match.absent.length}) : à chercher dans un autre dépôt
+            <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
+          </summary>
+          <span className="mt-2 flex flex-wrap gap-1">
+            {match.absent.map((name) => (
+              <span key={name} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                {name}
+              </span>
+            ))}
+          </span>
+        </details>
+      )}
+    </div>
   );
 }

@@ -62,7 +62,7 @@ export function DependenciesDialog({
   loading: boolean;
   error: string;
   onRefresh: () => void;
-  onImportRepository: () => void;
+  onImportRepository: (missing: string[]) => void;
   onCopy: (text: string) => void;
 }) {
   const missingNames = report?.missing.map((module) => module.name) ?? [];
@@ -184,7 +184,7 @@ export function DependenciesDialog({
                 <Copy className="h-4 w-4" />
                 Copier la liste
               </Button>
-              <Button onClick={onImportRepository}>
+              <Button onClick={() => onImportRepository(missingNames)}>
                 <GitBranch className="h-4 w-4" />
                 Importer depuis un dépôt Git
               </Button>

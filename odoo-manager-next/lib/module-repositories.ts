@@ -1,4 +1,4 @@
-import type { ModuleInfo, ModuleRepository } from "./types";
+import type { ModuleInfo, ModuleRepository, RepositoryModule } from "./types";
 
 /** Groupe de la vue par dépôt ; `repository` est absent pour les modules sans dépôt connu. */
 export type ModuleRepositoryGroup = {
@@ -85,4 +85,23 @@ export type RemoteBranch = { name: string; default: boolean };
 export function filterBranches(branches: RemoteBranch[], search: string) {
   const query = search.trim().toLocaleLowerCase();
   return query ? branches.filter((branch) => branch.name.toLocaleLowerCase().includes(query)) : branches;
+}
+
+/**
+ * Modules manquants de la base retrouvés dans un dépôt, par nom exact (le nom d'un module Odoo est
+ * celui de son dossier) : importables, présents mais non importables, ou absents du dépôt.
+ */
+export function matchWantedModules(modules: RepositoryModule[], wanted: string[]) {
+  const actions = new Map<string, RepositoryModule["action"][]>();
+  for (const item of modules) actions.set(item.name, [...(actions.get(item.name) ?? []), item.action]);
+  const importable: string[] = [];
+  const blocked: string[] = [];
+  const absent: string[] = [];
+  for (const name of new Set(wanted)) {
+    const found = actions.get(name);
+    if (!found) absent.push(name);
+    else if (found.some((action) => action !== "blocked")) importable.push(name);
+    else blocked.push(name);
+  }
+  return { importable, blocked, absent };
 }

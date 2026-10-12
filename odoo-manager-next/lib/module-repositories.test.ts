@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import {
   filterBranches,
   groupModulesByRepository,
+  matchWantedModules,
   NO_REPOSITORY_GROUP,
   repositoryBranchSwitchable,
   repositoryRevision,
   sharedReplacedRepository,
 } from "./module-repositories.ts";
-import type { ModuleInfo, ModuleRepository } from "./types.ts";
+import type { ModuleInfo, ModuleRepository, RepositoryModule } from "./types.ts";
 
 function repository(id: string, values: Partial<ModuleRepository> = {}): ModuleRepository {
   return {
@@ -97,4 +98,48 @@ test("branch search ignores case and keeps the server order", () => {
     ["TI20914-fix", "ti20915"],
   );
   assert.equal(filterBranches(branches, "").length, 3);
+});
+
+function repositoryModule(name: string, action: RepositoryModule["action"], path = name): RepositoryModule {
+  return {
+    name,
+    path,
+    title: name,
+    version: "",
+    current_version: "",
+    installed_version: "",
+    state: "",
+    action,
+    reason: "",
+    warning: "",
+  };
+}
+
+test("matchWantedModules sépare les modules manquants importables, bloqués et absents du dépôt", () => {
+  const modules = [
+    repositoryModule("account_payment_mode", "add"),
+    repositoryModule("account_payment_partner", "update"),
+    repositoryModule("account_banking_pain_base", "blocked"),
+    repositoryModule("unrelated", "add"),
+  ];
+  assert.deepEqual(
+    matchWantedModules(modules, [
+      "account_payment_mode",
+      "account_banking_pain_base",
+      "account_payment_partner",
+      "account_invoice_facturx",
+      "account_payment_mode",
+    ]),
+    {
+      importable: ["account_payment_mode", "account_payment_partner"],
+      blocked: ["account_banking_pain_base"],
+      absent: ["account_invoice_facturx"],
+    },
+  );
+});
+
+test("matchWantedModules retient un nom présent deux fois dès qu'une copie est importable", () => {
+  const modules = [repositoryModule("base_rest", "blocked", "old/base_rest"), repositoryModule("base_rest", "add")];
+  assert.deepEqual(matchWantedModules(modules, ["base_rest"]), { importable: ["base_rest"], blocked: [], absent: [] });
+  assert.deepEqual(matchWantedModules([], []), { importable: [], blocked: [], absent: [] });
 });

@@ -184,6 +184,7 @@ export default function Home() {
   const [openingPostgresql, setOpeningPostgresql] = useState(false);
   const [desktopRuntime, setDesktopRuntime] = useState(false);
   const [repositoryOpen, setRepositoryOpen] = useState(false);
+  const [repositoryWantedModules, setRepositoryWantedModules] = useState<string[]>([]);
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [repositoryBranch, setRepositoryBranch] = useState("");
   const [gitlabStatus, setGitlabStatus] = useState<GitLabStatus | null>(null);
@@ -790,7 +791,8 @@ export default function Home() {
     void loadSocleCatalog();
   }
 
-  function openRepositoryImport() {
+  function openRepositoryImport(wantedModules: string[] = []) {
+    setRepositoryWantedModules(wantedModules);
     setRepositoryOpen(true);
   }
 
@@ -1365,10 +1367,27 @@ export default function Home() {
     return () => window.removeEventListener("keydown", backToWelcomeOnEscape);
   }, [selectedModules, selectedProject, selectedProjectOnline, showWelcome]);
   const canUseDb = Boolean(selectedDb && odooDatabases.includes(selectedDb));
+  const lastRepositoryImportId = useMemo(
+    () =>
+      Math.max(
+        0,
+        ...jobs
+          .filter(
+            (job) =>
+              job.project === selectedProject?.name &&
+              job.status === "done" &&
+              job.result?.kind === "repository_modules",
+          )
+          .map((job) => job.id),
+      ),
+    [jobs, selectedProject?.name],
+  );
+  // Les modules importés depuis Git sortent de la liste des manquants sans actualisation manuelle.
   const databaseDependencies = useDatabaseDependencies(
     selectedProject?.name,
     selectedDb,
     canUseDb && selectedProject?.postgres_status === "running",
+    lastRepositoryImportId,
   );
 
   useEffect(() => {
@@ -1793,7 +1812,7 @@ export default function Home() {
                       moduleRepositories={moduleRepositories}
                       moduleSelectionBlock={moduleSelectionBlock}
                       odooDatabases={odooDatabases}
-                      openRepositoryImport={openRepositoryImport}
+                      openRepositoryImport={() => openRepositoryImport()}
                       openUrl={openUrl}
                       openSocleDialog={openSocleDialog}
                       openZipImport={openZipImport}
@@ -2033,6 +2052,7 @@ export default function Home() {
         setGitlabStatus={setGitlabStatus}
         setRepositoryBranch={setRepositoryBranch}
         setRepositoryUrl={setRepositoryUrl}
+        wantedModules={repositoryWantedModules}
       />
 
       <ZipImportDialog
@@ -2095,9 +2115,9 @@ export default function Home() {
         loading={databaseDependencies.loading}
         error={databaseDependencies.error}
         onRefresh={() => void databaseDependencies.refresh()}
-        onImportRepository={() => {
+        onImportRepository={(missing) => {
           setDependenciesOpen(false);
-          openRepositoryImport();
+          openRepositoryImport(missing);
         }}
         onCopy={async (text) => {
           try {
