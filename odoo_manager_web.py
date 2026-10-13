@@ -6226,12 +6226,18 @@ def repository_module_plans(project, modules, states, odoo_version):
 
         storage = storage_parent / name
         link_state, link_value = link_states[name]
+        current = None
         if link_state == "matching" and managed_module_copy_ready(project, name, storage):
-            plan["action"] = "update"
-            plan["current_version"] = str(read_manifest_dict(storage).get("version") or "")
-            current_key, new_key = manifest_version_key(plan["current_version"]), manifest_version_key(version)
-            if current_key and new_key and new_key < current_key:
-                plan["warning"] = f"Version plus ancienne que celle du projet ({plan['current_version']})."
+            current = storage
+        elif link_state == "other":
+            local = link_parent / name
+            if safe_path_exists(storage) or storage.is_symlink() or not local_module_copy(local):
+                plan["reason"] = "Un dossier non géré occupe odoo/addons."
+            else:
+                # Copie posée à la main dans odoo/addons : mise de côté comme une version précédente.
+                current = local
+                plan["local_copy"] = True
+                plan["warning"] = "Remplace la copie locale du module, gardée dans les sauvegardes du projet."
         elif link_state == "different":
             original = replaced_module_path(project, link_value)
             if original is None:
@@ -6252,8 +6258,6 @@ def repository_module_plans(project, modules, states, odoo_version):
                     f"Remplace la version du dépôt {label}, qui n'est pas modifié. "
                     "« Revenir à la version du dépôt », dans la liste des modules, la rétablit."
                 )
-        elif link_state == "other":
-            plan["reason"] = "Un dossier non géré occupe odoo/addons."
         elif safe_path_exists(storage) or storage.is_symlink():
             plan["reason"] = "Présent dans addons-store sans lien géré par le manager."
         elif module_provided_by_project(project, name):
@@ -6262,7 +6266,26 @@ def repository_module_plans(project, modules, states, odoo_version):
             plan["action"] = "add"
             if plan["state"] in ACTIVE_MODULE_STATES:
                 plan["warning"] = "Installé en base mais code absent : l’import le rétablit."
+        if current is not None:
+            plan["action"] = "update"
+            plan["current_version"] = str(read_manifest_dict(current).get("version") or "")
+            current_key, new_key = manifest_version_key(plan["current_version"]), manifest_version_key(version)
+            if current_key and new_key and new_key < current_key:
+                older = f"Version plus ancienne que celle du projet ({plan['current_version']})."
+                plan["warning"] = f"{plan['warning']} {older}".strip()
     return plans
+
+
+def local_module_copy(path):
+    """Vrai pour un vrai dossier de module (pas un lien) dans odoo/addons."""
+    try:
+        return (
+            not path.is_symlink()
+            and path.is_dir()
+            and any((path / manifest).is_file() for manifest in MANIFEST_FILENAMES)
+        )
+    except OSError:
+        return False
 
 
 def inspect_repository_modules(project, url, branch, db_name=""):
@@ -6584,7 +6607,7 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
         try:
             for candidate, plan in zip(selected, plans, strict=True):
                 target, link = storage / candidate.name, links / candidate.name
-                if plan["action"] == "update":
+                if plan["action"] == "update" and not plan.get("local_copy"):
                     backups.append((target, backup_existing_module(job, project, target)))
                 # Seul ce que l'import crée est retiré en cas d'échec, jamais un dossier déjà présent.
                 if not (target.exists() or target.is_symlink()):
@@ -6592,7 +6615,8 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
                 copy_module_to_storage(job, project, candidate)
                 if plan["action"] == "add" and addon_link_status(link, target)[0] == "missing":
                     created.append(link)
-                if plan["action"] == "replace":
+                # La copie locale d'odoo/addons ou le lien vers un autre dépôt est mis de côté par le journal.
+                if plan["action"] == "replace" or plan.get("local_copy"):
                     ensure_relative_module_link(
                         job, project, candidate.name, target, replace_existing=True, journal=journal
                     )

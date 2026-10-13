@@ -220,6 +220,60 @@ class RepositoryModulesTests(ModuleLayoutTests):
         with self.assertRaisesRegex(RuntimeError, "rien à rétablir"):
             web.restore_module_source_job(DummyJob(), self.project, "alpha")
 
+    def local_copy(self, name, manifest="{'name': 'Alpha', 'version': '1.0'}"):
+        local = self.project_root / "odoo/addons" / name
+        local.mkdir()
+        if manifest:
+            (local / "__manifest__.py").write_text(manifest)
+        (local / "code.py").write_text("local")
+        return local
+
+    def test_local_copy_in_addons_is_updated_from_the_repository(self):
+        # Cas AKAAZ : modules copiés à la main dans odoo/addons, bloqués à l'import depuis leur dépôt.
+        local = self.local_copy("alpha")
+        plans = web.repository_module_plans(
+            self.project, [{"name": "alpha", "path": "alpha", "manifest": {"version": "18.0.1.0.1"}}], {}, "18.0"
+        )
+        self.assertEqual(("update", "1.0"), (plans[0]["action"], plans[0]["current_version"]))
+        self.assertIn("copie locale", plans[0]["warning"])
+
+        job = self.run_import(["alpha"])
+
+        self.assertEqual((["alpha"], []), (job.result["updated"], job.result["replaced"]))
+        self.assertEqual(Path("../addons-store/alpha"), Path(local.readlink()))
+        self.assertEqual("new", (self.storage("alpha") / "code.py").read_text())
+        backups = list((self.root / ".odoo_manager_backups/modules" / self.project).glob("*/code.py"))
+        self.assertEqual(["local"], [backup.read_text() for backup in backups])
+        self.assertNotIn("replaced_link", web.read_imported_sources(self.project)["alpha"])
+        # Le module est désormais géré : le réimport suivant est une mise à jour ordinaire.
+        self.assertEqual(["alpha"], self.run_import(["alpha"]).result["updated"])
+
+    def test_failed_import_puts_the_local_copy_back(self):
+        local = self.local_copy("alpha")
+        original = web.copy_module_to_storage
+
+        def fail_beta(job, project, candidate, **kwargs):
+            if candidate.name == "beta":
+                raise OSError("disk full")
+            return original(job, project, candidate, **kwargs)
+
+        with mock.patch.object(web, "copy_module_to_storage", side_effect=fail_beta):
+            with self.assertRaises(OSError):
+                self.run_import(["alpha", "beta"])
+        self.assertFalse(local.is_symlink())
+        self.assertEqual("local", (local / "code.py").read_text())
+        self.assertFalse(self.storage("alpha").exists())
+
+    def test_local_folder_that_is_not_a_module_stays_blocked(self):
+        self.local_copy("alpha", manifest="")
+        self.local_copy("beta", manifest="{'name': 'Beta'}")
+        (self.storage("beta") / "__manifest__.py").parent.mkdir()
+        (self.storage("beta") / "__manifest__.py").write_text("{'name': 'Beta'}")
+
+        with self.assertRaisesRegex(ValueError, "alpha : Un dossier non géré[\\s\\S]*beta : Un dossier non géré"):
+            self.run_import(["alpha", "beta"])
+        self.assertFalse((self.project_root / "odoo/addons/alpha").is_symlink())
+
     def test_whole_repository_is_restored_at_once_after_checking_every_module(self):
         links = {}
         for name in ("alpha", "beta"):
