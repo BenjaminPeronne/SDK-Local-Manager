@@ -1481,7 +1481,32 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertIn('env["ir.mail_server"].with_context(active_test=False).search(', neutralize[-1])
         self.assertIn('dummies[:1].write({"smtp_host": "mailpit", "active": True})', neutralize[-1])
         self.assertTrue(any("0 cron métier actif" in line for line in logs))
+        # Odoo 12 à 15 et les modules OCA ne coupent pas la synchronisation bancaire eux-mêmes.
+        queries = [command[-1] for command, _cwd, _timeout in self.runner.captures if "-Atc" in command]
+        self.assertTrue(any("UPDATE account_online_link SET client_id = ''duplicate''" in query for query in queries))
+        self.assertTrue(any("0 synchronisation bancaire active" in line for line in logs))
         self.assertTrue(any("Neutralisation terminée et contrôlée." in line for line in logs))
+        self.assertTrue(any("Redémarrage du serveur Odoo" in line for line in logs))
+
+    def test_neutralization_check_fails_while_a_bank_link_is_still_live(self):
+        self.runner.statuses = {
+            "odoo-DEMO": "running",
+            "postgresql-DEMO": "running",
+        }
+        self.runner.odoo_server_running = False
+        self.runner.odoo_port_ready = True
+        self.runner.database_query_outputs = {
+            "database.is_neutralized": "true|0|0",
+            "to_regclass('public.fetchmail_server')": "absent",
+            "IS NOT NULL)::int || '|'": "1|1",
+            "count(*) FROM account_online_link": "0",
+            "count(*) FROM online_bank_statement_provider": "2",
+        }
+        logs = []
+
+        with self.assertRaisesRegex(RuntimeError, "Synchronisation bancaire encore active : 2 fournisseur"):
+            self.service.run_odoo_neutralize_command("DEMO", "PROTEX_20812", log=logs.append)
+
         self.assertTrue(any("Redémarrage du serveur Odoo" in line for line in logs))
 
     def test_failed_neutralization_check_still_restarts_odoo(self):
@@ -2212,6 +2237,130 @@ class OdooStartupRepairTests(unittest.TestCase):
         with zipfile.ZipFile(buffer) as archive:
             with self.assertRaisesRegex(RuntimeError, r"avant la fin \(psql, code 2\)"):
                 self.service.load_database_dump("DEMO", "client", archive, archive.getinfo("dump.sql"))
+
+    def test_restore_database_creates_each_extension_in_the_dump_schema(self):
+        self.service.create_restore_database(
+            "DEMO", "client", {"unaccent": "unaccent_schema", "vector": ""}, log=lambda _line: None
+        )
+
+        statements = [command[-1] for command, _cwd, _timeout in self.runner.captures if "-c" in command]
+        self.assertIn('CREATE EXTENSION IF NOT EXISTS "pg_trgm";', statements)
+        self.assertIn(
+            'CREATE SCHEMA IF NOT EXISTS "unaccent_schema" AUTHORIZATION "odoo_demo"; '
+            'CREATE EXTENSION IF NOT EXISTS "unaccent" WITH SCHEMA "unaccent_schema";',
+            statements,
+        )
+        self.assertIn('CREATE EXTENSION IF NOT EXISTS "vector";', statements)
+
+    def fake_psql_sessions(self, crash_on=None):
+        """Sessions psql simulées : chaque `\\echo` répond aussitôt, comme psql après l'instruction."""
+        sessions = []
+
+        class Input:
+            def __init__(self, on_output_line):
+                self.received = []
+                self.on_output_line = on_output_line
+
+            def write(self, data):
+                text = data.decode()
+                self.received.append(text)
+                if crash_on and crash_on in text:
+                    self.on_output_line(None)
+                    return
+                for line in text.splitlines():
+                    if line.startswith("\\echo "):
+                        self.on_output_line(line.split(" ", 1)[1])
+
+            def flush(self):
+                pass
+
+        def feed(command, produce, log=None, on_error_line=None, on_output_line=None):
+            if on_output_line is None:
+                # Session qui charge les données : tout passe d'un bloc.
+                sink = io.BytesIO()
+                produce(sink)
+                sessions.append(("data", sink.getvalue().decode()))
+                return 0
+            stdin = Input(on_output_line)
+            produce(stdin)
+            sessions.append(("post-data", "".join(stdin.received)))
+            return 1 if crash_on and crash_on in "".join(stdin.received) else 0
+
+        self.runner.feed = feed
+        self.runner.database_query_outputs = {
+            "relkind = 'p'": "f",
+            "pg_relation_size": "public.res_partner|819200\npublic.res_users|8192",
+        }
+        return sessions
+
+    def load_dump_with_post_data(self, sessions=2):
+        dump = (
+            b"SET statement_timeout = 0;\n"
+            b"SELECT pg_catalog.set_config('search_path', '', false);\n"
+            b"CREATE TABLE public.res_partner (id integer, user_id integer);\n"
+            b"CREATE TABLE public.res_users (id integer);\n"
+            b"COPY public.res_partner (id, user_id) FROM stdin;\n1\t1\n\\.\n"
+            b"ALTER TABLE ONLY public.res_partner\n    ADD CONSTRAINT res_partner_pkey PRIMARY KEY (id);\n"
+            b"ALTER TABLE ONLY public.res_users\n    ADD CONSTRAINT res_users_pkey PRIMARY KEY (id);\n"
+            b"CREATE INDEX res_partner_user_id_index ON public.res_partner USING btree (user_id);\n"
+            b"ALTER TABLE ONLY public.res_partner\n    ADD CONSTRAINT res_partner_user_id_fkey FOREIGN KEY (user_id) "
+            b"REFERENCES public.res_users(id) ON DELETE SET NULL;\n"
+            b"\\unrestrict key\n"
+        )
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("dump.sql", dump)
+        with zipfile.ZipFile(buffer) as archive:
+            return self.service.load_database_dump(
+                "DEMO",
+                "client",
+                archive,
+                archive.getinfo("dump.sql"),
+                options="-c maintenance_work_mem=512MB",
+                post_data_sessions=sessions,
+                post_data_options="-c maintenance_work_mem=256MB",
+            )
+
+    def test_post_data_is_built_by_several_sessions_after_the_data(self):
+        sessions = self.fake_psql_sessions()
+
+        self.assertEqual(0, self.load_dump_with_post_data())
+
+        kind, data = sessions[0]
+        self.assertEqual("data", kind)
+        self.assertTrue(data.endswith("1\t1\n\\.\n"))
+        self.assertNotIn("ADD CONSTRAINT", data)
+        post_data = [text for kind, text in sessions if kind == "post-data"]
+        self.assertEqual(2, len(post_data))
+        for text in post_data:
+            # Chaque session reprend les réglages de l'en-tête du dump avant toute instruction.
+            self.assertTrue(text.startswith("SET statement_timeout = 0;\nSELECT pg_catalog.set_config("))
+        everything = "".join(post_data)
+        self.assertIn(
+            "ADD CONSTRAINT res_partner_pkey PRIMARY KEY (id);\nCREATE INDEX res_partner_user_id_index", everything
+        )
+        self.assertIn("REFERENCES public.res_users(id) ON DELETE SET NULL NOT VALID;", everything)
+        self.assertIn("ALTER TABLE ONLY public.res_partner VALIDATE CONSTRAINT res_partner_user_id_fkey;", everything)
+        self.assertNotIn("unrestrict", everything)
+        commands = [command for command, _cwd, _timeout in self.runner.captures if "-Atc" in command]
+        self.assertTrue(any("relkind = 'p'" in command[-1] for command in commands))
+
+    def test_a_crashed_post_data_session_fails_the_restoration(self):
+        self.fake_psql_sessions(crash_on="VALIDATE CONSTRAINT")
+
+        with self.assertRaisesRegex(RuntimeError, r"avant la fin \(psql, code 1\)"):
+            self.load_dump_with_post_data()
+
+    def test_partitioned_tables_keep_a_single_post_data_session(self):
+        sessions = self.fake_psql_sessions()
+        self.runner.database_query_outputs["relkind = 'p'"] = "t"
+
+        self.load_dump_with_post_data()
+
+        post_data = [text for kind, text in sessions if kind == "post-data"]
+        self.assertEqual(1, len(post_data))
+        self.assertIn("ON DELETE SET NULL;", post_data[0])
+        self.assertNotIn("NOT VALID", post_data[0])
 
 
 if __name__ == "__main__":

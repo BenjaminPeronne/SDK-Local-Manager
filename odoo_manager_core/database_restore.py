@@ -16,6 +16,7 @@ Fonctions pures : le backend leur passe l'archive ouverte et les flux des proces
 import re
 import tarfile
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 DUMP_MEMBER = "dump.sql"
@@ -26,8 +27,12 @@ GIB = 1024 * MIB
 
 # pg_dump écrit les extensions en tête de fichier, avant la première table.
 EXTENSION_STATEMENT_RE = re.compile(
-    rb'^CREATE EXTENSION IF NOT EXISTS "?(?P<name>[A-Za-z_][A-Za-z0-9_]*)"?', re.MULTILINE
+    rb'^CREATE EXTENSION IF NOT EXISTS "?(?P<name>[A-Za-z_][A-Za-z0-9_]*)"?'
+    rb'(?: WITH SCHEMA "?(?P<schema>[A-Za-z_][A-Za-z0-9_]*)"?)?',
+    re.MULTILINE,
 )
+# Odoo.sh range unaccent dans son propre schéma, créé par le dump : l'extension y est créée avant.
+SCHEMA_STATEMENT_RE = re.compile(rb"^CREATE SCHEMA (?!IF NOT EXISTS )", re.MULTILINE)
 # Seul le propriétaire de l'extension peut la commenter : la ligne échouerait à chaque restauration.
 EXTENSION_COMMENT_RE = re.compile(rb"^COMMENT ON EXTENSION [^\n]*\n", re.MULTILINE)
 PROLOGUE_END_RE = re.compile(rb"^(?:CREATE TABLE|COPY) ", re.MULTILINE)
@@ -35,6 +40,38 @@ PROLOGUE_MAX_BYTES = 8 * MIB
 # Après les données viennent les clés, les index et les contraintes : peu d'octets, mais la plus
 # longue partie de la restauration d'une grosse base.
 POST_DATA_RE = re.compile(rb"^(?:CREATE (?:UNIQUE )?INDEX|ALTER TABLE ONLY \S+\s+ADD CONSTRAINT) ", re.MULTILINE)
+COPY_START_RE = re.compile(rb"^COPY (?P<table>\S+) [^\n]* FROM stdin;\n", re.MULTILINE)
+COPY_END = b"\n\\.\n"
+# COPY FREEZE est refusé sur une table partitionnée (dump fait avec --load-via-partition-root).
+PARTITIONED_TABLE_RE = re.compile(rb"\bPARTITION (?:BY|OF)\b")
+# Au-delà, le post-data n'est pas celui d'une base Odoo ordinaire : il part tel quel vers psql.
+POST_DATA_MAX_BYTES = 64 * MIB
+# Réglages de session de l'en-tête du dump (search_path vide…) : chaque session du post-data les rejoue.
+SESSION_SETTING_RE = re.compile(rb"^(?:SET \w+ = [^\n]*;|SELECT pg_catalog\.set_config\([^\n]*\);)$", re.MULTILINE)
+
+# Instructions d'un script pg_dump : chaînes, identifiants entre guillemets, corps $$…$$ et
+# commentaires peuvent contenir un point-virgule qui ne termine rien.
+SQL_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_])[Ee]'(?:[^'\\]|\\.|'')*'"
+    r"|'(?:[^']|'')*'"
+    r'|"(?:[^"]|"")*"'
+    r"|\$\$.*?\$\$"
+    r"|\$(?P<tag>[A-Za-z_][A-Za-z0-9_]*)\$.*?\$(?P=tag)\$"
+    r"|--[^\n]*"
+    r"|/\*.*?\*/"
+    r"|;"
+    r"|^\\[^\n]*",
+    re.DOTALL | re.MULTILINE,
+)
+LEADING_COMMENTS_RE = re.compile(r"\A(?:\s+|--[^\n]*)*")
+INDEX_SQL_RE = re.compile(r"\ACREATE (?:UNIQUE )?INDEX (?P<name>\S+) ON (?:ONLY )?(?P<table>\S+) ")
+CONSTRAINT_SQL_RE = re.compile(
+    r"\AALTER TABLE (?P<only>ONLY )?(?P<table>\S+)\s+ADD CONSTRAINT (?P<name>\S+) "
+    r"(?P<kind>FOREIGN KEY|PRIMARY KEY|UNIQUE|CHECK|EXCLUDE)\b"
+)
+# pg_dump range chaque commentaire juste après son objet : il suit la table de cet objet.
+CONSTRAINT_COMMENT_SQL_RE = re.compile(r"\ACOMMENT ON CONSTRAINT (?P<name>\S+) ON (?P<table>\S+) IS ")
+INDEX_COMMENT_SQL_RE = re.compile(r"\ACOMMENT ON INDEX (?P<name>\S+) IS ")
 
 # Extensions qu'Odoo crée lui-même dans chaque nouvelle base (service/db.py, _create_empty_database).
 ODOO_BASE_EXTENSIONS = ("pg_trgm", "unaccent")
@@ -45,9 +82,59 @@ DATABASE_TO_DUMP_RATIO = 0.7
 DATABASE_SPACE_MARGIN_BYTES = 2 * GIB
 FILESTORE_SPACE_MARGIN_BYTES = 512 * MIB
 
+# Synchronisation bancaire : une copie qui garde les accès de la production interroge la vraie banque,
+# et un jeton renouvelé dans la copie seulement peut bloquer la synchronisation de la production.
+# Odoo 16 et suivants coupent le lien Odoo Fin eux-mêmes (account_online_synchronization/data/
+# neutralize.sql) ; Odoo 12 à 15 et les modules OCA account_statement_import_online* jamais.
+BANK_SYNC_SECRETS = (
+    ("account_online_link", "provider_data"),
+    # Odoo 12 : account_ponto et account_yodlee.
+    ("account_online_provider", "ponto_token"),
+    ("res_company", "yodlee_user_password"),
+    ("res_company", "yodlee_access_token"),
+    ("res_company", "yodlee_user_access_token"),
+    # OCA : mot de passe ou clé d'API selon le service, puis les jetons propres à chacun.
+    ("online_bank_statement_provider", "password"),
+    ("online_bank_statement_provider", "key"),
+    ("online_bank_statement_provider", "passphrase"),
+    ("online_bank_statement_provider", "certificate_private_key"),
+    ("online_bank_statement_provider", "ponto_token"),
+    ("online_bank_statement_provider", "gocardless_token"),
+    ("online_bank_statement_provider", "gocardless_refresh_token"),
+    ("online_bank_statement_provider", "plaid_access_token"),
+)
+
+BANK_SYNC_NEUTRALIZATION_SQL = f"""
+DO $$
+DECLARE
+    secret record;
+BEGIN
+    IF to_regclass('public.account_online_link') IS NOT NULL THEN
+        -- Comme Odoo : le serveur Odoo Fin refuse toute demande signée par ce lien.
+        EXECUTE 'UPDATE account_online_link SET client_id = ''duplicate'' WHERE client_id IS DISTINCT FROM ''duplicate''';
+    END IF;
+    IF to_regclass('public.online_bank_statement_provider') IS NOT NULL THEN
+        EXECUTE 'UPDATE online_bank_statement_provider SET active = false WHERE active';
+    END IF;
+    FOR secret IN
+        SELECT c.relname::text AS table_name, a.attname::text AS column_name
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+           AND (c.relname::text, a.attname::text) IN (VALUES {", ".join(f"('{table}', '{column}')" for table, column in BANK_SYNC_SECRETS)})
+    LOOP
+        EXECUTE format('UPDATE %I SET %I = NULL WHERE %I IS NOT NULL', secret.table_name, secret.column_name, secret.column_name);
+    END LOOP;
+END
+$$;
+""".strip()
+
 # Valeurs qu'Odoo régénère pour une copie (ir.config_parameter.init(force=True) à la restauration) :
 # une copie ne doit pas partager l'identité de la base d'origine auprès des services Odoo.
-NEUTRALIZATION_SAFETY_SQL = """
+NEUTRALIZATION_SAFETY_SQL = (
+    """
 UPDATE ir_cron SET active = false
  WHERE active
    AND id NOT IN (
@@ -62,6 +149,19 @@ BEGIN
     END IF;
 END
 $$;
+"""
+    + BANK_SYNC_NEUTRALIZATION_SQL
+).strip()
+
+PARTITIONED_TABLES_SQL = "SELECT EXISTS (SELECT 1 FROM pg_class WHERE relkind = 'p');"
+
+# Taille de chaque table, sous le nom que lui donne pg_dump (public.res_partner) : poids des tâches du post-data.
+TABLE_SIZES_SQL = """
+SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname) || '|' || pg_relation_size(c.oid)
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE c.relkind IN ('r', 'm', 'p')
+   AND n.nspname NOT IN ('pg_catalog', 'information_schema');
 """.strip()
 
 INSTALLED_MODULES_SQL = (
@@ -111,8 +211,9 @@ def format_bytes(value):
 def split_prologue(read, max_bytes=PROLOGUE_MAX_BYTES, chunk_size=CHUNK_BYTES):
     """Lit le début du dump jusqu'à la première table.
 
-    Retourne (prologue nettoyé, octets déjà lus après le prologue, extensions demandées). Sans table
-    dans les `max_bytes` premiers octets, tout ce qui a été lu est rendu tel quel, sans extension.
+    Retourne (prologue nettoyé, octets déjà lus après le prologue, extensions demandées avec leur
+    schéma, vide pour celui par défaut). Sans table dans les `max_bytes` premiers octets, tout ce
+    qui a été lu est rendu tel quel, sans extension.
     """
     buffer = b""
     while len(buffer) < max_bytes:
@@ -123,24 +224,26 @@ def split_prologue(read, max_bytes=PROLOGUE_MAX_BYTES, chunk_size=CHUNK_BYTES):
         match = PROLOGUE_END_RE.search(buffer)
         if match:
             prologue, rest = buffer[: match.start()], buffer[match.start() :]
-            extensions = []
+            extensions = {}
             for found in EXTENSION_STATEMENT_RE.finditer(prologue):
-                name = found.group("name").decode("ascii")
-                if name not in extensions:
-                    extensions.append(name)
-            return EXTENSION_COMMENT_RE.sub(b"", prologue), rest, extensions
-    return b"", buffer, []
+                schema = (found.group("schema") or b"").decode("ascii")
+                extensions.setdefault(found.group("name").decode("ascii"), "" if schema == "public" else schema)
+            prologue = SCHEMA_STATEMENT_RE.sub(b"CREATE SCHEMA IF NOT EXISTS ", EXTENSION_COMMENT_RE.sub(b"", prologue))
+            return prologue, rest, extensions
+    return b"", buffer, {}
 
 
-def restore_session_options(server_version_num, memory_bytes=0, cpus=0):
-    """Options de la session psql qui charge le dump (variable PGOPTIONS).
+def restore_session_options(server_version_num, memory_bytes=0, cpus=0, sessions=1):
+    """Options d'une session psql de la restauration (variable PGOPTIONS).
 
     Plus de mémoire pour construire les index (l'étape la plus longue), validations sans attendre
     l'écriture sur disque (un arrêt brutal ne perd que les dernières secondes, sans corrompre la
-    base) et, depuis PostgreSQL 11, plusieurs processus par index.
+    base) et, depuis PostgreSQL 11, plusieurs processus par index. Mémoire et processus sont
+    partagés entre les `sessions` qui construisent les index en même temps.
     """
-    budget = memory_bytes // 8 if memory_bytes else 256 * MIB
-    maintenance_mib = max(128, min(2047, budget // MIB))
+    sessions = max(int(sessions or 1), 1)
+    budget = (memory_bytes // 8 if memory_bytes else 256 * MIB) // sessions
+    maintenance_mib = max(64 if sessions > 1 else 128, min(2047, budget // MIB))
     options = [
         ("maintenance_work_mem", f"{maintenance_mib}MB"),
         ("synchronous_commit", "off"),
@@ -148,8 +251,20 @@ def restore_session_options(server_version_num, memory_bytes=0, cpus=0):
         ("client_min_messages", "warning"),
     ]
     if server_version_num >= 110000 and cpus >= 2:
-        options.append(("max_parallel_maintenance_workers", str(min(4, cpus // 2))))
+        options.append(("max_parallel_maintenance_workers", str(min(4, cpus // 2) // sessions)))
     return " ".join(f"-c {name}={value}" for name, value in options)
+
+
+def post_data_sessions(cpus, shared_folder=False):
+    """Sessions PostgreSQL qui construisent index et contraintes en même temps.
+
+    Sur un disque rapide (Linux, WSL), trois sessions gagnent encore 15 à 30 % sur une base de
+    quelques Go. Sous macOS, les données de PostgreSQL passent par le partage de fichiers de Docker
+    Desktop : le disque limite déjà une session seule, et plusieurs à la fois vont moins vite.
+    """
+    if shared_folder:
+        return 1
+    return max(1, min(3, int(cpus or 0) // 2))
 
 
 def parameters_sql(values):
@@ -285,25 +400,250 @@ class DumpProgress:
 
 
 def dump_extensions(archive, entry):
-    """Extensions PostgreSQL que le dump crée, lues dans ses premiers Mo."""
+    """Extensions PostgreSQL que le dump crée, lues dans ses premiers Mo : {nom: schéma ou ""}."""
     with archive.open(entry) as source:
         return split_prologue(source.read)[2]
 
 
-def stream_dump(archive, entry, write, progress, read_size=CHUNK_BYTES):
-    """Envoie dump.sql à `write` sans le décompresser sur disque."""
+def stream_dump(archive, entry, write, progress, read_size=CHUNK_BYTES, splitter=None):
+    """Envoie dump.sql à `write` sans le décompresser sur disque.
+
+    Avec `splitter` (DumpSplitter), le post-data n'est pas envoyé : il reste dans le splitter.
+    """
     with archive.open(entry) as source:
         prologue, rest, _extensions = split_prologue(source.read)
-        for chunk in (prologue, rest):
-            if chunk:
-                write(chunk)
-                progress.feed(chunk)
+        if splitter:
+            splitter.session_settings = SESSION_SETTING_RE.findall(prologue)
+        chunks = [prologue, rest]
         while True:
-            chunk = source.read(read_size)
+            chunk = chunks.pop(0) if chunks else source.read(read_size)
             if not chunk:
+                if chunks:
+                    continue
                 break
-            write(chunk)
+            data = splitter.feed(chunk) if splitter else chunk
+            if data:
+                write(data)
             progress.feed(chunk)
+        if splitter:
+            data = splitter.finish()
+            if data:
+                write(data)
+
+
+class DumpSplitter:
+    """Sépare au fil de l'eau le post-data (clés, index, contraintes) du reste du dump.
+
+    Le début du post-data n'est cherché qu'en dehors des blocs COPY : une ligne de données ne peut
+    pas être prise pour une instruction. Un post-data démesuré repart vers psql avec le reste.
+
+    Avec `freeze`, chaque table est chargée déjà figée (COPY FREEZE, après un TRUNCATE de la table
+    vide dans la même transaction) : sans cela, PostgreSQL réécrit chacune de ses pages à leur
+    première lecture, celle de la construction du premier index.
+    """
+
+    # Une ligne COPY d'une table très large dépasse le Mo ; une marge de 64 Ko suffit à toutes les autres.
+    LOOKBACK = 64 * 1024
+
+    def __init__(self, max_post_data=POST_DATA_MAX_BYTES, freeze=False):
+        self.max_post_data = max_post_data
+        self.freeze = freeze
+        self.session_settings = []
+        self.post_data = None
+        self._in_copy = False
+        self._frozen_copy = False
+        self._pending = b""
+        self._passthrough = False
+
+    def feed(self, chunk):
+        """Retourne ce qui peut partir vers psql maintenant."""
+        if self._passthrough:
+            return chunk
+        if self.post_data is not None:
+            self.post_data += chunk
+            if len(self.post_data) > self.max_post_data:
+                self._passthrough = True
+                data, self.post_data = bytes(self.post_data), None
+                return data
+            return b""
+        buffer = self._pending + chunk
+        output = []
+        while buffer:
+            if self._in_copy:
+                end = buffer.find(COPY_END)
+                if end < 0:
+                    keep = len(COPY_END) - 1
+                    output.append(buffer[:-keep])
+                    buffer = buffer[-keep:]
+                    break
+                output.append(buffer[: end + len(COPY_END)])
+                if self._frozen_copy:
+                    output.append(b"COMMIT;\n")
+                buffer = buffer[end + len(COPY_END) :]
+                self._in_copy = self._frozen_copy = False
+                continue
+            copy = COPY_START_RE.search(buffer)
+            statements_end = copy.start() if copy else len(buffer)
+            if self.freeze and PARTITIONED_TABLE_RE.search(buffer, 0, statements_end):
+                self.freeze = False
+            post = POST_DATA_RE.search(buffer, 0, statements_end)
+            if post and (not copy or post.start() < copy.start()):
+                output.append(buffer[: post.start()])
+                self.post_data = bytearray(buffer[post.start() :])
+                buffer = b""
+                break
+            if copy:
+                output.append(buffer[: copy.start()])
+                header = buffer[copy.start() : copy.end() - 1]
+                if self.freeze:
+                    # Une erreur annule la transaction : COMMIT vaut alors ROLLBACK, comme une COPY ratée.
+                    table = copy["table"]
+                    header = header.removesuffix(b" FROM stdin;") + b" FROM stdin WITH (FREEZE);"
+                    output.append(b"BEGIN;\nTRUNCATE ONLY " + table + b";\n")
+                    self._frozen_copy = True
+                # Le saut de ligne de l'en-tête reste : une table vide se termine aussitôt par « \n\.\n ».
+                output.append(header)
+                buffer = buffer[copy.end() - 1 :]
+                self._in_copy = True
+                continue
+            cut = buffer.rfind(b"\n", 0, max(len(buffer) - self.LOOKBACK, 0)) + 1
+            output.append(buffer[:cut])
+            buffer = buffer[cut:]
+            break
+        self._pending = buffer
+        return b"".join(output)
+
+    def finish(self):
+        data, self._pending = self._pending, b""
+        return data
+
+
+def split_sql_statements(text):
+    """Instructions d'un script SQL, sans les commentaires qui les précèdent ni leur point-virgule.
+
+    Une méta-commande psql (`\\unrestrict` de pg_dump…) est rendue telle quelle, sur sa ligne.
+    """
+    statements = []
+    start = 0
+    for match in SQL_TOKEN_RE.finditer(text):
+        token = match.group()
+        if token != ";" and not token.startswith("\\"):
+            continue
+        body = LEADING_COMMENTS_RE.sub("", text[start : match.start()], count=1)
+        if token.startswith("\\"):
+            if body:
+                # Barre oblique au milieu d'une instruction : psql la lit comme une méta-commande,
+                # mais pg_dump n'en écrit jamais là. L'instruction garde son texte.
+                continue
+            body = token.rstrip()
+        if body:
+            statements.append(body)
+        start = match.end()
+    tail = LEADING_COMMENTS_RE.sub("", text[start:], count=1).rstrip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+@dataclass
+class PostDataTask:
+    """Instructions exécutées à la suite dans une même session ; `table` en donne le poids."""
+
+    statements: list
+    table: str = ""
+    weight: int = 1
+
+    @property
+    def script(self):
+        return "".join(statement + ";\n" for statement in self.statements)
+
+
+@dataclass
+class PostDataStep:
+    tasks: list
+    parallel: bool = False
+
+
+def post_data_steps(statements):
+    """Étapes du post-data, dans l'ordre de pg_dump.
+
+    Clés primaires, index et contraintes d'une table forment une tâche ; les tables différentes
+    avancent en parallèle (chaque instruction ne verrouille qu'une table : pas d'interblocage
+    possible). Une clé étrangère verrouille aussi la table qu'elle désigne, et presque toutes
+    désignent res_users : elles sont donc créées sans contrôle (NOT VALID), puis contrôlées
+    table par table en parallèle, ce contrôle ne bloquant pas la table désignée. Le résultat est
+    identique à une création directe. Le reste garde son ordre, seul.
+    """
+    steps = []
+    group_kind = None
+    group = []
+    tables = {}
+
+    def close():
+        if not group:
+            return
+        if group_kind == "build":
+            steps.append(PostDataStep(tasks_by_table(group), parallel=True))
+        elif group_kind == "foreign key":
+            created = [statement + " NOT VALID" if validation else statement for _table, statement, validation in group]
+            steps.append(PostDataStep([PostDataTask(created)]))
+            validations = [(table, validation) for table, _statement, validation in group if validation]
+            steps.append(PostDataStep(tasks_by_table(validations), parallel=True))
+        else:
+            steps.append(PostDataStep([PostDataTask([statement for _table, statement, _validation in group])]))
+        group.clear()
+
+    for statement in statements:
+        if statement.startswith("\\"):
+            # \restrict et \unrestrict ne valent que pour la session qui a lu le début du dump.
+            continue
+        kind, table, validation = "other", "", ""
+        index = INDEX_SQL_RE.match(statement)
+        constraint = CONSTRAINT_SQL_RE.match(statement)
+        comment = CONSTRAINT_COMMENT_SQL_RE.match(statement) or INDEX_COMMENT_SQL_RE.match(statement)
+        if index:
+            kind, table = "build", index["table"]
+            schema = table.rpartition(".")[0]
+            tables[f"{schema}.{index['name']}" if schema else index["name"]] = (kind, table)
+        elif constraint and constraint["kind"] != "FOREIGN KEY":
+            kind, table = "build", constraint["table"]
+            tables[(constraint["name"], table)] = (kind, table)
+        elif constraint:
+            kind, table = "foreign key", constraint["table"]
+            # Une clé étrangère déjà NOT VALID dans la base d'origine le reste.
+            if not statement.endswith("NOT VALID"):
+                validation = f"ALTER TABLE {constraint['only'] or ''}{table} VALIDATE CONSTRAINT {constraint['name']}"
+            tables[(constraint["name"], table)] = (kind, table)
+        elif comment:
+            key = (comment["name"], comment["table"]) if "table" in comment.groupdict() else comment["name"]
+            kind, table = tables.get(key, ("other", ""))
+        if kind != group_kind:
+            close()
+            group_kind = kind
+        group.append((table, statement, validation))
+    close()
+    return steps
+
+
+def tasks_by_table(items):
+    tasks = {}
+    for table, statement, *_rest in items:
+        tasks.setdefault(table, PostDataTask([], table=table)).statements.append(statement)
+    return list(tasks.values())
+
+
+def ordered_post_data_tasks(statements):
+    """Post-data dans l'ordre du dump, en tâches successives : les instructions voisines d'une même table."""
+    tasks = []
+    for statement in statements:
+        if statement.startswith("\\"):
+            continue
+        match = INDEX_SQL_RE.match(statement) or CONSTRAINT_SQL_RE.match(statement)
+        table = match["table"] if match else ""
+        if not tasks or tasks[-1].table != table:
+            tasks.append(PostDataTask([], table=table))
+        tasks[-1].statements.append(statement)
+    return tasks
 
 
 def write_filestore_tar(archive, entries, output, on_file=None):

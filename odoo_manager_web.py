@@ -4035,8 +4035,9 @@ def neutralize_restored_database(job, service, project, db_name):
             package = python_package_for_import(import_name) if import_name else ""
             if not package or package in installed or len(installed) >= MAX_AUTO_DEPENDENCY_FIXES:
                 raise OdooError(
-                    f"La base {db_name} est restaurée, crons métier et serveurs de messagerie désactivés, mais la "
-                    f"neutralisation complète par Odoo a échoué : {exc} Relance « Neutraliser » sur cette base "
+                    f"La base {db_name} est restaurée, crons métier, serveurs de messagerie et synchronisation "
+                    "bancaire désactivés, mais la neutralisation complète par Odoo a échoué : "
+                    f"{exc} Relance « Neutraliser » sur cette base "
                     "une fois la cause corrigée."
                 ) from exc
             installed.append(package)
@@ -4099,7 +4100,10 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
                 project, db_name, database_restore.dump_extensions(archive, dump), log=job.add
             )
             memory, cpus = service.docker_resources()
-            options = database_restore.restore_session_options(service.postgres_server_version(project), memory, cpus)
+            server_version = service.postgres_server_version(project)
+            options = database_restore.restore_session_options(server_version, memory, cpus)
+            sessions = database_restore.post_data_sessions(cpus, shared_folder=platform_id() == "macos")
+            post_data_options = database_restore.restore_session_options(server_version, memory, cpus, sessions)
             load_end = 70 if filestore else 85
             job_progress.span("Chargement des données", end=load_end, expected=60 + dump.file_size / (25 * 1024 * 1024))
             job.add("Chargement des données dans PostgreSQL (sans passer par Odoo)...")
@@ -4107,14 +4111,22 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
 
             def post_data():
                 job.add(
-                    "Données chargées. Création des index et des contraintes : étape la plus longue "
-                    "pour une grosse base, la progression ne bouge presque plus pendant ce temps."
+                    "Données chargées. Création des index et des contraintes : étape la plus longue pour une grosse base."
                 )
                 job_progress.span("Création des index", end=load_end, expected=60 + dump.file_size / (60 * 1024 * 1024))
 
             try:
                 errors = service.load_database_dump(
-                    project, db_name, archive, dump, options=options, log=job.add, on_post_data=post_data
+                    project,
+                    db_name,
+                    archive,
+                    dump,
+                    options=options,
+                    log=job.add,
+                    on_post_data=post_data,
+                    post_data_sessions=sessions,
+                    post_data_options=post_data_options,
+                    freeze=True,
                 )
                 if filestore:
                     job_progress.span("Copie du filestore", end=85, expected=30 + filestore_bytes / (40 * 1024 * 1024))
@@ -4145,7 +4157,7 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
         service.run_postgres_sql(project, db_name, database_restore.restored_urls_sql(base_url))
         if neutralize:
             # Avant qu'Odoo n'ouvre la base, même si la neutralisation complète échoue ensuite.
-            job.add("Désactivation des crons métier et des serveurs de messagerie...")
+            job.add("Désactivation des crons métier, des serveurs de messagerie et de la synchronisation bancaire...")
             service.run_postgres_sql(project, db_name, database_restore.NEUTRALIZATION_SAFETY_SQL)
         remember_database_arrival(job, project, db_name, "restored")
         clear_project_module_cache(project)

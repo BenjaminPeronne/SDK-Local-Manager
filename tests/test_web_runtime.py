@@ -461,6 +461,8 @@ class DatabaseNameValidationTests(unittest.TestCase):
 
 
 class DatabaseRestoreTests(unittest.TestCase):
+    platform = "linux"
+
     def make_backup(self, root, include_dump=True, manifest="{}"):
         path = Path(root) / "backup.zip"
         with zipfile.ZipFile(path, "w") as archive:
@@ -578,6 +580,7 @@ class DatabaseRestoreTests(unittest.TestCase):
                 patch("odoo_manager_web.invalidate_overview_databases"),
                 patch("odoo_manager_web.clear_project_module_cache"),
                 patch("odoo_manager_web.drop_partial_database") as drop,
+                patch("odoo_manager_web.platform_id", return_value=self.platform),
             ):
                 try:
                     web.restore_database_job(job, "DEMO", path, "backup.zip", "demo_restore", True, neutralize)
@@ -601,20 +604,38 @@ class DatabaseRestoreTests(unittest.TestCase):
             service.run_postgres_sql.call_args_list,
         )
         service.stop_odoo_server.assert_called_once_with("DEMO", log=job.add)
-        service.create_restore_database.assert_called_once_with("DEMO", "demo_restore", [], log=job.add)
-        options = service.load_database_dump.call_args.kwargs["options"]
-        self.assertIn("maintenance_work_mem=512MB", options)
-        self.assertIn("max_parallel_maintenance_workers=2", options)
+        service.create_restore_database.assert_called_once_with("DEMO", "demo_restore", {}, log=job.add)
+        loading = service.load_database_dump.call_args.kwargs
+        self.assertIn("maintenance_work_mem=512MB", loading["options"])
+        self.assertIn("max_parallel_maintenance_workers=2", loading["options"])
+        # Tables chargées déjà figées ; index et contraintes à deux sessions sur ce disque (4 processeurs).
+        self.assertTrue(loading["freeze"])
+        self.assertEqual(2, loading["post_data_sessions"])
+        self.assertIn("maintenance_work_mem=256MB", loading["post_data_options"])
+        self.assertIn("max_parallel_maintenance_workers=1", loading["post_data_options"])
         service.restore_filestore.assert_called_once()
         executed = [call.args[2] for call in service.run_postgres_sql.call_args_list]
         self.assertTrue(any("database.uuid" in sql for sql in executed))
         self.assertTrue(any("UPDATE ir_cron SET active = false" in sql for sql in executed))
+        # Avant qu'Odoo n'ouvre la base : la copie ne doit pas pouvoir interroger la banque.
+        self.assertTrue(any("UPDATE account_online_link SET client_id" in sql for sql in executed))
         service.ensure_python_dependencies.assert_called_once()
         service.run_odoo_neutralize_command.assert_called_once_with("DEMO", "demo_restore", log=ANY)
         # La neutralisation redémarre elle-même le serveur Odoo.
         service.start_odoo_server.assert_not_called()
         arrival.assert_called_once_with(job, "DEMO", "demo_restore", "restored")
         drop.assert_not_called()
+
+    def test_restore_on_macos_builds_indexes_with_a_single_session(self):
+        service = self.restore_service()
+        self.platform = "macos"
+
+        _job, error, _backup_left, _arrival, _drop = self.run_restore(service)
+
+        self.assertIsNone(error)
+        loading = service.load_database_dump.call_args.kwargs
+        self.assertEqual(1, loading["post_data_sessions"])
+        self.assertTrue(loading["freeze"])
 
     def test_restore_without_neutralization_restarts_odoo_normally(self):
         service = self.restore_service()
@@ -656,7 +677,7 @@ class DatabaseRestoreTests(unittest.TestCase):
         _job, error, _backup_left, _arrival, drop = self.run_restore(service)
 
         self.assertIsInstance(error, web.OdooError)
-        self.assertRegex(str(error), "crons métier et serveurs de messagerie désactivés")
+        self.assertRegex(str(error), "crons métier, serveurs de messagerie et synchronisation bancaire désactivés")
         drop.assert_not_called()
 
     @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo_restore"])

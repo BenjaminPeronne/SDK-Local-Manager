@@ -1,6 +1,7 @@
 import http.client
 import os
 import platform
+import queue
 import re
 import shlex
 import shutil
@@ -654,14 +655,16 @@ class ProjectService:
         except subprocess.TimeoutExpired as exc:
             return 124, (exc.stdout or "").strip()
 
-    def feed_process(self, command, produce, log=None, on_error_line=None):
+    def feed_process(self, command, produce, log=None, on_error_line=None, on_output_line=None):
         """Lance `command`, écrit sur son entrée ce que `produce(entrée)` y envoie et retourne son code.
 
-        Sa sortie standard est ignorée : psql y affiche le résultat de chaque SELECT d'un dump.
+        Sa sortie standard est ignorée, sauf avec `on_output_line` : psql y affiche le résultat de
+        chaque SELECT d'un dump. `on_output_line` reçoit chaque ligne, puis None à la fin de la sortie.
         Chaque ligne de sa sortie d'erreur part vers `on_error_line` au fil de l'eau.
         """
         if self.runner:
-            return self.runner.feed(command, produce, log=log, on_error_line=on_error_line)
+            extra = {"on_output_line": on_output_line} if on_output_line else {}
+            return self.runner.feed(command, produce, log=log, on_error_line=on_error_line, **extra)
         command, process_cwd = self.prepare_command(command, self.workspace)
         jobs.checkpoint()
         self.log(log, "$ " + " ".join(str(arg) for arg in command))
@@ -670,7 +673,7 @@ class ProjectService:
             cwd=str(process_cwd),
             env=self.env(),
             stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE if on_output_line else subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             **hidden_process_kwargs(),
         )
@@ -684,8 +687,15 @@ class ProjectService:
                 if line and on_error_line:
                     on_error_line(line)
 
+        def read_output():
+            for raw in process.stdout:
+                on_output_line(raw.decode("utf-8", errors="replace").rstrip())
+            on_output_line(None)
+
         reader = threading.Thread(target=read_errors, name="process-errors", daemon=True)
         reader.start()
+        if on_output_line:
+            threading.Thread(target=read_output, name="process-output", daemon=True).start()
         try:
             try:
                 produce(process.stdin)
@@ -2555,22 +2565,24 @@ class ProjectService:
         lines = self._postgres_lines(project, "postgres", "SHOW server_version_num;")
         return int(lines[0]) if lines and lines[0].isdigit() else 0
 
-    def create_restore_database(self, project, db_name, extensions=(), log=None):
+    def create_restore_database(self, project, db_name, extensions=None, log=None):
         """Crée la base vide qui reçoit le dump, comme Odoo, avec les extensions qu'il demande.
 
         Les extensions sont créées par le superutilisateur : le rôle d'Odoo n'en a pas le droit
-        (pgvector notamment), et sans elles psql perd les tables qui en dépendent.
+        (pgvector notamment), et sans elles psql perd les tables qui en dépendent. Chacune va dans
+        le schéma que le dump lui donne ({nom: schéma}, vide pour celui par défaut).
         """
+        extensions = extensions or {}
         owner = self.odoo_database_user(project)
         self.log(log, f"Création de la base vide {db_name} (propriétaire {owner})...")
         self.run_postgres_sql(project, "postgres", database_restore.create_database_sql(db_name, owner))
         for extension in database_restore.ODOO_BASE_EXTENSIONS:
-            self.create_postgres_extension(project, db_name, extension, log=log)
-        for extension in extensions:
+            self.create_postgres_extension(project, db_name, extension, log=log, schema=extensions.get(extension))
+        for extension, schema in extensions.items():
             if extension in database_restore.ODOO_BASE_EXTENSIONS:
                 continue
             try:
-                self.create_postgres_extension(project, db_name, extension, log=log)
+                self.create_postgres_extension(project, db_name, extension, log=log, schema=schema)
             except RuntimeError as exc:
                 # Odoo poursuivrait sans elle : seules les tables qui en dépendent manqueront.
                 self.log(log, f"Attention : {exc} Les tables qui en dépendent ne seront pas restaurées.")
@@ -2580,13 +2592,30 @@ class ProjectService:
         except RuntimeError:
             pass
 
-    def load_database_dump(self, project, db_name, archive, entry, options="", log=None, on_post_data=None):
+    def load_database_dump(
+        self,
+        project,
+        db_name,
+        archive,
+        entry,
+        options="",
+        log=None,
+        on_post_data=None,
+        post_data_sessions=1,
+        post_data_options="",
+        freeze=False,
+    ):
         """Envoie dump.sql du ZIP à psql dans le conteneur PostgreSQL, sans rien décompresser sur disque.
 
+        Avec `freeze` ou plusieurs sessions, clés, index et contraintes (le post-data) sont gardés de
+        côté puis construits table par table une fois les données chargées, en parallèle s'il y a
+        plusieurs sessions (voir database_restore.post_data_steps). `freeze` charge chaque table déjà
+        figée (voir database_restore.DumpSplitter).
         Retourne le nombre d'erreurs signalées par psql (Odoo les ignore aussi).
         """
         errors = database_restore.PsqlErrors(log=log)
         total = entry.file_size
+        splitter = database_restore.DumpSplitter(freeze=freeze) if post_data_sessions > 1 or freeze else None
 
         def progress(sent, size, step):
             if tracker.post_data:
@@ -2617,17 +2646,169 @@ class ProjectService:
         )
 
         def produce(stdin):
-            database_restore.stream_dump(archive, entry, stdin.write, tracker)
+            database_restore.stream_dump(archive, entry, stdin.write, tracker, splitter=splitter)
 
         code = self.feed_process(command, produce, log=log, on_error_line=errors.add)
         if code != 0:
-            detail = f" Dernière erreur : {errors.lines[-1]}" if errors.lines else ""
-            raise RuntimeError(
-                f"Le chargement de la base s'est arrêté avant la fin (psql, code {code}).{detail} "
-                "Vérifie l'espace disque et la mémoire allouée à Docker, puis relance la restauration."
+            raise RuntimeError(self._dump_load_failure(code, errors))
+        if splitter and splitter.post_data:
+            self.run_post_data(
+                project,
+                db_name,
+                bytes(splitter.post_data).decode("utf-8", errors="replace"),
+                b"\n".join(splitter.session_settings).decode("utf-8", errors="replace"),
+                sessions=post_data_sessions,
+                options=post_data_options or options,
+                errors=errors,
+                log=log,
             )
         if errors.count > errors.LIMIT:
             self.log(log, f"... {errors.count - errors.LIMIT} autre(s) erreur(s) psql non affichée(s).")
+        return errors.count
+
+    @staticmethod
+    def _dump_load_failure(code, errors):
+        reason = f"code {code}" if isinstance(code, int) else code
+        detail = f" Dernière erreur : {errors.lines[-1]}" if errors.lines else ""
+        return (
+            f"Le chargement de la base s'est arrêté avant la fin (psql, {reason}).{detail} "
+            "Vérifie l'espace disque et la mémoire allouée à Docker, puis relance la restauration."
+        )
+
+    def run_post_data(self, project, db_name, text, session_settings, sessions, options="", errors=None, log=None):
+        """Construit clés, index et contraintes du dump avec `sessions` sessions psql à la fois.
+
+        Chaque étape attend la fin de la précédente ; ses tâches partent vers la première session
+        libre, les plus lourdes d'abord. Une session seule suit l'ordre du dump, table par table :
+        la progression se mesure. Une erreur psql n'arrête rien, comme pendant le chargement.
+        """
+        started = time.monotonic()
+        errors = errors or database_restore.PsqlErrors(log=log)
+        statements = database_restore.split_sql_statements(text)
+        if sessions > 1 and self._postgres_lines(project, db_name, database_restore.PARTITIONED_TABLES_SQL) == ["t"]:
+            # Avant PostgreSQL 18, une table partitionnée refuse les clés étrangères NOT VALID.
+            # L'héritage d'Odoo (ir_act_window hérite d'ir_actions) n'est pas concerné.
+            sessions = 1
+        if sessions > 1:
+            steps = database_restore.post_data_steps(statements)
+        else:
+            # Seule, une session va aussi vite dans l'ordre de pg_dump : les clés étrangères y sont
+            # contrôlées dès leur création, sans seconde passe.
+            steps = [database_restore.PostDataStep(database_restore.ordered_post_data_tasks(statements))]
+        sizes = dict(
+            row.split("|", 1)
+            for row in self._postgres_lines(project, db_name, database_restore.TABLE_SIZES_SQL)
+            if "|" in row
+        )
+        for step in steps:
+            for task in step.tasks:
+                pages = int(sizes.get(task.table, "0") or 0) // 8192 + 1
+                task.weight = pages * len(task.statements)
+        total_weight = sum(task.weight for step in steps for task in step.tasks)
+        self.log(
+            log,
+            f"Index et contraintes : {len(statements)} instruction(s), "
+            + (f"{sessions} sessions PostgreSQL en parallèle." if sessions > 1 else "une session PostgreSQL."),
+        )
+
+        command = self.docker(
+            "exec",
+            "-i",
+            "-e",
+            f"PGOPTIONS={options}",
+            f"postgresql-{project}",
+            "psql",
+            "-X",
+            "-q",
+            "-U",
+            self.odoo_database_user(project),
+            "-d",
+            db_name,
+        )
+        control = jobs.current_control()
+        pending = queue.Queue()
+        condition = threading.Condition()
+        state = {"finished": 0, "weight": 0, "failure": None}
+        errors_lock = threading.Lock()
+
+        def add_error(line):
+            with errors_lock:
+                errors.add(line)
+
+        def work(index):
+            replies = queue.Queue()
+            marker = f"__odoo_manager_post_data_{index}__"
+
+            def on_output(line):
+                if line is None or line == marker:
+                    replies.put(line)
+
+            interrupted = []
+
+            def produce(stdin):
+                stdin.write(session_settings.encode("utf-8") + b"\n")
+                while True:
+                    task = pending.get()
+                    if task is None:
+                        return
+                    stdin.write(f"{task.script}\\echo {marker}\n".encode())
+                    stdin.flush()
+                    if replies.get() is None:
+                        # psql s'est arrêté au milieu de la tâche : son code de sortie dira pourquoi.
+                        interrupted.append(task)
+                        return
+                    with condition:
+                        state["finished"] += 1
+                        state["weight"] += task.weight
+                        condition.notify_all()
+
+            try:
+                with jobs.bind_control(control):
+                    code = self.feed_process(command, produce, on_error_line=add_error, on_output_line=on_output)
+                failure = code if code != 0 or interrupted else None
+            except BaseException as exc:
+                failure = str(exc) or type(exc).__name__
+            if failure is not None:
+                with condition:
+                    state["failure"] = state["failure"] if state["failure"] is not None else failure
+                    condition.notify_all()
+
+        workers = [
+            threading.Thread(target=work, args=(index,), name="post-data", daemon=True) for index in range(sessions)
+        ]
+        for worker in workers:
+            worker.start()
+        try:
+            for step in steps:
+                tasks = sorted(step.tasks, key=lambda task: task.weight, reverse=True) if step.parallel else step.tasks
+                target = state["finished"] + len(tasks)
+                for task in tasks:
+                    pending.put(task)
+                while True:
+                    jobs.checkpoint()
+                    with condition:
+                        if state["failure"] is None and state["finished"] < target:
+                            condition.wait(timeout=1)
+                        failure, finished, weight = state["failure"], state["finished"], state["weight"]
+                    job_progress.measure(weight, total_weight)
+                    if failure is not None:
+                        # Un arrêt demandé l'emporte sur l'erreur de la session qu'il a interrompue.
+                        jobs.checkpoint()
+                        raise RuntimeError(self._dump_load_failure(failure, errors))
+                    if finished >= target:
+                        break
+        finally:
+            while not pending.empty():
+                try:
+                    pending.get_nowait()
+                except queue.Empty:
+                    break
+            for _worker in workers:
+                pending.put(None)
+            for worker in workers:
+                worker.join(timeout=30)
+        elapsed = int(time.monotonic() - started)
+        self.log(log, f"Index et contraintes construits en {elapsed // 60} min {elapsed % 60:02d} s.")
         return errors.count
 
     def restore_filestore(self, project, db_name, archive, entries, log=None):
@@ -2699,7 +2880,7 @@ class ProjectService:
             )
         return freed
 
-    def create_postgres_extension(self, project, db_name, extension, log=None):
+    def create_postgres_extension(self, project, db_name, extension, log=None, schema=None):
         """Installe une extension PostgreSQL manquante via le rôle `postgres`, superuser du conteneur.
 
         Certains modules (ex. pgvector pour l'IA) exigent CREATE EXTENSION, que le rôle applicatif
@@ -2708,15 +2889,17 @@ class ProjectService:
         """
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", extension):
             raise ValueError(f"Nom d'extension PostgreSQL invalide : {extension}")
+        if schema and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
+            raise ValueError(f"Nom de schéma PostgreSQL invalide : {schema}")
         self.log(log, f"Installation de l'extension PostgreSQL {extension} (rôle postgres)...")
-        code, output = self.run_create_postgres_extension(project, db_name, extension)
+        code, output = self.run_create_postgres_extension(project, db_name, extension, schema=schema)
         if code != 0 and extension == "vector" and POSTGRES_EXTENSION_UNAVAILABLE_RE.search(output):
             # Projet créé avant que son modèle ne passe à l'image pgvector : l'image officielle
             # n'a pas l'extension, aucun droit ne la fera apparaître.
             self.log(log, output.strip())
             if not self.switch_postgres_to_pgvector_image(project, log=log):
                 raise RuntimeError(PGVECTOR_IMAGE_REQUIRED_MESSAGE)
-            code, output = self.run_create_postgres_extension(project, db_name, extension)
+            code, output = self.run_create_postgres_extension(project, db_name, extension, schema=schema)
         if code != 0:
             raise RuntimeError(f"Installation de l'extension PostgreSQL {extension} impossible : {output.strip()}")
         self.log(log, f"Extension PostgreSQL {extension} installée.")
@@ -2741,7 +2924,14 @@ class ProjectService:
             )
         return False
 
-    def run_create_postgres_extension(self, project, db_name, extension):
+    def run_create_postgres_extension(self, project, db_name, extension, schema=None):
+        sql = f'CREATE EXTENSION IF NOT EXISTS "{extension}";'
+        if schema:
+            owner = self.odoo_database_user(project)
+            sql = (
+                f'CREATE SCHEMA IF NOT EXISTS "{schema}" AUTHORIZATION "{owner}"; '
+                f'CREATE EXTENSION IF NOT EXISTS "{extension}" WITH SCHEMA "{schema}";'
+            )
         return self.capture(
             self.docker(
                 "exec",
@@ -2754,7 +2944,7 @@ class ProjectService:
                 "-d",
                 db_name,
                 "-c",
-                f'CREATE EXTENSION IF NOT EXISTS "{extension}";',
+                sql,
             ),
             timeout=20,
         )
@@ -3615,11 +3805,33 @@ SELECT COALESCE((SELECT value FROM ir_config_parameter WHERE key = 'database.is_
             if active_incoming_servers != "0":
                 raise RuntimeError(f"{active_incoming_servers} serveur(s) entrant(s) sont encore actifs.")
 
+        # Odoo saute sans rien dire le script d'un module dont le code manque au projet : la
+        # synchronisation bancaire est donc contrôlée ici, quelle que soit la version.
+        bank_tables = self._database_scalar(
+            project,
+            db_name,
+            "SELECT (to_regclass('public.account_online_link') IS NOT NULL)::int || '|' "
+            "|| (to_regclass('public.online_bank_statement_provider') IS NOT NULL)::int;",
+        ).split("|")
+        bank_checks = (
+            ("account_online_link WHERE client_id IS DISTINCT FROM 'duplicate'", "lien(s) Odoo"),
+            ("online_bank_statement_provider WHERE active", "fournisseur(s) OCA"),
+        )
+        for present, (source, label) in zip(bank_tables, bank_checks, strict=False):
+            if present != "1":
+                continue
+            active_bank_syncs = self._database_scalar(project, db_name, f"SELECT count(*) FROM {source};")
+            if active_bank_syncs != "0":
+                raise RuntimeError(
+                    f"Synchronisation bancaire encore active : {active_bank_syncs} {label} relié(s) à la banque."
+                )
+
         self.log(log, "Contrôles de neutralisation validés:")
         self.log(log, "- base marquée comme neutralisée")
         self.log(log, "- 0 cron métier actif (seul l'autovacuum Odoo peut rester actif)")
         self.log(log, "- 0 serveur de messagerie sortant exploitable (e-mails capturés par Mailpit s'il est démarré)")
         self.log(log, f"- {active_incoming_servers} serveur de messagerie entrant actif")
+        self.log(log, "- 0 synchronisation bancaire active")
 
     @staticmethod
     def _neutralization_shell_command():
@@ -3704,6 +3916,8 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
             raise RuntimeError(
                 "La neutralisation Odoo a échoué. La base ne doit pas être considérée comme neutralisée."
             )
+        # Odoo 12 à 15 n'ont pas de script pour la banque, les modules OCA non plus à aucune version.
+        self.run_postgres_sql(project, db_name, database_restore.BANK_SYNC_NEUTRALIZATION_SQL)
         self.verify_database_neutralization(project, db_name, log=log)
 
     def run_odoo_neutralize_command(self, project, db_name, log=None):
