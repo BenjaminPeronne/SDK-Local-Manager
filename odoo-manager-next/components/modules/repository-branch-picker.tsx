@@ -6,9 +6,10 @@ import { ArrowRight, Check, ChevronDown, GitBranch, Loader2, RefreshCcw, Search 
 import { api } from "@/lib/api";
 import { handleListKeys } from "@/lib/list-navigation";
 import { filterBranches, type RemoteBranch } from "@/lib/module-repositories";
-import type { Job, ModuleRepository } from "@/lib/types";
+import type { Job, ModuleRepository, RepositoryDatabases } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 
 // Lignes affichées : au-delà, la recherche sert à trouver la branche voulue.
@@ -27,6 +28,83 @@ function switchEffect(repository: ModuleRepository, moduleCount: number, branch:
   if (repository.source === "sdk")
     return `Le dossier ${repository.name}, téléchargé depuis la plateforme SDK, est remplacé par la branche ${branch}. L’ancien dossier est mis de côté.`;
   return `Les fichiers de ${repository.name} passent sur la branche ${branch}. Si des fichiers ont été modifiés sans être enregistrés dans Git, rien n’est changé.`;
+}
+
+type DatabaseList =
+  { status: "loading" } | { status: "error"; error: string } | ({ status: "ready" } & RepositoryDatabases);
+
+/**
+ * Le code d'un projet est le même pour toutes ses bases : le changement de branche les touche toutes.
+ * Les bases qui utilisent des modules du dépôt doivent être mises à jour, sinon leurs écrans et leurs
+ * données restent ceux de l'ancienne branche alors que le code a changé.
+ */
+function AffectedDatabases({
+  databases,
+  update,
+  onUpdateChange,
+}: {
+  databases: DatabaseList;
+  update: boolean;
+  onUpdateChange: (update: boolean) => void;
+}) {
+  const used = databases.status === "ready" ? databases.databases : [];
+  // Bases non lues ici : le serveur les cherchera lui-même au moment du changement.
+  const unknown = databases.status === "error" || (databases.status === "ready" && !databases.running);
+  return (
+    <div className="grid gap-2 rounded-md border bg-muted/30 p-2.5 text-xs">
+      <p className="text-muted-foreground">
+        Toutes les bases du projet utiliseront ce code : elles partagent les mêmes modules.
+      </p>
+      {databases.status === "loading" ? (
+        <p className="flex items-center gap-2 text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Recherche des bases qui utilisent ces modules…
+        </p>
+      ) : databases.status === "error" ? (
+        <p className="text-destructive">
+          Impossible de savoir pour l’instant quelles bases utilisent ces modules : {databases.error}
+        </p>
+      ) : unknown ? (
+        <p className="text-muted-foreground">
+          Le projet est arrêté. Pour mettre à jour les bases, il sera démarré au moment du changement.
+        </p>
+      ) : used.length ? (
+        <ul className="grid gap-1" aria-label="Bases qui utilisent des modules de ce dépôt">
+          {used.map((database) => (
+            <li key={database.name} className="flex min-w-0 items-center justify-between gap-2">
+              <span className="truncate font-mono">{database.name}</span>
+              <span className="shrink-0 text-muted-foreground" title={database.modules.join(", ")}>
+                {database.modules.length} module{database.modules.length > 1 ? "s" : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted-foreground">Aucune base n’utilise encore les modules de ce dépôt.</p>
+      )}
+      {(unknown || used.length > 0) && (
+        <>
+          <label className="flex cursor-pointer items-start gap-2">
+            <Checkbox
+              className="mt-px"
+              checked={update}
+              onCheckedChange={(checked) => onUpdateChange(checked === true)}
+            />
+            <span>
+              {unknown ? "Mettre à jour ensuite chaque base qui les utilise" : "Mettre à jour ces bases juste après"}
+              <span className="text-muted-foreground"> (conseillé)</span>
+            </span>
+          </label>
+          {!update && (
+            <p className="text-muted-foreground">
+              Sans mise à jour, leurs écrans et leurs données restent ceux de l’ancienne branche, ce qui peut causer des
+              erreurs.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 type RepositoryBranchPickerProps = {
@@ -51,6 +129,8 @@ export function RepositoryBranchPicker({
   const [search, setSearch] = useState("");
   const [active, setActive] = useState(0);
   const [chosen, setChosen] = useState("");
+  const [databases, setDatabases] = useState<DatabaseList>({ status: "loading" });
+  const [updateDatabases, setUpdateDatabases] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const current = repository.branch;
   const listId = useId();
@@ -76,6 +156,29 @@ export function RepositoryBranchPicker({
     };
   }, [request, projectName, repository.id]);
 
+  // Bases concernées, relues à chaque branche choisie : une base a pu changer entre-temps.
+  useEffect(() => {
+    if (!chosen) return;
+    let cancelled = false;
+    api<RepositoryDatabases>(`/api/projects/${encodeURIComponent(projectName)}/repository/databases`, {
+      method: "POST",
+      body: JSON.stringify({ repository: repository.id }),
+    })
+      .then((result) => {
+        if (!cancelled) setDatabases({ status: "ready", ...result });
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setDatabases({
+            status: "error",
+            error: err instanceof Error ? err.message : "Lecture des bases impossible.",
+          });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [chosen, projectName, repository.id]);
+
   const matches = useMemo(() => (list.status === "ready" ? filterBranches(list.branches, search) : []), [list, search]);
   const visible = matches.slice(0, VISIBLE_BRANCHES);
 
@@ -85,7 +188,10 @@ export function RepositoryBranchPicker({
   }
 
   function choose(name: string) {
-    if (name !== current) setChosen(name);
+    if (name === current) return;
+    setChosen(name);
+    setDatabases({ status: "loading" });
+    setUpdateDatabases(true);
   }
 
   function changeOpen(next: boolean) {
@@ -102,10 +208,14 @@ export function RepositoryBranchPicker({
     if (!chosen || submitting) return;
     setSubmitting(true);
     try {
+      // Aucune base n'utilise le dépôt : le changement reste seul. Sinon, le serveur retrouve lui-même
+      // les bases à mettre à jour, y compris quand la liste n'a pas pu être lue ici.
+      const nothingToUpdate = databases.status === "ready" && databases.running && databases.databases.length === 0;
       const job = await createJob("switch_repository_branch", {
         project: projectName,
         repository: repository.id,
         branch: chosen,
+        update_databases: updateDatabases && !nothingToUpdate,
       });
       if (job) changeOpen(false);
     } finally {
@@ -140,9 +250,7 @@ export function RepositoryBranchPicker({
               </span>
             </div>
             <p className="text-muted-foreground">{switchEffect(repository, moduleCount, chosen)}</p>
-            <p className="text-muted-foreground">
-              Ensuite, mets à jour les modules installés pour que la base utilise ce code.
-            </p>
+            <AffectedDatabases databases={databases} update={updateDatabases} onUpdateChange={setUpdateDatabases} />
             <div className="flex justify-end gap-2">
               <Button type="button" size="sm" variant="ghost" onClick={() => setChosen("")}>
                 Retour

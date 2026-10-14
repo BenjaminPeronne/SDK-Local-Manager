@@ -317,6 +317,13 @@ export type ModuleRepository = {
   imported_at?: string;
 };
 
+/** Bases du projet qui utilisent des modules d'un dépôt : un changement de branche les concerne. */
+export type RepositoryDatabases = {
+  /** PostgreSQL démarré : sans lui, les bases ne se lisent pas. */
+  running: boolean;
+  databases: { name: string; modules: string[] }[];
+};
+
 export type SocleApp = {
   id: string;
   label: string;

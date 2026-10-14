@@ -473,6 +473,115 @@ class RepositoryModulesTests(ModuleLayoutTests):
         with self.assertRaisesRegex(ValueError, "déjà de la branche dev"):
             web.switch_repository_branch_job(DummyJob(), self.project, f"import:{URL}#dev", "dev")
 
+    def test_branch_switch_lists_every_base_that_uses_the_repository(self):
+        states = {
+            "prod": {"alpha": {"state": "installed"}, "beta": {"state": "to upgrade"}, "other": {"state": "installed"}},
+            "test": {"alpha": {"state": "installed"}, "beta": {"state": "installed"}},
+            "empty": {"alpha": {"state": "uninstalled"}},
+        }
+        with (
+            mock.patch.object(web, "list_databases_for", return_value=["empty", "postgres", "prod", "test"]),
+            mock.patch.object(web, "installed_modules", side_effect=lambda _project, db: states[db]),
+            # Un module exclu localement des mises à jour d'une base le reste après le changement.
+            mock.patch.object(
+                web,
+                "active_local_module_exceptions",
+                side_effect=lambda _project, db, states=None: ["beta"] if db == "test" else [],
+            ),
+        ):
+            found = web.repository_installed_databases(self.project, ["alpha", "beta", "gamma"])
+
+        self.assertEqual({"prod": ["alpha", "beta"], "test": ["alpha"]}, found)
+
+    def test_branch_switch_then_updates_the_bases_using_the_repository(self):
+        self.run_import(["alpha", "beta"])
+        job = DummyJob()
+
+        with (
+            mock.patch.object(web.subprocess, "run", side_effect=self.clone),
+            mock.patch.object(web, "update_repository_databases", return_value=["prod"]) as update,
+        ):
+            web.switch_repository_branch_job(job, self.project, f"import:{URL}#18.0", "dev", update_databases=True)
+
+        update.assert_called_once_with(job, self.project, ["alpha", "beta"])
+        self.assertEqual(["prod"], job.result["databases"])
+
+    def test_bases_are_not_read_while_the_project_is_stopped(self):
+        self.run_import(["alpha"])
+
+        with (
+            mock.patch.object(web, "container_status", return_value="exited"),
+            mock.patch.object(web, "repository_installed_databases") as installed,
+        ):
+            result = web.repository_databases(self.project, f"import:{URL}#18.0")
+
+        self.assertEqual({"running": False, "databases": []}, result)
+        installed.assert_not_called()
+
+    def test_base_updates_go_on_after_a_failure_and_report_it(self):
+        updated = []
+
+        def update(job, flag, project, db_name, modules):
+            updated.append((flag, db_name, modules))
+            if db_name == "prod":
+                raise RuntimeError("module en erreur")
+
+        job = DummyJob()
+        with (
+            mock.patch.object(web, "project_service") as service,
+            mock.patch.object(
+                web, "repository_installed_databases", return_value={"prod": ["alpha", "beta"], "test": ["beta"]}
+            ) as installed,
+            mock.patch.object(web, "module_command_job", side_effect=update),
+            self.assertRaisesRegex(RuntimeError, r"1 base\(s\) sur 2 n'ont pas pu être mises à jour : prod"),
+        ):
+            web.update_repository_databases(job, self.project, ["alpha", "beta"])
+
+        # Le projet arrêté est démarré : les bases ne se lisent qu'avec PostgreSQL.
+        service.return_value.ensure_odoo_containers_ready.assert_called_once_with(self.project, log=job.add)
+        installed.assert_called_once_with(self.project, ["alpha", "beta"])
+        self.assertEqual(
+            [("--update-module", "prod", "alpha,beta"), ("--update-module", "test", "beta")],
+            updated,
+        )
+
+    def test_no_base_to_update_after_a_branch_switch(self):
+        job = DummyJob()
+        with (
+            mock.patch.object(web, "project_service"),
+            mock.patch.object(web, "repository_installed_databases", return_value={}),
+            mock.patch.object(web, "module_command_job") as update,
+        ):
+            self.assertEqual([], web.update_repository_databases(job, self.project, ["alpha"]))
+
+        update.assert_not_called()
+        self.assertTrue(any("rien à mettre à jour" in line for line in job.lines))
+
+    def test_branch_switch_without_update_reminds_that_every_base_uses_the_new_code(self):
+        self.run_import(["alpha"])
+        job = DummyJob()
+
+        with (
+            mock.patch.object(web.subprocess, "run", side_effect=self.clone),
+            mock.patch.object(web, "module_command_job") as update,
+        ):
+            web.switch_repository_branch_job(job, self.project, f"import:{URL}#18.0", "dev")
+
+        update.assert_not_called()
+        self.assertTrue(any("Toutes les bases du projet utilisent maintenant ce code" in line for line in job.lines))
+
+    def test_branch_switch_action_carries_the_base_update_choice(self):
+        self.run_import(["alpha"])
+        payload = {"project": self.project, "repository": f"import:{URL}#18.0", "branch": "dev"}
+
+        with mock.patch.object(web, "validate_project", return_value=self.project):
+            plain = web.switch_repository_branch_action(payload)
+            updating = web.switch_repository_branch_action({**payload, "update_databases": True})
+
+        self.assertFalse(plain.args[-1])
+        self.assertTrue(updating.args[-1])
+        self.assertIn("mettre à jour les bases", updating.title)
+
     def test_sdk_archive_is_replaced_by_a_clone_of_the_chosen_branch(self):
         archive = self.storage("sdk-addons")
         (archive / "alpha").mkdir(parents=True)

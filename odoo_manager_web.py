@@ -233,6 +233,7 @@ API_ENDPOINTS = {
         "/api/projects/{project}/database-retention",
         "/api/projects/{project}/repository/inspect",
         "/api/projects/{project}/repository/branches",
+        "/api/projects/{project}/repository/databases",
         "/api/projects/{project}/module-zip/inspect",
         "/api/projects/{project}/module-zip",
     ),
@@ -6802,6 +6803,54 @@ def repository_branches_view(request):
     return repository_branches(request.param("project"), payload.get("repository", ""))
 
 
+def repository_target_modules(target):
+    """Modules du dépôt présents dans le projet (ceux d'une copie importée, ou du dossier du dépôt)."""
+    if target["kind"] == "import":
+        return list(target["modules"])
+    return sorted(repository_module_names(ProjectCreator(SETTINGS, WORKSPACE, project_service()), target["root"]))
+
+
+def repository_installed_databases(project, modules):
+    """{base: modules de `modules` à mettre à jour} pour chaque base Odoo du projet qui en utilise.
+
+    Toutes les bases d'un projet partagent son code : un changement de branche les concerne toutes.
+    Les modules exclus localement des mises à jour d'une base le restent.
+    """
+    names = set(modules)
+    found = {}
+    for db_name in list_databases_for(project):
+        if db_name == "postgres":
+            continue
+        states = installed_modules(project, db_name)
+        installed = available_update_modules(
+            project,
+            db_name,
+            states=states,
+            available_names=names,
+            excluded_names=active_local_module_exceptions(project, db_name, states=states),
+        )
+        if installed:
+            found[db_name] = installed
+    return found
+
+
+def repository_databases(project, repository_id):
+    """Bases du projet qui utilisent des modules du dépôt ; illisibles tant que PostgreSQL est arrêté."""
+    target = switchable_repository(project, repository_id)
+    project = validate_project(project)
+    running = container_status(f"postgresql-{project}") == "running"
+    databases = repository_installed_databases(project, repository_target_modules(target)) if running else {}
+    return {
+        "running": running,
+        "databases": [{"name": db_name, "modules": modules} for db_name, modules in databases.items()],
+    }
+
+
+def repository_databases_view(request):
+    payload = request.handler.read_json()
+    return repository_databases(request.param("project"), payload.get("repository", ""))
+
+
 def repository_module_names(creator, root):
     try:
         return {path.name for path in creator.module_directories(root)}
@@ -6885,8 +6934,12 @@ def replace_archive_with_clone(job, creator, project, root, url, branch):
     job.add(f"Ancienne archive mise de côté : {backup}")
 
 
-def switch_repository_branch_job(job, project, repository_id, branch):
-    """Change la branche d'un dépôt de modules du projet, selon sa nature (voir switchable_repository)."""
+def switch_repository_branch_job(job, project, repository_id, branch, update_databases=False):
+    """Change la branche d'un dépôt de modules du projet, selon sa nature (voir switchable_repository).
+
+    Le code vaut pour toutes les bases du projet : avec `update_databases`, chaque base qui utilise
+    des modules du dépôt est ensuite mise à jour, pour que ses vues et données suivent ce code.
+    """
     target = switchable_repository(project, repository_id)
     project = validate_project(project)
     name, previous = target["name"], target["branch"]
@@ -6925,8 +6978,39 @@ def switch_repository_branch_job(job, project, repository_id, branch):
         if branch != previous
         else f"{name} : branche {branch} mise à jour depuis le serveur."
     )
-    job.add("Mets à jour les modules installés de ce dépôt dans la base Odoo pour qu'elle utilise ce code.")
     job.result = {"kind": "repository_branch", "repository": name, "branch": branch, "modules": modules}
+    if not update_databases:
+        job.add(
+            "Toutes les bases du projet utilisent maintenant ce code : mets à jour les modules de ce dépôt "
+            "dans chaque base qui les utilise, sinon ses écrans et ses données restent ceux de l'ancienne branche."
+        )
+        return
+    job.result["databases"] = update_repository_databases(job, project, modules)
+
+
+def update_repository_databases(job, project, modules):
+    """Met à jour, base par base, les modules de `modules` installés ; une base en échec n'arrête pas les autres."""
+    project_service().ensure_odoo_containers_ready(project, log=job.add)
+    databases = repository_installed_databases(project, modules)
+    if not databases:
+        job.add("Aucune base du projet n'utilise les modules de ce dépôt : rien à mettre à jour.")
+        return []
+    failures = []
+    for index, (db_name, names) in enumerate(databases.items(), start=1):
+        job.add("")
+        job.add(f"Base {index}/{len(databases)} : mise à jour de {db_name} ({', '.join(names)})")
+        try:
+            module_command_job(job, "--update-module", project, db_name, ",".join(names))
+        except Exception as exc:
+            failures.append(f"{db_name} ({exc})")
+            job.add(f"Mise à jour de {db_name} impossible : {exc}")
+    if failures:
+        raise RuntimeError(
+            f"Branche changée, mais {len(failures)} base(s) sur {len(databases)} n'ont pas pu être mises à jour : "
+            + " ; ".join(failures)
+        )
+    job.add(f"{len(databases)} base(s) mise(s) à jour avec le code de la nouvelle branche.")
+    return list(databases)
 
 
 def extract_zip_module_candidates(project, filename, upload):
@@ -7990,10 +8074,12 @@ def switch_repository_branch_action(payload):
     project = payload_project(payload)
     branch = validate_git_ref(payload.get("branch"))
     target = switchable_repository(project, payload.get("repository"))
+    update_databases = truthy(payload.get("update_databases"))
     return Job(
-        f"Changer de branche · {target['name']} → {branch}",
+        f"Changer de branche · {target['name']} → {branch}"
+        + (" et mettre à jour les bases" if update_databases else ""),
         switch_repository_branch_job,
-        (project, str(payload.get("repository")), branch),
+        (project, str(payload.get("repository")), branch, update_databases),
         project=project,
     )
 
@@ -8376,6 +8462,7 @@ ROUTER = Router(
         api_route("POST", "/api/projects/{project}/database-retention", extend_database_retention_view),
         api_route("POST", "/api/projects/{project}/repository/inspect", inspect_repository_view),
         api_route("POST", "/api/projects/{project}/repository/branches", repository_branches_view),
+        api_route("POST", "/api/projects/{project}/repository/databases", repository_databases_view),
         api_route("POST", "/api/projects/{project}/module-zip/inspect", inspect_module_zip_view),
         api_route("POST", "/api/projects/{project}/module-zip", import_module_zip_view),
         api_route("DELETE", "/api/errors", clear_errors_view),

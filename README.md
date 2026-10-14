@@ -419,6 +419,8 @@ Le dépôt d'un module est lu sans lancer Git (`odoo_manager_core/git_checkouts.
 
 Les dossiers du projet et `odoo/` ne comptent jamais comme dépôt d'un module : ils peuvent être le dépôt du modèle de projet ou le dépôt de production du client, qui ne suivent pas les copies d'`addons-store`.
 
+Un clic sur la branche d'un dépôt d'`addons-store` (clone, archive SDK ou copie importée) en change. Le code d'un projet est le même pour toutes ses bases : un seul serveur Odoo, un seul chemin des modules. La nouvelle branche vaut donc pour toutes les bases du projet. Avant de confirmer, le gestionnaire liste les bases qui utilisent des modules de ce dépôt et propose de les mettre à jour juste après, une par une (case cochée par défaut ; projet démarré si besoin, modules exclus localement d'une base laissés de côté). Sans cette mise à jour, une base garde les écrans et les données de l'ancienne branche alors que son code a changé. Pour faire tourner deux branches en même temps, chacune sur sa base, il faut deux projets.
+
 ---
 
 ## Tests
