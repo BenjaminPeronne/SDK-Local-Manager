@@ -1,6 +1,7 @@
 import http.client
 import json
 import os
+import subprocess
 import tempfile
 import threading
 import time
@@ -1358,6 +1359,32 @@ class CommandWorkingDirectoryTests(unittest.TestCase):
         self.assertEqual(Path(run.call_args.kwargs["cwd"]), Path.home())
 
 
+class PostgresServerWarningTests(unittest.TestCase):
+    # Écrit par PostgreSQL à chaque connexion quand son image trie le texte autrement (cas réel).
+    COLLATION_WARNING = (
+        'WARNING:  database "postgres" has a collation version mismatch\n'
+        "DETAIL:  The database was created using collation version 2.41, "
+        "but the operating system provides version 2.36.\n"
+        "HINT:  Rebuild all objects in this database that use the default collation and run "
+        "ALTER DATABASE postgres REFRESH COLLATION VERSION, or build PostgreSQL with the right library version.\n"
+    )
+
+    @patch("odoo_manager_web.container_status", return_value="running")
+    @patch("odoo_manager_web.subprocess.run")
+    def test_database_list_never_shows_server_warnings_as_databases(self, run, _status):
+        run.return_value = Mock(returncode=0, stdout="akaaz_05102026\npostgres\n", stderr=self.COLLATION_WARNING)
+
+        self.assertEqual(["akaaz_05102026", "postgres"], web.list_databases_for("AKAAZ"))
+        self.assertEqual(subprocess.PIPE, run.call_args.kwargs["stderr"])
+
+    @patch("odoo_manager_web.subprocess.run")
+    def test_failed_query_still_reports_the_server_error(self, run):
+        run.return_value = Mock(returncode=2, stdout="", stderr='psql: error: database "gone" does not exist')
+
+        with self.assertRaisesRegex(RuntimeError, '"gone" does not exist'):
+            web.db_query_lines("AKAAZ", "gone", "select 1;")
+
+
 class WslManagerCommandTests(unittest.TestCase):
     def test_generic_command_environment_keeps_host_paths(self):
         previous_settings = web.SETTINGS
@@ -2473,7 +2500,7 @@ class DiagnosticModuleTests(unittest.TestCase):
     def test_database_list_flags_cut_restores_but_not_the_one_being_loaded(self):
         answers = {"aca_05102026": "16.0.1.3|0", "aca_ok": "16.0.1.3|4812", "loading": "16.0.1.3|0", "other": ""}
 
-        def capture(command, timeout=8):
+        def capture(command, timeout=8, **_kwargs):
             return 0, answers[command[command.index("-d") + 1]]
 
         with (

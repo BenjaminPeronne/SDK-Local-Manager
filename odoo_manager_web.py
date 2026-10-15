@@ -759,7 +759,8 @@ def html_response(handler, body, status=200):
         return None
 
 
-def run_capture(args, cwd=None, timeout=12):
+def run_capture(args, cwd=None, timeout=12, stdout_only=False):
+    """(code, sortie et erreurs mêlées) ; `stdout_only` : une réussite ne rend que la sortie standard."""
     requested_cwd = Path(cwd) if cwd is not None else None
     command_cwd = requested_cwd
     if command_cwd is None:
@@ -787,12 +788,14 @@ def run_capture(args, cwd=None, timeout=12):
             cwd=str(command_cwd),
             env=command_env(),
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE if stdout_only else subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
             **hidden_process_kwargs(),
         )
+        if stdout_only and result.returncode != 0:
+            return result.returncode, "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
         return result.returncode, result.stdout.strip()
     except OSError as exc:
         return 127, str(exc)
@@ -1591,14 +1594,26 @@ def project_odoo_version(project):
     return ""
 
 
+def psql_capture(project, query, db_name=None, timeout=12):
+    """Requête dans le PostgreSQL du projet : une réussite ne rend que son résultat.
+
+    Le serveur écrit ses avertissements sur la sortie d'erreur même quand la requête réussit
+    (« collation version mismatch » après un changement d'image) : mêlés au résultat, ils
+    s'affichaient comme des bases dans la liste.
+    """
+    database = ["-d", db_name] if db_name else []
+    return run_capture(
+        docker_command(SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", *database, "-Atc", query),
+        timeout=timeout,
+        stdout_only=True,
+    )
+
+
 def list_databases_for(project, check_container=True):
     if check_container and container_status(f"postgresql-{project}") != "running":
         return []
     query = "select datname from pg_database where datistemplate = false order by datname;"
-    code, output = run_capture(
-        docker_command(SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-Atc", query),
-        timeout=12,
-    )
+    code, output = psql_capture(project, query)
     if code != 0:
         return []
     return [line.strip() for line in output.splitlines() if line.strip()]
@@ -1612,10 +1627,7 @@ def database_oids_for(project, check_container=True):
     if check_container and container_status(f"postgresql-{project}") != "running":
         return None
     query = "select oid, datname from pg_database where datistemplate = false;"
-    code, output = run_capture(
-        docker_command(SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-Atc", query),
-        timeout=12,
-    )
+    code, output = psql_capture(project, query)
     if code != 0:
         return None
     databases = {}
@@ -1706,21 +1718,7 @@ def database_base_versions(project, databases):
     for db_name in databases:
         if db_name == "postgres":
             continue
-        code, output = run_capture(
-            docker_command(
-                SETTINGS,
-                "exec",
-                f"postgresql-{project}",
-                "psql",
-                "-U",
-                "postgres",
-                "-d",
-                db_name,
-                "-Atc",
-                DATABASE_STATE_SQL,
-            ),
-            timeout=8,
-        )
+        code, output = psql_capture(project, DATABASE_STATE_SQL, db_name, timeout=8)
         lines = output.strip().splitlines() if code == 0 else []
         version, _separator, foreign_keys = lines[0].partition("|") if lines else ("", "", "")
         if version:
@@ -2366,12 +2364,7 @@ def installed_modules(project, db_name, check_container=True):
         "select name,state,coalesce(latest_version,''),coalesce(application,false),"
         "replace(coalesce(shortdesc::text,''),E'\\n',' ') from ir_module_module order by name;"
     )
-    code, output = run_capture(
-        docker_command(
-            SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-d", db_name, "-Atc", query
-        ),
-        timeout=18,
-    )
+    code, output = psql_capture(project, query, db_name, timeout=18)
     states = {}
     if code != 0:
         return states
@@ -2701,12 +2694,7 @@ RESTORE_COMPLETENESS_SQL = (
 
 
 def db_query_lines(project, db_name, query, timeout=18):
-    code, output = run_capture(
-        docker_command(
-            SETTINGS, "exec", f"postgresql-{project}", "psql", "-U", "postgres", "-d", db_name, "-Atc", query
-        ),
-        timeout=timeout,
-    )
+    code, output = psql_capture(project, query, db_name, timeout=timeout)
     if code != 0:
         raise RuntimeError(output or "Requête PostgreSQL impossible.")
     return [line.strip() for line in output.splitlines() if line.strip()]

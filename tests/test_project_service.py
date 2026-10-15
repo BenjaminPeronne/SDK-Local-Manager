@@ -1,4 +1,5 @@
 import io
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -7,6 +8,7 @@ from unittest.mock import ANY, patch
 
 from odoo_manager_core.config import ManagerSettings
 from odoo_manager_core.project_service import (
+    COLLATION_MISMATCH_SQL,
     DATABASE_EXPIRATION_DAYS,
     ODOO_STARTUP_LOG,
     ODOO_STARTUP_STATUS,
@@ -1713,6 +1715,22 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertTrue(has_command_tail(commands, ["compose", "up", "-d"]))
         self.assertFalse(has_command_tail(commands, ["compose", "up", "-d", "--no-recreate"]))
 
+    def test_start_and_update_bring_databases_in_line_with_the_text_sorting_of_the_postgres_image(self):
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        for action in (self.service.start_project, self.service.update_project):
+            with self.subTest(action=action.__name__):
+                self.runner.captures = []
+                self.runner.database_query_outputs[COLLATION_MISMATCH_SQL] = "postgres"
+
+                action("DEMO", log=lambda _line: None)
+
+                self.assertTrue(
+                    any(
+                        'ALTER DATABASE "postgres" REFRESH COLLATION VERSION' in command
+                        for command, _cwd, _timeout in self.runner.captures
+                    )
+                )
+
     def test_update_project_restarts_odoo_when_the_new_image_recreated_its_container(self):
         # Avant : serveur Odoo actif ; après la recréation sur la nouvelle image : plus de serveur.
         self.runner.odoo_states = ["running", "exited:1"]
@@ -1910,8 +1928,8 @@ class ProjectServiceTests(unittest.TestCase):
     def capture_extension_attempts(self, outputs):
         attempts = []
 
-        def capture(command, cwd=None, timeout=10):
-            if "psql" in command:
+        def capture(command, cwd=None, timeout=10, **_kwargs):
+            if any("CREATE EXTENSION" in argument for argument in command):
                 attempts.append(list(command))
                 return outputs[min(len(attempts), len(outputs)) - 1]
             return self.runner.capture(command, cwd, timeout)
@@ -1934,6 +1952,8 @@ class ProjectServiceTests(unittest.TestCase):
         # Seul PostgreSQL est recréé : le conteneur Odoo et son serveur restent en place.
         self.assertTrue(has_command_tail(commands, ["compose", "up", "-d", "--no-deps", "postgresql-DEMO"]))
         wait_for_postgres.assert_called_once_with("DEMO", log=ANY)
+        # L'image pgvector peut reposer sur un autre Debian : le tri du texte des bases est vérifié.
+        self.assertTrue(any(COLLATION_MISMATCH_SQL in command for command, _cwd, _timeout in self.runner.captures))
         backups = list(self.project_path.glob("compose.yml.pgvector.bak.*"))
         self.assertEqual([self.POSTGRES_16_COMPOSE], [backup.read_text(encoding="utf-8") for backup in backups])
 
@@ -2007,10 +2027,76 @@ class ProjectServiceTests(unittest.TestCase):
 
         self.assertTrue(any("No such container" in line for line in logs))
 
+    def test_databases_sorted_with_another_system_library_get_their_indexes_rebuilt(self):
+        commands = []
+
+        def capture(command, cwd=None, timeout=10, **_kwargs):
+            command = list(command)
+            commands.append(command)
+            return (0, "postgres\ntemplate1") if "-Atc" in command else (0, "")
+
+        logs = []
+        with patch.object(self.service, "capture", side_effect=capture):
+            repaired = self.service.refresh_collation_versions("DEMO", log=logs.append)
+
+        self.assertEqual(["postgres", "template1"], repaired)
+        repair = commands[-1]
+        self.assertIn("postgresql-DEMO", repair)
+        # La version n'est enregistrée qu'une fois les index reconstruits : psql s'arrête à la première erreur.
+        self.assertIn("ON_ERROR_STOP=1", repair)
+        self.assertEqual(
+            [
+                '\\connect "postgres"',
+                'REINDEX DATABASE "postgres"',
+                'ALTER DATABASE "postgres" REFRESH COLLATION VERSION',
+                '\\connect "template1"',
+                'REINDEX DATABASE "template1"',
+                'ALTER DATABASE "template1" REFRESH COLLATION VERSION',
+            ],
+            [repair[index + 1] for index, argument in enumerate(repair) if argument == "-c"],
+        )
+        self.assertTrue(logs[-1].endswith("postgres, template1"))
+
+    def test_collation_check_is_silent_when_in_line_or_before_postgresql_15(self):
+        for listing in ((0, ""), (1, 'ERROR:  column "datcollversion" does not exist')):
+            with self.subTest(listing=listing):
+                commands = []
+
+                def capture(command, cwd=None, timeout=10, listing=listing, commands=commands, **_kwargs):
+                    commands.append(list(command))
+                    return listing
+
+                logs = []
+                with patch.object(self.service, "capture", side_effect=capture):
+                    self.assertEqual([], self.service.refresh_collation_versions("DEMO", log=logs.append))
+                self.assertEqual(1, len(commands))
+                self.assertEqual([], logs)
+
+    def test_failed_collation_repair_never_blocks_the_action(self):
+        def capture(command, cwd=None, timeout=10, **_kwargs):
+            return (0, "postgres") if "-Atc" in command else (1, "ERROR:  could not create unique index")
+
+        logs = []
+        with patch.object(self.service, "capture", side_effect=capture):
+            self.assertEqual([], self.service.refresh_collation_versions("DEMO", log=logs.append))
+
+        self.assertTrue(logs[-1].startswith("Index des bases non reconstruits"))
+        self.assertIn("could not create unique index", logs[-1])
+
+    def test_server_warnings_never_pass_for_a_query_result(self):
+        # Avertissement écrit par PostgreSQL à chaque connexion après un changement d'image.
+        warning = 'WARNING:  database "postgres" has a collation version mismatch'
+        service = ProjectService(self.settings, self.root)
+        completed = subprocess.CompletedProcess([], 0, stdout="", stderr=warning)
+
+        with patch("odoo_manager_core.project_service.jobs.run_process", return_value=completed):
+            self.assertEqual([], service._postgres_lines("DEMO", "postgres", "select 1 where false;"))
+            self.assertEqual((0, warning), service.capture(["docker", "compose", "version"]))
+
     def test_database_links_are_aligned_in_every_database_with_one_command(self):
         commands = []
 
-        def capture(command, cwd=None, timeout=10):
+        def capture(command, cwd=None, timeout=10, **_kwargs):
             command = list(command)
             commands.append(command)
             if "port" in command:
@@ -2035,7 +2121,7 @@ class ProjectServiceTests(unittest.TestCase):
         for listing, align in (((1, "connection refused"), (0, "")), ((0, "client_a"), (1, "psql: erreur"))):
             with self.subTest(listing=listing, align=align):
 
-                def capture(command, cwd=None, timeout=10, listing=listing, align=align):
+                def capture(command, cwd=None, timeout=10, listing=listing, align=align, **_kwargs):
                     command = list(command)
                     if "psql" not in command:
                         return 1, ""
@@ -2048,7 +2134,7 @@ class ProjectServiceTests(unittest.TestCase):
                 self.assertTrue(logs[0].startswith("Liens des bases non vérifiés"))
 
     def test_orphan_report_expressions_of_the_module_are_deleted_through_the_postgres_role(self):
-        def capture(command, cwd=None, timeout=10):
+        def capture(command, cwd=None, timeout=10, **_kwargs):
             self.runner.captures.append((list(command), cwd, timeout))
             return 0, "163\n174\n"
 

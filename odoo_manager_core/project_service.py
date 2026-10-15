@@ -488,6 +488,16 @@ control="$(pg_config --sharedir)/extension/vector.control"
 grep -Eq '^[[:space:]]*trusted[[:space:]]*=' "$control" && exit 0
 printf '\ntrusted = true\n' >> "$control" && echo changed
 """
+# Bases dont le tri du texte a été enregistré avec une autre version de la bibliothèque du système
+# (glibc) que celle de l'image PostgreSQL actuelle. PostgreSQL 15+ seulement : les versions plus
+# anciennes n'ont ni la colonne ni la fonction, la requête y échoue (« does not exist »).
+COLLATION_MISMATCH_SQL = (
+    "select datname from pg_database "
+    "where datallowconn and datcollversion <> pg_database_collation_actual_version(oid) order by datname;"
+)
+# Reconstruire les index de postgres et template1 est instantané ; une base de travail créée avec le
+# tri par défaut (pas celles d'Odoo ni du gestionnaire, triées en « C ») peut demander plus longtemps.
+COLLATION_REFRESH_TIMEOUT = 900
 PGVECTOR_IMAGE_REQUIRED_MESSAGE = (
     "L'IA d'Odoo a besoin de l'extension « vector », absente du serveur de bases PostgreSQL de ce projet. "
     "Dans le docker-compose.yml du projet, remplace l'image PostgreSQL par pgvector/pgvector de la même version "
@@ -626,7 +636,13 @@ class ProjectService:
         jobs.checkpoint()
         return code
 
-    def capture(self, command, cwd=None, timeout=10):
+    def capture(self, command, cwd=None, timeout=10, stdout_only=False):
+        """(code, sortie) ; une réussite sans sortie standard rend la sortie d'erreur.
+
+        `stdout_only` pour les requêtes psql : le serveur écrit ses avertissements sur la sortie
+        d'erreur même quand la requête réussit (« collation version mismatch » après un changement
+        d'image), et un résultat vide les ferait passer pour des lignes de résultat.
+        """
         cwd = Path(cwd or self.workspace)
         command, process_cwd = self.prepare_command(command, cwd)
         if self.runner:
@@ -648,7 +664,7 @@ class ProjectService:
             stdout = (result.stdout or "").strip()
             stderr = (result.stderr or "").strip()
             if result.returncode == 0:
-                return result.returncode, stdout or stderr
+                return result.returncode, stdout if stdout_only else stdout or stderr
             return result.returncode, "\n".join(part for part in (stdout, stderr) if part)
         except OSError as exc:
             return 127, str(exc)
@@ -2462,6 +2478,7 @@ class ProjectService:
                 query,
             ),
             timeout=timeout,
+            stdout_only=True,
         )
         if code != 0:
             raise RuntimeError(output.strip()[-500:] or f"Requête PostgreSQL refusée sur {db_name}.")
@@ -2924,6 +2941,65 @@ class ProjectService:
             )
         return False
 
+    def refresh_collation_versions(self, project, log=None):
+        """Remet les bases en accord avec le tri du texte de l'image PostgreSQL actuelle.
+
+        Une image bâtie sur un autre Debian (postgres:16 sur Debian 13 remplacée par pgvector:pg16
+        sur Debian 12, ou une image mise à jour) trie le texte avec une autre version de glibc.
+        PostgreSQL l'écrit alors en avertissement à chaque connexion à la base concernée, et refuse
+        de créer une base depuis template1. Comme le demande PostgreSQL, les index sont reconstruits
+        avec le tri actuel avant d'en enregistrer la version. Ne fait jamais échouer l'action en cours.
+        Retourne les bases remises en accord.
+        """
+        try:
+            names = self._postgres_lines(project, "postgres", COLLATION_MISMATCH_SQL)
+        except RuntimeError as exc:
+            if "does not exist" not in str(exc):
+                self.log(log, f"Tri du texte des bases non vérifié : {exc}")
+            return []
+        if not names:
+            return []
+        self.log(
+            log,
+            "Le tri du texte de PostgreSQL a changé avec son image : reconstruction des index de "
+            + ", ".join(names)
+            + "...",
+        )
+        arguments = []
+        for name in names:
+            identifier = database_restore.sql_identifier(name)
+            # REINDEX DATABASE ne vise que la base où psql est connecté, hors transaction : un -c chacun.
+            arguments += [
+                "-c",
+                f"\\connect {identifier}",
+                "-c",
+                f"REINDEX DATABASE {identifier}",
+                "-c",
+                f"ALTER DATABASE {identifier} REFRESH COLLATION VERSION",
+            ]
+        code, output = self.capture(
+            self.docker(
+                "exec",
+                f"postgresql-{project}",
+                "psql",
+                "-X",
+                "-q",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "postgres",
+                "-d",
+                "postgres",
+                *arguments,
+            ),
+            timeout=COLLATION_REFRESH_TIMEOUT,
+        )
+        if code != 0:
+            self.log(log, f"Index des bases non reconstruits : {output.strip()[-300:] or f'code {code}'}")
+            return []
+        self.log(log, "Bases remises en accord avec le tri du texte de PostgreSQL : " + ", ".join(names))
+        return names
+
     def run_create_postgres_extension(self, project, db_name, extension, schema=None):
         sql = f'CREATE EXTENSION IF NOT EXISTS "{extension}";'
         if schema:
@@ -2981,6 +3057,8 @@ class ProjectService:
             raise RuntimeError(f"Impossible de recréer le conteneur PostgreSQL sur l'image {image}.")
         self.wait_for_postgres(project, log=log)
         self.trust_pgvector_extension(project, log=log)
+        # L'image pgvector peut reposer sur un autre Debian que l'image officielle qu'elle remplace.
+        self.refresh_collation_versions(project, log=log)
         return True
 
     def odoo_addons_paths(self, project):
@@ -3079,6 +3157,7 @@ class ProjectService:
                 sql,
             ),
             timeout=30,
+            stdout_only=True,
         )
         if code != 0:
             raise RuntimeError(f"Nettoyage des expressions de rapport de {module} impossible : {output.strip()}")
@@ -3615,6 +3694,7 @@ env.cr.commit()
                 f"select name from ir_module_module where state in {PENDING_MODULE_STATES_SQL} order by name;",
             ),
             timeout=20,
+            stdout_only=True,
         )
         if code != 0:
             return None
@@ -3661,6 +3741,7 @@ env.cr.commit()
                 query,
             ),
             timeout=60,
+            stdout_only=True,
         )
         if code != 0:
             raise RuntimeError(output or f"Remise en état des modules de {db_name} impossible.")
@@ -3750,6 +3831,7 @@ print("Désinstallation terminée.")
                 query,
             ),
             timeout=timeout,
+            stdout_only=True,
         )
         if code != 0:
             raise RuntimeError(output or "Le contrôle PostgreSQL de la neutralisation a échoué.")
@@ -3977,6 +4059,7 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
             # Un projet doit démarrer même avec les réglages d'origine de PostgreSQL.
             self.log(log, f"Réglages PostgreSQL non appliqués : {exc}")
         self.trust_pgvector_extension(project, log=log)
+        self.refresh_collation_versions(project, log=log)
         self.align_database_urls(project, log=log)
 
     def align_database_urls(self, project, log=None):
@@ -4014,6 +4097,7 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
                     *arguments,
                 ),
                 timeout=60,
+                stdout_only=True,
             )
         except (OSError, RuntimeError) as exc:
             self.log(log, f"Liens des bases non vérifiés : {exc}")
@@ -4073,8 +4157,10 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
 
         self.log(log, "Redémarrage compose...")
         self.compose_up_project(project, path, log=log, recreate_changed=True)
-        # Un conteneur PostgreSQL recréé sur une nouvelle image a perdu cette autorisation.
+        # Un conteneur PostgreSQL recréé sur une nouvelle image a perdu cette autorisation, et la
+        # nouvelle image peut trier le texte autrement.
         self.trust_pgvector_extension(project, log=log)
+        self.refresh_collation_versions(project, log=log)
         # Un conteneur recréé sur la nouvelle image repart sans serveur Odoo : il est relancé
         # s'il tournait avant la mise à jour.
         if odoo_was_serving and self.odoo_server_state(container) != "running":
