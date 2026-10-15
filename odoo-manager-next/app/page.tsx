@@ -38,6 +38,7 @@ import {
 import { isJobActive, isJobUnfinished, PROJECT_ARRIVAL_PREFIXES } from "@/lib/jobs";
 import { latestModuleSourcesJob, type ModuleSourceGroup } from "@/lib/module-sources";
 import { moduleRepositoryUrlError, socleAppInstalled } from "@/lib/modules";
+import { gitlabTokenNotice } from "@/lib/gitlab-token";
 import { noticeSnoozed } from "@/lib/notice-snooze";
 import { fallbackManagerSettings, firstOdooDatabase } from "@/lib/projects";
 import { deletionDate, deletionLabel, notificationKey, upcomingDeletions } from "@/lib/retention";
@@ -101,6 +102,7 @@ import { RetentionNotice } from "@/components/notices/retention-notice";
 import { StagingCleanupNotice } from "@/components/notices/staging-cleanup-notice";
 import { TraefikNotice } from "@/components/notices/traefik-notice";
 import { OnboardingDialog } from "@/components/onboarding/onboarding-dialog";
+import { GitLabTokenDialog } from "@/components/onboarding/gitlab-token-dialog";
 import { SshKeyDialog } from "@/components/onboarding/ssh-key-dialog";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
 import { DeleteProjectDialog } from "@/components/projects/delete-project-dialog";
@@ -190,6 +192,7 @@ export default function Home() {
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [repositoryBranch, setRepositoryBranch] = useState("");
   const [gitlabStatus, setGitlabStatus] = useState<GitLabStatus | null>(null);
+  const [gitlabTokenOpen, setGitlabTokenOpen] = useState(false);
   const repositoryUrlError = moduleRepositoryUrlError(repositoryUrl);
   const [zipDialogOpen, setZipDialogOpen] = useState(false);
   const [createDbOpen, setCreateDbOpen] = useState(false);
@@ -312,6 +315,7 @@ export default function Home() {
   const updateInstaller = useUpdateInstaller(appUpdate);
   const onboardingPrompted = useRef(false);
   const wslSetupPrompted = useRef(false);
+  const gitlabTokenChecked = useRef(false);
   const logOutputRef = useRef<HTMLPreElement>(null);
   const previousSelectedJobRef = useRef<{ id: number | null; status: string | null }>({ id: null, status: null });
   const logAutoFollow = useRef(true);
@@ -459,20 +463,19 @@ export default function Home() {
       ?.rikaCredentials()
       .then(setStoredRikaCredentials)
       .catch(() => setStoredRikaCredentials(null));
-    window.sdkDesktop
+    const bridge = window.sdkDesktop;
+    bridge
       ?.gitlabStatus()
-      .then(setGitlabStatus)
+      .then((status) => {
+        setGitlabStatus(status);
+        // Affiché tout de suite, puis confirmé par GitLab : un jeton expiré ne reste pas « Connecté ».
+        if (status.connected) return bridge.gitlabCheck().then(setGitlabStatus);
+      })
       .catch(() => setGitlabStatus(null));
     void loadSettings();
     void loadSshKeys();
     void loadManagerErrors();
   }, [loadSettings, overview, setSettingsDraft, settings, systemStatus]);
-
-  // Raccourci vers les comptes : « Connecter GitLab » y mène directement.
-  const openAccountSettings = useCallback(() => {
-    setSettingsSection("accounts");
-    openSettingsDialog();
-  }, [openSettingsDialog]);
 
   const loadCreationPrerequisites = useCallback(async () => {
     setLoadingCreationPrerequisites(true);
@@ -617,6 +620,24 @@ export default function Home() {
       })
       .catch(() => setDegradedBackendReason(""));
   }, [initializing]);
+
+  // Jeton GitLab expiré ou expirant dans la semaine : dit au lancement, pas à la première recherche ratée.
+  useEffect(() => {
+    const bridge = desktopBridge();
+    if (initializing || !bridge || gitlabTokenChecked.current) return;
+    gitlabTokenChecked.current = true;
+    bridge
+      .gitlabCheck()
+      .then((status) => {
+        setGitlabStatus(status);
+        const notice = gitlabTokenNotice(status);
+        if (!notice) return;
+        pushToast("info", notice.expired ? `${notice.text} La recherche de dépôts est en pause.` : notice.text, {
+          action: { label: "Remplacer le jeton", onClick: () => setGitlabTokenOpen(true) },
+        });
+      })
+      .catch(() => undefined);
+  }, [initializing, pushToast]);
 
   // Disque qui porte le dossier des projets : relu quand ce dossier change.
   const workspacePath = systemStatus?.workspace ?? "";
@@ -1947,6 +1968,15 @@ export default function Home() {
         traefikInstallRunning={traefikInstallRunning}
       />
 
+      <GitLabTokenDialog
+        open={gitlabTokenOpen}
+        onOpenChange={setGitlabTokenOpen}
+        status={gitlabStatus}
+        onConnected={setGitlabStatus}
+        openUrl={openUrl}
+        pushToast={pushToast}
+      />
+
       <SshKeyDialog
         creationPrerequisites={creationPrerequisites}
         provider={sshProvider}
@@ -1980,10 +2010,9 @@ export default function Home() {
         loading={loading}
         onRefreshPrerequisites={loadCreationPrerequisites}
         onSubmit={requestProjectCreation}
-        onManageGitlab={() => {
-          setCreateProjectOpen(false);
-          openAccountSettings();
-        }}
+        gitlabStatus={gitlabStatus}
+        setGitlabStatus={setGitlabStatus}
+        onManageGitlab={() => setGitlabTokenOpen(true)}
       />
 
       <SettingsDialog
@@ -2001,6 +2030,7 @@ export default function Home() {
         migrationCandidates={migrationCandidates}
         onOpenChange={setSettingsOpen}
         open={settingsOpen}
+        openGitlabTokenAssistant={() => setGitlabTokenOpen(true)}
         openSshAssistant={openSshAssistant}
         pushToast={pushToast}
         refreshMigration={refreshMigration}
@@ -2071,7 +2101,7 @@ export default function Home() {
         gitlabStatus={gitlabStatus}
         onOpenChange={setRepositoryOpen}
         open={repositoryOpen}
-        openAccountSettings={openAccountSettings}
+        openGitlabTokenAssistant={() => setGitlabTokenOpen(true)}
         openSshAssistant={openSshAssistant}
         repositoryBranch={repositoryBranch}
         repositoryInspectionKey={repositoryInspectionKey}

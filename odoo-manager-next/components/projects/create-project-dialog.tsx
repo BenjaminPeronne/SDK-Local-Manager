@@ -73,6 +73,8 @@ export function CreateProjectDialog({
   loading,
   onRefreshPrerequisites,
   onSubmit,
+  gitlabStatus,
+  setGitlabStatus,
   onManageGitlab,
 }: {
   open: boolean;
@@ -84,6 +86,9 @@ export function CreateProjectDialog({
   loading: boolean;
   onRefreshPrerequisites: () => Promise<ProjectCreationPrerequisites | null>;
   onSubmit: (payload: Record<string, unknown>) => Promise<boolean>;
+  /** État du compte GitLab, partagé avec la page : l'assistant de jeton le met à jour par-dessus la fenêtre. */
+  gitlabStatus: GitLabStatus | null;
+  setGitlabStatus: (status: GitLabStatus | null) => void;
   onManageGitlab: () => void;
 }) {
   const [name, setName] = useState("");
@@ -94,7 +99,6 @@ export function CreateProjectDialog({
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [repositoryBranch, setRepositoryBranch] = useState("master");
   const [repositorySource, setRepositorySource] = useState<RepositorySource>("ssh");
-  const [gitlabStatus, setGitlabStatus] = useState<GitLabStatus | null>(null);
   const [rikaInstance, setRikaInstance] = useState("");
   const [rikaLogin, setRikaLogin] = useState("");
   const [rikaPassword, setRikaPassword] = useState("");
@@ -155,7 +159,7 @@ export function CreateProjectDialog({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, setGitlabStatus]);
 
   const hasStoredRikaCredentials = Boolean(credentialStore?.login);
 
@@ -326,6 +330,7 @@ export function CreateProjectDialog({
                     setRepositoryBranch(branch);
                   }}
                   onManageAccount={onManageGitlab}
+                  onStatusChange={setGitlabStatus}
                 />
               ) : (
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">

@@ -31,7 +31,7 @@ type RepositoryImportDialogProps = {
   gitlabStatus: GitLabStatus | null;
   onOpenChange: (open: boolean) => void;
   open: boolean;
-  openAccountSettings: () => void;
+  openGitlabTokenAssistant: () => void;
   openSshAssistant: (regenerate?: boolean) => Promise<void>;
   repositoryBranch: string;
   repositoryInspectionKey: string;
@@ -54,7 +54,7 @@ export function RepositoryImportDialog({
   gitlabStatus,
   onOpenChange,
   open,
-  openAccountSettings,
+  openGitlabTokenAssistant,
   openSshAssistant,
   repositoryBranch,
   repositoryInspectionKey,
@@ -291,10 +291,8 @@ export function RepositoryImportDialog({
                   setRepositoryUrl(url);
                   setRepositoryBranch(branch);
                 }}
-                onManageAccount={() => {
-                  onOpenChange(false);
-                  openAccountSettings();
-                }}
+                onManageAccount={openGitlabTokenAssistant}
+                onStatusChange={setGitlabStatus}
               />
             ) : (
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">

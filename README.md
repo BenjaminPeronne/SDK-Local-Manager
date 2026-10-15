@@ -38,7 +38,7 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 **Projets**
 - Création d'un projet Odoo **standard**, **standard + dépôt d'addons GitLab**, ou **copie d'une instance RIKA** (version Odoo détectée automatiquement).
 - Nom de projet mis en forme pendant la saisie (« Client V19 » → `client_v19`), adresse affichée, et refus d'un nom déjà pris à la casse près ; les noms s'affichent en majuscules.
-- Connexion facultative à un compte GitLab (jeton personnel) pour rechercher les dépôts et choisir la branche ou le tag au clavier.
+- Connexion facultative à un compte GitLab (jeton personnel en lecture seule, propre à chaque poste) pour rechercher les dépôts et choisir la branche ou le tag au clavier. Un assistant en trois étapes guide la création du jeton ; l'application signale un jeton expiré et prévient une semaine avant son expiration.
 - Préparation dans un dossier temporaire puis déplacement en une seule opération : un clone interrompu ne laisse pas de projet à moitié créé.
 - Démarrage, arrêt, logs en direct, diagnostic et ouverture d'Odoo dans le navigateur une fois Traefik prêt, en mode normal ou debug (`?debug=1`, `?debug=assets`).
 - Suppression réversible : le projet est déplacé dans `.odoo_manager_deleted/`.

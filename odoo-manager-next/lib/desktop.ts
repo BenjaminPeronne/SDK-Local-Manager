@@ -19,6 +19,8 @@ export interface DesktopBridge {
   saveRikaCredentials(login: string, password: string | null): Promise<void>;
   clearRikaCredentials(): Promise<void>;
   gitlabStatus(): Promise<GitLabStatus>;
+  /** Vérifie le jeton auprès de GitLab (validité, date d'expiration) ; plus lent que `gitlabStatus`. */
+  gitlabCheck(): Promise<GitLabStatus>;
   gitlabConnect(token: string): Promise<GitLabStatus>;
   gitlabDisconnect(): Promise<GitLabStatus>;
   gitlabProjects(search: string): Promise<GitLabProject[]>;
@@ -96,6 +98,12 @@ export interface GitLabStatus {
   connected: boolean;
   /** Jeton enregistré mais indéchiffrable : le compte est à reconnecter. */
   unreadable?: boolean;
+  /** Jeton enregistré mais refusé par GitLab ou arrivé à expiration : à remplacer. */
+  expired?: boolean;
+  /** Date d'expiration du jeton (AAAA-MM-JJ) ; vide si GitLab ne l'a pas donnée. */
+  expiresAt?: string;
+  /** Jours avant l'expiration ; null si la date est inconnue. */
+  daysLeft?: number | null;
   username: string;
   url: string;
 }

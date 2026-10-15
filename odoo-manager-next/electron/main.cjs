@@ -292,6 +292,7 @@ function installHandlers() {
     fetch: (url, init) => net.fetch(url, init),
   });
   handle("gitlab-status", () => gitlab.status());
+  handle("gitlab-check", () => gitlab.check());
   handle("gitlab-connect", (token) => gitlab.connect(token));
   handle("gitlab-disconnect", () => gitlab.disconnect());
   handle("gitlab-projects", (search) => gitlab.searchProjects(search));

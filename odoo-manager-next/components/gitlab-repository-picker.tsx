@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { desktopErrorMessage, type GitLabProject, type GitLabRefs, type GitLabStatus } from "@/lib/desktop";
+import { gitlabTokenNotice } from "@/lib/gitlab-token";
 import { handleListKeys } from "@/lib/list-navigation";
 import { cn } from "@/lib/utils";
 
@@ -81,6 +82,7 @@ export function GitLabRepositoryPicker({
   preferDefaultBranch = false,
   onChange,
   onManageAccount,
+  onStatusChange,
 }: {
   status: GitLabStatus | null;
   /** Dépôt déjà retenu par la fenêtre : toujours affiché, jamais gardé en mémoire à l'insu de l'utilisateur. */
@@ -92,6 +94,8 @@ export function GitLabRepositoryPicker({
   preferDefaultBranch?: boolean;
   onChange: (value: { url: string; branch: string }) => void;
   onManageAccount?: () => void;
+  /** État du compte relu après un refus de GitLab : un jeton qui vient d'expirer s'affiche comme tel. */
+  onStatusChange?: (status: GitLabStatus) => void;
 }) {
   const [search, setSearch] = useState("");
   const [projects, setProjects] = useState<GitLabProject[] | null>(null);
@@ -106,6 +110,7 @@ export function GitLabRepositoryPicker({
   // Une fois une branche choisie, la liste se replie sur un résumé compact ; « Changer » la rouvre.
   const [changingBranch, setChangingBranch] = useState(false);
   const connected = Boolean(status?.connected);
+  const notice = gitlabTokenNotice(status);
 
   const refOptions = useMemo(
     () =>
@@ -137,13 +142,18 @@ export function GitLabRepositoryPicker({
           if (cancelled) return;
           setProjects([]);
           setError(desktopErrorMessage(err, "Recherche GitLab impossible."));
+          if (onStatusChange)
+            void bridge
+              .gitlabStatus()
+              .then(onStatusChange)
+              .catch(() => undefined);
         });
     }, 350);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [connected, project, search]);
+  }, [connected, onStatusChange, project, search]);
 
   useEffect(() => {
     const bridge = window.sdkDesktop;
@@ -162,13 +172,18 @@ export function GitLabRepositoryPicker({
           if (cancelled) return;
           setRefs({ branches: [], tags: [] });
           setError(desktopErrorMessage(err, "Lecture des branches impossible."));
+          if (onStatusChange)
+            void bridge
+              .gitlabStatus()
+              .then(onStatusChange)
+              .catch(() => undefined);
         });
     }, 300);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [connected, project, refSearch]);
+  }, [connected, onStatusChange, project, refSearch]);
 
   // Branche proposée d'office, sans jamais écraser un choix déjà fait.
   useEffect(() => {
@@ -247,11 +262,13 @@ export function GitLabRepositoryPicker({
             <KeyRound className="mt-0.5 h-4 w-4 shrink-0" />
             {status?.unreadable
               ? status.reason
-              : "Connecte ton compte GitLab pour retrouver tes dépôts et leurs branches sans copier d’URL."}
+              : notice?.expired
+                ? `${notice.text} Remplace-le pour retrouver la recherche de dépôts, ou utilise le lien SSH.`
+                : "Connecte ton compte GitLab pour retrouver tes dépôts et leurs branches sans copier d’URL."}
           </p>
           {onManageAccount && (
             <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={onManageAccount}>
-              {status?.unreadable ? "Reconnecter GitLab" : "Connecter GitLab"}
+              {status?.unreadable ? "Reconnecter GitLab" : status?.expired ? "Remplacer le jeton" : "Connecter GitLab"}
             </Button>
           )}
         </div>
@@ -266,6 +283,16 @@ export function GitLabRepositoryPicker({
 
   return (
     <div className="space-y-3">
+      {notice && !notice.expired && (
+        <div className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100">
+          <p>{notice.text} Remplace-le avant pour garder cette recherche.</p>
+          {onManageAccount && (
+            <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={onManageAccount}>
+              Remplacer le jeton
+            </Button>
+          )}
+        </div>
+      )}
       {error && <p className="text-sm text-destructive">{error}</p>}
       {!project ? (
         <div className="space-y-2">

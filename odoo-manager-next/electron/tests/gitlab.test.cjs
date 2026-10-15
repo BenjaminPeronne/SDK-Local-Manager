@@ -26,7 +26,10 @@ function fakeFetch(routes, calls) {
   };
 }
 
-function client(t, routes, calls = []) {
+// 15 octobre 2026, 9 h 55 UTC : jour où le premier jeton de 30 jours a expiré (cas vécu).
+const NOW = Date.parse("2026-10-15T09:55:00Z");
+
+function client(t, routes, calls = [], now = () => NOW) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-gitlab-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   return {
@@ -36,13 +39,21 @@ function client(t, routes, calls = []) {
       safeStorage: safeStorage(),
       fetch: fakeFetch(routes, calls),
       platform: "darwin",
+      now,
     }),
   };
 }
 
 test("connects with a validated token stored encrypted, then disconnects", async (t) => {
   const calls = [];
-  const { directory, gitlab } = client(t, { "/api/v4/user": [200, { username: "bperonne" }] }, calls);
+  const { directory, gitlab } = client(
+    t,
+    {
+      "/api/v4/user": [200, { username: "bperonne" }],
+      "/api/v4/personal_access_tokens/self": [200, { expires_at: "2027-10-15" }],
+    },
+    calls,
+  );
 
   const status = await gitlab.connect(`  ${TOKEN} `);
 
@@ -51,6 +62,9 @@ test("connects with a validated token stored encrypted, then disconnects", async
     reason: "",
     connected: true,
     unreadable: false,
+    expired: false,
+    expiresAt: "2027-10-15",
+    daysLeft: 365,
     username: "bperonne",
     url: "https://gitlab.sudokeys.com",
   });
@@ -64,7 +78,7 @@ test("connects with a validated token stored encrypted, then disconnects", async
 test("rejects malformed or refused tokens without storing them", async (t) => {
   const { directory, gitlab } = client(t, { "/api/v4/user": [401, {}] });
   await assert.rejects(gitlab.connect("short"), /Jeton GitLab invalide/);
-  await assert.rejects(gitlab.connect(TOKEN), /refusé ou expiré/);
+  await assert.rejects(gitlab.connect(TOKEN), /GitLab refuse ce jeton/);
   assert.ok(!fs.existsSync(path.join(directory, TOKEN_FILE)));
 });
 
@@ -150,4 +164,116 @@ test("an account never connected is simply disconnected, without alarming messag
   assert.equal(status.connected, false);
   assert.equal(status.unreadable, false);
   assert.equal(status.reason, "");
+});
+
+test("a token GitLab no longer accepts is shown as expired, never as connected", async (t) => {
+  // Cas vécu : jeton de 30 jours arrivé à échéance, paramètres toujours sur « Connecté ».
+  let accepted = true;
+  const { gitlab } = client(t, {
+    "/api/v4/user": [200, { username: "bperonne" }],
+    "/api/v4/projects": () => (accepted ? [200, []] : [401, { message: "401 Unauthorized" }]),
+  });
+  await gitlab.connect(TOKEN);
+  accepted = false;
+
+  await assert.rejects(gitlab.searchProjects("protex"), /refusé ou expiré/);
+
+  const status = gitlab.status();
+  assert.equal(status.connected, false);
+  assert.equal(status.expired, true);
+  assert.equal(status.username, "bperonne", "le compte reste affiché, à remplacer");
+  // Plus aucun appel avec un jeton connu pour refusé : la raison est donnée tout de suite.
+  await assert.rejects(gitlab.searchProjects("protex"), /Jeton GitLab expiré/);
+});
+
+test("the expiry date makes the token expired on that day, at midnight UTC, without asking GitLab", async (t) => {
+  let now = Date.parse("2026-10-14T23:59:00Z");
+  const { gitlab } = client(
+    t,
+    {
+      "/api/v4/user": [200, { username: "bperonne" }],
+      "/api/v4/personal_access_tokens/self": [200, { expires_at: "2026-10-15" }],
+    },
+    [],
+    () => now,
+  );
+  await gitlab.connect(TOKEN);
+  assert.equal(gitlab.status().daysLeft, 1);
+  assert.equal(gitlab.status().connected, true);
+
+  now = Date.parse("2026-10-15T00:00:00Z");
+
+  assert.equal(gitlab.status().expired, true);
+  assert.equal(gitlab.status().connected, false);
+});
+
+test("a token without expiry date, or an older GitLab, still connects", async (t) => {
+  for (const route of [
+    [200, { expires_at: null }],
+    [404, {}],
+  ]) {
+    const { gitlab } = client(t, {
+      "/api/v4/user": [200, { username: "bperonne" }],
+      "/api/v4/personal_access_tokens/self": route,
+    });
+    const status = await gitlab.connect(TOKEN);
+    assert.equal(status.connected, true);
+    assert.equal(status.expiresAt, "");
+    assert.equal(status.daysLeft, null);
+  }
+});
+
+test("checking a token stored before expiry dates were read learns its date", async (t) => {
+  let selfRoute = [404, {}];
+  const { gitlab } = client(t, {
+    "/api/v4/user": [200, { username: "bperonne" }],
+    "/api/v4/personal_access_tokens/self": () => selfRoute,
+  });
+  await gitlab.connect(TOKEN);
+  assert.equal(gitlab.status().expiresAt, "");
+
+  selfRoute = [200, { expires_at: "2026-10-20" }];
+  const status = await gitlab.check();
+
+  assert.equal(status.expiresAt, "2026-10-20");
+  assert.equal(status.daysLeft, 5);
+  assert.equal(status.connected, true);
+});
+
+test("checking an expired token marks it, and an unreachable GitLab changes nothing", async (t) => {
+  let selfRoute = [200, { expires_at: "2027-01-01" }];
+  let reachable = true;
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-gitlab-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const routes = {
+    "/api/v4/user": [200, { username: "bperonne" }],
+    "/api/v4/personal_access_tokens/self": () => selfRoute,
+  };
+  const fetch = fakeFetch(routes, []);
+  const gitlab = new GitLabClient({
+    directory,
+    safeStorage: safeStorage(),
+    fetch: async (url, init) => {
+      if (!reachable) throw new Error("offline");
+      return fetch(url, init);
+    },
+    platform: "darwin",
+    now: () => NOW,
+  });
+  await gitlab.connect(TOKEN);
+
+  reachable = false;
+  assert.equal((await gitlab.check()).connected, true);
+
+  reachable = true;
+  selfRoute = [401, {}];
+  const status = await gitlab.check();
+  assert.equal(status.expired, true);
+  assert.equal(status.connected, false);
+
+  // Un nouveau jeton remplace l'ancien et efface le refus.
+  selfRoute = [200, { expires_at: "2027-10-15" }];
+  const replaced = await gitlab.connect("glpat-zyxwvutsrqponmlkjihg");
+  assert.equal(replaced.connected, true);
+  assert.equal(replaced.expired, false);
 });

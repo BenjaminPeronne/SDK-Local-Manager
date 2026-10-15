@@ -1,20 +1,11 @@
 "use client";
 
 import { type Dispatch, type SetStateAction, useCallback, useState } from "react";
-import {
-  CheckCircle2,
-  Copy,
-  ExternalLink,
-  FolderOpen,
-  KeyRound,
-  Loader2,
-  RefreshCcw,
-  Settings,
-  Trash2,
-} from "lucide-react";
+import { CheckCircle2, Copy, FolderOpen, KeyRound, Loader2, RefreshCcw, Settings, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { desktopErrorMessage, type GitLabStatus, type StoredRikaCredentials } from "@/lib/desktop";
-import { openExternalUrl, pickDirectory } from "@/lib/desktop-runtime";
+import type { GitLabStatus, StoredRikaCredentials } from "@/lib/desktop";
+import { pickDirectory } from "@/lib/desktop-runtime";
+import { gitlabTokenDate, gitlabTokenNotice } from "@/lib/gitlab-token";
 import { windowsPathFromMount } from "@/lib/projects";
 import type {
   Job,
@@ -49,9 +40,6 @@ import {
   type SettingsSectionId,
 } from "@/components/settings/settings-section";
 
-const GITLAB_TOKEN_URL =
-  "https://gitlab.sudokeys.com/-/user_settings/personal_access_tokens?name=SDK%20Local%20Manager&scopes=read_api";
-
 type SettingsDialogProps = {
   createJob: (action: string, payload?: Record<string, unknown>) => Promise<Job | null>;
   desktopRuntime: boolean;
@@ -68,6 +56,7 @@ type SettingsDialogProps = {
   onOpenChange: (open: boolean) => void;
   open: boolean;
   openSshAssistant: (regenerate?: boolean, provider?: "gitlab" | "github") => Promise<void>;
+  openGitlabTokenAssistant: () => void;
   pushToast: (kind: Toast["kind"], message: string) => void;
   refreshMigration: () => Promise<void>;
   refreshOverview: () => Promise<void>;
@@ -110,6 +99,7 @@ export function SettingsDialog({
   onOpenChange,
   open,
   openSshAssistant,
+  openGitlabTokenAssistant,
   pushToast,
   refreshMigration,
   refreshOverview,
@@ -137,8 +127,7 @@ export function SettingsDialog({
   const [savingSettings, setSavingSettings] = useState(false);
   const [selectingWorkspace, setSelectingWorkspace] = useState(false);
   const [savingLegacyWorkspace, setSavingLegacyWorkspace] = useState(false);
-  const [gitlabTokenDraft, setGitlabTokenDraft] = useState("");
-  const [gitlabConnecting, setGitlabConnecting] = useState(false);
+  const gitlabNotice = gitlabTokenNotice(gitlabStatus);
   const reopenInitialConfiguration = useCallback(() => {
     onOpenChange(false);
     setOnboardingOpen(true);
@@ -670,14 +659,19 @@ export function SettingsDialog({
                       <div className="grid gap-3 rounded-md border p-3">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div className="min-w-0">
-                            <div className="text-sm font-medium">Recherche de dépôts GitLab</div>
+                            <div className="flex items-center gap-2 text-sm font-medium">
+                              Recherche de dépôts GitLab
+                              {gitlabStatus.expired && <Badge variant="danger">Jeton expiré</Badge>}
+                            </div>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {gitlabStatus.connected
-                                ? `Connecté à gitlab.sudokeys.com${gitlabStatus.username ? ` en tant que @${gitlabStatus.username}` : ""}. « Dépôt SSH » propose la recherche de dépôts et de branches ; le lien SSH reste le mode par défaut.`
-                                : "Désactivée : « Dépôt SSH » utilise le lien SSH. Connecte un jeton personnel en lecture seule (portée read_api) pour chercher un dépôt et choisir sa branche."}
+                              {gitlabStatus.expired
+                                ? `${gitlabNotice?.text ?? ""} La recherche de dépôts est en pause : remplace le jeton pour la retrouver.`
+                                : gitlabStatus.connected
+                                  ? `Connecté à gitlab.sudokeys.com${gitlabStatus.username ? ` en tant que @${gitlabStatus.username}` : ""}.${gitlabStatus.expiresAt ? ` Le jeton expire le ${gitlabTokenDate(gitlabStatus.expiresAt)}.` : ""} « Dépôt SSH » propose la recherche de dépôts et de branches ; le lien SSH reste le mode par défaut.`
+                                  : "Facultative et désactivée : « Dépôt SSH » utilise le lien SSH. Connecte GitLab pour chercher un dépôt et sa branche par leur nom ; l’assistant te guide pas à pas."}
                             </p>
                           </div>
-                          {gitlabStatus.connected && (
+                          {(gitlabStatus.connected || gitlabStatus.expired) && (
                             <Button
                               type="button"
                               variant="outline"
@@ -696,57 +690,23 @@ export function SettingsDialog({
                             </Button>
                           )}
                         </div>
+                        {gitlabNotice && !gitlabNotice.expired && (
+                          <p className="text-xs text-amber-700 dark:text-amber-300">
+                            {gitlabNotice.text} Remplace-le avant cette date pour garder la recherche de dépôts.
+                          </p>
+                        )}
                         {!gitlabStatus.available && (
                           <p className="text-xs text-amber-700 dark:text-amber-300">{gitlabStatus.reason}</p>
                         )}
-                        {gitlabStatus.available && !gitlabStatus.connected && (
-                          <form
-                            className="flex flex-col gap-2 sm:flex-row"
-                            onSubmit={async (event) => {
-                              event.preventDefault();
-                              if (!gitlabTokenDraft.trim()) return;
-                              setGitlabConnecting(true);
-                              try {
-                                setGitlabStatus(await window.sdkDesktop!.gitlabConnect(gitlabTokenDraft));
-                                setGitlabTokenDraft("");
-                                pushToast("success", "GitLab connecté : la recherche de dépôts est activée.");
-                              } catch (err) {
-                                pushToast("error", desktopErrorMessage(err, "Connexion GitLab impossible."));
-                              } finally {
-                                setGitlabConnecting(false);
-                              }
-                            }}
+                        {gitlabStatus.available && (!gitlabStatus.connected || gitlabNotice) && (
+                          <Button
+                            type="button"
+                            variant={gitlabNotice ? "default" : "outline"}
+                            onClick={openGitlabTokenAssistant}
                           >
-                            <Input
-                              type="password"
-                              autoComplete="off"
-                              value={gitlabTokenDraft}
-                              onChange={(event) => setGitlabTokenDraft(event.target.value)}
-                              placeholder="Jeton personnel GitLab (glpat-…)"
-                              aria-label="Jeton personnel GitLab"
-                            />
-                            <Button
-                              type="submit"
-                              className="shrink-0"
-                              disabled={gitlabConnecting || !gitlabTokenDraft.trim()}
-                            >
-                              {gitlabConnecting ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <KeyRound className="h-4 w-4" />
-                              )}
-                              Activer
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              className="shrink-0"
-                              onClick={() => void openExternalUrl(GITLAB_TOKEN_URL)}
-                            >
-                              <ExternalLink className="h-4 w-4" />
-                              Créer un jeton
-                            </Button>
-                          </form>
+                            <KeyRound className="h-4 w-4" />
+                            {gitlabStatus.connected || gitlabStatus.expired ? "Remplacer le jeton" : "Connecter GitLab"}
+                          </Button>
                         )}
                       </div>
                     )}

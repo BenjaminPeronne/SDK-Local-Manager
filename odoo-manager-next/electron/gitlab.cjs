@@ -7,6 +7,7 @@ const GITLAB_URL = "https://gitlab.sudokeys.com";
 const TOKEN_FILE = "gitlab-token.bin";
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_QUERY_LENGTH = 100;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function query(value) {
   if (value === undefined || value === null) return "";
@@ -21,13 +22,24 @@ function projectId(value) {
   return value;
 }
 
+/** Date d'expiration donnée par GitLab (AAAA-MM-JJ), vide si le jeton n'en a pas. */
+function expiryDate(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
+}
+
+/** Jours restants : GitLab désactive le jeton à 0 h UTC le jour de son expiration. */
+function daysUntil(expiresAt, now) {
+  return Math.ceil((Date.parse(`${expiresAt}T00:00:00Z`) - now) / DAY_MS);
+}
+
 class GitLabClient {
-  constructor({ directory, safeStorage, fetch, platform = process.platform, baseUrl = GITLAB_URL }) {
+  constructor({ directory, safeStorage, fetch, platform = process.platform, baseUrl = GITLAB_URL, now = Date.now }) {
     this.file = path.join(directory, TOKEN_FILE);
     this.safeStorage = safeStorage;
     this.fetch = fetch;
     this.platform = platform;
     this.baseUrl = baseUrl;
+    this.now = now;
   }
 
   unavailableReason() {
@@ -60,11 +72,40 @@ class GitLabClient {
     } catch {
       throw new Error("GitLab est injoignable depuis cet ordinateur.");
     }
-    if (response.status === 401)
-      throw new Error("Jeton GitLab refusé ou expiré. Reconnecte GitLab dans les paramètres.");
+    if (response.status === 401) {
+      this.markRejected(token);
+      throw Object.assign(new Error("Jeton GitLab refusé ou expiré. Reconnecte GitLab dans les paramètres."), {
+        status: 401,
+      });
+    }
     if (response.status === 403) throw new Error("Le jeton GitLab doit avoir la portée read_api.");
     if (!response.ok) throw new Error(`GitLab a répondu HTTP ${response.status}.`);
     return response.json();
+  }
+
+  /** Un jeton refusé par GitLab (expiré, révoqué) reste enregistré, marqué à remplacer. */
+  markRejected(token) {
+    const account = this.storedAccount();
+    if (account?.token === token && !account.rejected) {
+      writeEncryptedJson(this.file, this.safeStorage, { ...account, rejected: true });
+    }
+  }
+
+  /** Refusé par GitLab ou arrivé à sa date : le jeton est expiré. */
+  expiry(account) {
+    const expiresAt = expiryDate(account?.expiresAt);
+    const daysLeft = expiresAt ? daysUntil(expiresAt, this.now()) : null;
+    const expired = Boolean(account) && (Boolean(account.rejected) || (daysLeft !== null && daysLeft <= 0));
+    return { expiresAt, daysLeft, expired };
+  }
+
+  /** Date d'expiration du jeton ; vide si GitLab ne la donne pas (instance trop ancienne, jeton sans fin). */
+  async tokenExpiry(token) {
+    try {
+      return expiryDate((await this.request("/personal_access_tokens/self", {}, token))?.expires_at);
+    } catch {
+      return "";
+    }
   }
 
   status() {
@@ -73,16 +114,38 @@ class GitLabClient {
     // Jeton présent mais indéchiffrable : sur macOS, un nouveau build signé ad hoc peut se voir
     // refuser la clé du trousseau. Le dire, au lieu de faire disparaître GitLab de l'interface.
     const unreadable = !reason && !account && fs.existsSync(this.file);
+    // Un jeton expiré reste affiché comme tel : « Connecté » laissait croire que la recherche marchait.
+    const { expiresAt, daysLeft, expired } = this.expiry(account);
     return {
       available: !reason,
       reason: unreadable
         ? "Le jeton GitLab enregistré ne peut plus être lu : le trousseau du système en refuse l'accès à cette version de l'application. Reconnecte ton compte."
         : reason,
-      connected: Boolean(account),
+      connected: Boolean(account) && !expired,
       unreadable,
+      expired,
+      expiresAt,
+      daysLeft,
       username: account?.username || "",
       url: this.baseUrl,
     };
+  }
+
+  /**
+   * Demande à GitLab si le jeton enregistré marche encore, et à quelle date il expire.
+   * Un jeton enregistré avant que l'application ne lise sa date l'apprend ainsi. GitLab
+   * injoignable : l'état enregistré est gardé tel quel.
+   */
+  async check() {
+    const account = this.storedAccount();
+    if (!account || account.rejected) return this.status();
+    try {
+      const token = await this.request("/personal_access_tokens/self", {}, account.token);
+      writeEncryptedJson(this.file, this.safeStorage, { ...account, expiresAt: expiryDate(token?.expires_at) });
+    } catch {
+      // Refus déjà noté par request() ; autre échec : rien de sûr à enregistrer.
+    }
+    return this.status();
   }
 
   async connect(token) {
@@ -91,9 +154,19 @@ class GitLabClient {
     if (typeof token !== "string" || !/^[A-Za-z0-9_.-]{20,255}$/.test(token.trim())) {
       throw new Error("Jeton GitLab invalide.");
     }
-    const user = await this.request("/user", {}, token.trim());
+    let user;
+    try {
+      user = await this.request("/user", {}, token.trim());
+    } catch (error) {
+      // Message lu dans l'assistant de connexion : y renvoyer « dans les paramètres » égarerait.
+      if (error.status === 401) {
+        throw new Error("GitLab refuse ce jeton : vérifie qu’il est copié en entier et qu’il n’a pas expiré.");
+      }
+      throw error;
+    }
     const username = typeof user?.username === "string" ? user.username : "";
-    writeEncryptedJson(this.file, this.safeStorage, { token: token.trim(), username });
+    const expiresAt = await this.tokenExpiry(token.trim());
+    writeEncryptedJson(this.file, this.safeStorage, { token: token.trim(), username, expiresAt });
     return this.status();
   }
 
@@ -105,6 +178,7 @@ class GitLabClient {
   requireToken() {
     const account = this.storedAccount();
     if (!account) throw new Error("GitLab n’est pas connecté.");
+    if (this.expiry(account).expired) throw new Error("Jeton GitLab expiré. Remplace-le dans les paramètres.");
     return account.token;
   }
 
