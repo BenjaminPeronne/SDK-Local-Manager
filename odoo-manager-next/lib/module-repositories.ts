@@ -49,12 +49,39 @@ export function groupModulesByRepository(
   );
 }
 
+/** Commit abrégé, comme Git l'affiche : les premiers caractères suffisent à le reconnaître. */
+export function shortCommit(commit: string) {
+  return commit.slice(0, 7);
+}
+
 /** Ce que le dépôt a de chargé : branche, sinon étiquette, sinon commit. */
 export function repositoryRevision(repository: ModuleRepository) {
   if (repository.branch) return { kind: "branch" as const, label: repository.branch };
   if (repository.tag) return { kind: "tag" as const, label: repository.tag };
-  if (repository.commit) return { kind: "commit" as const, label: repository.commit.slice(0, 7) };
+  if (repository.commit) return { kind: "commit" as const, label: shortCommit(repository.commit) };
   return null;
+}
+
+/** Page web du dépôt, déduite de son adresse : gitlab.sudokeys.com/OCA/pos → https://gitlab.sudokeys.com/OCA/pos. */
+export function repositoryWebUrl(repository: Pick<ModuleRepository, "remote_label">) {
+  return repository.remote_label.includes("/") ? `https://${repository.remote_label}` : "";
+}
+
+/** Préfixe des pages d'un commit : `/-/` sur GitLab, rien sur GitHub. */
+function webPagePrefix(base: string) {
+  return new URL(base).hostname === "github.com" ? "" : "/-";
+}
+
+/** Page d'un commit sur le site du dépôt : son titre, sa date et ses changements. */
+export function repositoryCommitUrl(repository: Pick<ModuleRepository, "remote_label">, commit: string) {
+  const base = repositoryWebUrl(repository);
+  return base && commit ? `${base}${webPagePrefix(base)}/commit/${commit}` : "";
+}
+
+/** Commits apparus entre deux commits, sur le site du dépôt. */
+export function repositoryCompareUrl(repository: Pick<ModuleRepository, "remote_label">, from: string, to: string) {
+  const base = repositoryWebUrl(repository);
+  return base && from && to ? `${base}${webPagePrefix(base)}/compare/${from}...${to}` : "";
 }
 
 /**
@@ -79,7 +106,42 @@ export function repositoryBranchSwitchable(repository: ModuleRepository) {
   return (repository.source === "git" || repository.source === "sdk") && Boolean(repository.path);
 }
 
-export type RemoteBranch = { name: string; default: boolean };
+export type RemoteBranch = { name: string; default: boolean; commit: string };
+
+/**
+ * Commit chargé comparé au dernier commit de sa branche sur le serveur.
+ * same : le même ; behind : le serveur en a un plus récent ; ahead : le dépôt a des commits pas encore
+ * envoyés ; missing : la branche n'existe plus sur le serveur ; unknown : commit chargé inconnu.
+ */
+export type CommitStatus = "same" | "behind" | "ahead" | "missing" | "unknown";
+
+/** Branches du dépôt sur le serveur et état du commit chargé (voir repository_branches côté serveur). */
+export type RepositoryBranches = {
+  current: string;
+  kind: "git" | "sdk" | "import";
+  branches: RemoteBranch[];
+  commit: string;
+  remote_commit: string;
+  commit_status: CommitStatus;
+  /** Date ISO et titre du commit chargé, lus seulement dans un clone Git. */
+  commit_date: string;
+  commit_subject: string;
+};
+
+/** Date d'un commit, à l'heure de l'ordinateur : « 12 octobre 2026 à 14:05 » ; vide si illisible. */
+export function formatCommitDate(iso: string) {
+  const date = new Date(iso);
+  if (!iso || Number.isNaN(date.getTime())) return "";
+  const day = date.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+  const time = date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  return `${day} à ${time}`;
+}
+
+/** La branche chargée peut recevoir un commit plus récent du serveur. */
+export function repositoryUpdatable(result: Pick<RepositoryBranches, "current" | "commit_status" | "remote_commit">) {
+  if (!result.current || !result.remote_commit) return false;
+  return result.commit_status === "behind" || result.commit_status === "unknown";
+}
 
 /** Branches dont le nom contient la recherche, sans tenir compte des majuscules ; l'ordre reçu est gardé. */
 export function filterBranches(branches: RemoteBranch[], search: string) {

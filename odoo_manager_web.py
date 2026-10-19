@@ -160,6 +160,7 @@ from odoo_manager_core.repositories import (
     REPOSITORY_COMMIT_RE,
     REPOSITORY_GIT_OPTIONS,
     RepositoryBranchMissing,
+    remote_branch_commit,
     remote_branches,
     repository_clone_error,
     repository_search_sources,
@@ -6545,18 +6546,21 @@ def repository_modules_job(job, project, url, branch, names, commit=""):
         code, output = creator.project_service.capture(command, cwd=creator.command_cwd, timeout=300)
         if code:
             raise repository_clone_error(output)
+        # Commit récupéré, noté avec les modules : la liste montre d'où vient chaque copie.
+        code, head = creator.project_service.capture(
+            creator.git("-C", creator.command_path(checkout), "rev-parse", "HEAD"),
+            cwd=creator.command_cwd,
+            timeout=30,
+        )
+        head = head.strip() if not code and REPOSITORY_COMMIT_RE.fullmatch(head.strip()) else ""
         if commit:
-            code, head = creator.project_service.capture(
-                creator.git("-C", creator.command_path(checkout), "rev-parse", "HEAD"),
-                cwd=creator.command_cwd,
-                timeout=30,
-            )
-            if code or head.strip() != commit:
+            if head != commit:
                 raise ValueError(
                     f"La branche {branch} a reçu de nouveaux commits depuis l’analyse. "
                     "Rouvre l’import pour vérifier les modules avant de les copier."
                 )
             job.add(f"Commit vérifié : {commit[:12]}")
+        commit = head
 
         by_name = {}
         for candidate in find_module_candidates(checkout):
@@ -6726,19 +6730,22 @@ def switchable_repository(project, repository_id):
     if repository_id.startswith("import:"):
         url, _, branch = repository_id.removeprefix("import:").rpartition("#")
         url = validate_gitlab_repository(url)
-        modules = sorted(
-            name
+        sources = {
+            name: source
             for name, source in read_imported_sources(project).items()
             if str(source.get("url") or "") == url and str(source.get("branch") or "") == branch
-        )
-        if not modules:
+        }
+        if not sources:
             raise ValueError("Aucun module importé depuis ce dépôt : actualise la liste des modules.")
+        # Modules importés à des moments différents : pas de commit unique à comparer au serveur.
+        commits = {str(source.get("commit") or "") for source in sources.values()}
         return {
             "kind": "import",
             "name": repository_slug(url),
             "url": url,
             "branch": branch,
-            "modules": modules,
+            "commit": commits.pop() if len(commits) == 1 else "",
+            "modules": sorted(sources),
         }
     root = Path(repository_id)
     if not repository_id or not root.is_absolute():
@@ -6764,12 +6771,72 @@ def switchable_repository(project, repository_id):
                 f"L'archive {root.name} ne précise pas d'adresse sur le GitLab Sudokeys : "
                 "impossible de récupérer une autre branche."
             ) from None
-        return {"kind": "sdk", "name": root.name, "root": root, "url": url, "branch": info["branch"]}
-    return {"kind": "git", "name": root.name, "root": root, "url": "", "branch": info["branch"]}
+        return {
+            "kind": "sdk",
+            "name": root.name,
+            "root": root,
+            "url": url,
+            "branch": info["branch"],
+            "commit": info["commit"],
+        }
+    return {
+        "kind": "git",
+        "name": root.name,
+        "root": root,
+        "url": "",
+        "branch": info["branch"],
+        "commit": info["commit"],
+    }
+
+
+def checkout_git(creator, root, *arguments, timeout=60):
+    """Commande Git lancée dans un clone du projet, avec la seule clé SSH."""
+    return creator.project_service.capture(
+        creator.git(*CHECKOUT_GIT_OPTIONS, "-C", creator.command_path(root), *arguments),
+        cwd=creator.command_cwd,
+        timeout=timeout,
+    )
+
+
+def repository_commit_status(creator, target, remote_commit):
+    """Commit chargé du dépôt comparé au dernier commit de sa branche sur le serveur.
+
+    same : le même ; behind : le serveur en a un autre, à récupérer ; ahead : le clone porte des
+    commits que le serveur n'a pas encore ; missing : la branche n'existe plus sur le serveur ;
+    unknown : commit chargé inconnu, ou dépôt sur une étiquette plutôt qu'une branche.
+    """
+    if not target["branch"]:
+        return "unknown"
+    if not remote_commit:
+        return "missing"
+    if not target["commit"]:
+        return "unknown"
+    if target["commit"] == remote_commit:
+        return "same"
+    # Commit du serveur déjà connu du clone et ancêtre du commit chargé : il ne reste rien à récupérer.
+    if target["kind"] == "git":
+        code, _output = checkout_git(creator, target["root"], "merge-base", "--is-ancestor", remote_commit, "HEAD")
+        if code == 0:
+            return "ahead"
+    return "behind"
+
+
+def checkout_commit_details(creator, root):
+    """Date et titre du commit chargé d'un clone, lus sans réseau ; vides si Git ne les donne pas."""
+    code, output = checkout_git(creator, root, "log", "-1", "--format=%cI%n%s", "HEAD", timeout=30)
+    date, _, subject = output.strip().partition("\n")
+    # Sortie sans date (erreur de Git rendue à sa place) : rien plutôt qu'un message d'erreur en titre.
+    if code or not re.match(r"\d{4}-\d{2}-\d{2}T", date):
+        return {"commit_date": "", "commit_subject": ""}
+    return {"commit_date": date.strip(), "commit_subject": subject.strip()}
 
 
 def repository_branches(project, repository_id):
-    """Branches du dépôt d'origine, lues sur le serveur avec la clé SSH qui servira au changement."""
+    """Branches du dépôt d'origine, lues sur le serveur avec la clé SSH qui servira au changement.
+
+    Le commit chargé est comparé au dernier commit de sa branche sur le serveur : l'interface sait
+    ainsi s'il est à jour et propose de récupérer le plus récent.
+    """
     target = switchable_repository(project, repository_id)
     creator = ProjectCreator(SETTINGS, WORKSPACE, project_service())
     if target["kind"] == "git":
@@ -6783,7 +6850,21 @@ def repository_branches(project, repository_id):
     )
     if code:
         raise repository_clone_error(output)
-    return {"current": target["branch"], "kind": target["kind"], "branches": remote_branches(output)}
+    remote_commit = remote_branch_commit(output, target["branch"]) if target["branch"] else ""
+    details = (
+        checkout_commit_details(creator, target["root"])
+        if target["kind"] == "git" and target["commit"]
+        else {"commit_date": "", "commit_subject": ""}
+    )
+    return {
+        "current": target["branch"],
+        "kind": target["kind"],
+        "branches": remote_branches(output),
+        "commit": target["commit"],
+        "remote_commit": remote_commit,
+        "commit_status": repository_commit_status(creator, target, remote_commit),
+        **details,
+    }
 
 
 def repository_branches_view(request):
@@ -6847,13 +6928,11 @@ def repository_module_names(creator, root):
 
 
 def switch_checkout_branch(job, creator, root, branch):
-    """Passe un clone Git sur `branch`, sans jamais écraser une modification non enregistrée."""
-    path = creator.command_path(root)
+    """Passe un clone Git sur `branch`, ou y récupère les nouveaux commits, sans jamais écraser une
+    modification non enregistrée."""
 
     def git(*arguments, timeout=60):
-        return creator.project_service.capture(
-            creator.git(*CHECKOUT_GIT_OPTIONS, "-C", path, *arguments), cwd=creator.command_cwd, timeout=timeout
-        )
+        return checkout_git(creator, root, *arguments, timeout=timeout)
 
     code, changes = git("status", "--porcelain", "--untracked-files=no")
     if code:
@@ -6864,14 +6943,18 @@ def switch_checkout_branch(job, creator, root, branch):
             f"{root.name} contient des fichiers modifiés et non enregistrés dans Git ({len(changed)}) : "
             + ", ".join(changed[:8])
             + (" …" if len(changed) > 8 else "")
-            + ". Enregistre-les (commit) ou annule-les, puis relance le changement de branche."
+            + ". Enregistre-les (commit) ou annule-les, puis relance l'opération."
         )
     git_dir = git_checkouts.git_directory(root)
     shallow = bool(git_dir) and (git_checkouts.common_directory(git_dir) / "shallow").exists()
+    current = (git_checkouts.read_checkout(root) or {}).get("branch", "")
+    local = git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")[0] == 0
     job.add(f"Récupération de la branche {branch} de {root.name}…")
+    # Clone partiel : une branche déjà présente reçoit ses seuls nouveaux commits, rattachés à son
+    # historique. Limités au dernier, ils en seraient coupés et ne pourraient jamais la faire avancer.
     code, output = git(
         "fetch",
-        *(("--depth", "1") if shallow else ()),
+        *(("--depth", "1") if shallow and not local else ()),
         "--no-tags",
         "origin",
         f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
@@ -6879,8 +6962,6 @@ def switch_checkout_branch(job, creator, root, branch):
     )
     if code:
         raise repository_clone_error(output)
-    current = (git_checkouts.read_checkout(root) or {}).get("branch", "")
-    local = git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")[0] == 0
     if current != branch:
         if local:
             code, output = git("checkout", "-q", branch)
@@ -6925,21 +7006,22 @@ def replace_archive_with_clone(job, creator, project, root, url, branch):
 def switch_repository_branch_job(job, project, repository_id, branch, update_databases=False):
     """Change la branche d'un dépôt de modules du projet, selon sa nature (voir switchable_repository).
 
+    La branche déjà chargée est mise à jour : son dernier commit est récupéré du serveur.
     Le code vaut pour toutes les bases du projet : avec `update_databases`, chaque base qui utilise
     des modules du dépôt est ensuite mise à jour, pour que ses vues et données suivent ce code.
     """
     target = switchable_repository(project, repository_id)
     project = validate_project(project)
-    name, previous = target["name"], target["branch"]
+    name, previous, previous_commit = target["name"], target["branch"], target["commit"]
     if target["kind"] == "import":
-        if branch == previous:
-            raise ValueError(f"Les modules de {name} viennent déjà de la branche {branch}.")
-        job.add(f"Réimport de {len(target['modules'])} module(s) de {name} depuis la branche {branch}…")
+        job.add(
+            f"Réimport de {len(target['modules'])} module(s) de {name} depuis "
+            + (f"le dernier commit de la branche {branch}…" if branch == previous else f"la branche {branch}…")
+        )
         repository_modules_job(job, project, target["url"], branch, target["modules"])
         modules = target["modules"]
+        commit = str((read_imported_sources(project).get(modules[0]) or {}).get("commit") or "")
     else:
-        if branch == previous and target["kind"] == "sdk":
-            raise ValueError(f"{name} est déjà sur la branche {branch}.")
         creator = ProjectCreator(SETTINGS, WORKSPACE, project_service())
         root = target["root"]
         before = repository_module_names(creator, root)
@@ -6961,12 +7043,21 @@ def switch_repository_branch_job(job, project, repository_id, branch, update_dat
                 f"Odoo ne les trouvera plus tant que {name} reste sur cette branche."
             )
         modules = sorted(after)
-    job.add(
-        f"{name} : branche {previous or '?'} → {branch}."
-        if branch != previous
-        else f"{name} : branche {branch} mise à jour depuis le serveur."
-    )
-    job.result = {"kind": "repository_branch", "repository": name, "branch": branch, "modules": modules}
+        commit = (git_checkouts.read_checkout(root) or {}).get("commit", "")
+    short = commit[:7] or "?"
+    if branch != previous:
+        job.add(f"{name} : branche {previous or '?'} → {branch} (commit {short}).")
+    elif commit and commit == previous_commit:
+        job.add(f"{name} : aucun nouveau commit récupéré sur la branche {branch} (commit {short}).")
+    else:
+        job.add(f"{name} : branche {branch} mise à jour, commit {previous_commit[:7] or '?'} → {short}.")
+    job.result = {
+        "kind": "repository_branch",
+        "repository": name,
+        "branch": branch,
+        "commit": commit,
+        "modules": modules,
+    }
     if not update_databases:
         job.add(
             "Toutes les bases du projet utilisent maintenant ce code : mets à jour les modules de ce dépôt "
@@ -8064,7 +8155,11 @@ def switch_repository_branch_action(payload):
     target = switchable_repository(project, payload.get("repository"))
     update_databases = truthy(payload.get("update_databases"))
     return Job(
-        f"Changer de branche · {target['name']} → {branch}"
+        (
+            f"Mettre à jour le dépôt · {target['name']} ({branch})"
+            if branch == target["branch"]
+            else f"Changer de branche · {target['name']} → {branch}"
+        )
         + (" et mettre à jour les bases" if update_databases else ""),
         switch_repository_branch_job,
         (project, str(payload.get("repository")), branch, update_databases),

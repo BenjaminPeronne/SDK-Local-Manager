@@ -78,6 +78,8 @@ class RepositoryModulesTests(ModuleLayoutTests):
 
     def test_repository_clone_uses_non_interactive_ssh_without_credentials(self):
         def ssh_clone(command, **kwargs):
+            if "clone" not in command:
+                return self.clone(command, **kwargs)
             rendered_command = " ".join(command)
             self.assertIn("core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new", command)
             self.assertIn("protocol.ssh.allow=always", command)
@@ -420,23 +422,25 @@ class RepositoryModulesTests(ModuleLayoutTests):
                 "Warning: Permanently added 'gitlab.sudokeys.com' to the list of known hosts.",
                 "ref: refs/heads/master\tHEAD",
                 f"{COMMIT}\tHEAD",
-                f"{COMMIT}\trefs/heads/ti20914",
-                f"{COMMIT}\trefs/heads/Feature/x",
-                f"{COMMIT}\trefs/heads/10.0",
-                f"{COMMIT}\trefs/heads/8.0",
+                f"{'1' * 40}\trefs/heads/ti20914",
+                f"{'2' * 40}\trefs/heads/Feature/x",
+                f"{'3' * 40}\trefs/heads/10.0",
+                f"{'4' * 40}\trefs/heads/8.0",
                 f"{COMMIT}\trefs/heads/master",
             )
         )
         self.assertEqual(
             [
-                {"name": "master", "default": True},
-                {"name": "8.0", "default": False},
-                {"name": "10.0", "default": False},
-                {"name": "Feature/x", "default": False},
-                {"name": "ti20914", "default": False},
+                {"name": "master", "default": True, "commit": COMMIT},
+                {"name": "8.0", "default": False, "commit": "4" * 40},
+                {"name": "10.0", "default": False, "commit": "3" * 40},
+                {"name": "Feature/x", "default": False, "commit": "2" * 40},
+                {"name": "ti20914", "default": False, "commit": "1" * 40},
             ],
             web.remote_branches(output),
         )
+        self.assertEqual("3" * 40, web.remote_branch_commit(output, "10.0"))
+        self.assertEqual("", web.remote_branch_commit(output, "absente"))
 
     def test_only_repositories_of_addons_store_can_switch_branch(self):
         (self.project_root / "odoo/odoo/.git").mkdir()
@@ -467,11 +471,36 @@ class RepositoryModulesTests(ModuleLayoutTests):
         sources = web.read_imported_sources(self.project)
         self.assertEqual({"dev"}, {sources[name]["branch"] for name in ("alpha", "beta")})
         self.assertEqual(
-            {"kind": "repository_branch", "repository": "addons", "branch": "dev", "modules": ["alpha", "beta"]},
+            {
+                "kind": "repository_branch",
+                "repository": "addons",
+                "branch": "dev",
+                "commit": COMMIT,
+                "modules": ["alpha", "beta"],
+            },
             job.result,
         )
-        with self.assertRaisesRegex(ValueError, "déjà de la branche dev"):
-            web.switch_repository_branch_job(DummyJob(), self.project, f"import:{URL}#dev", "dev")
+
+    def test_imported_copies_are_updated_from_the_latest_commit_of_their_branch(self):
+        self.run_import(["alpha", "beta"])
+        self.assertEqual(COMMIT, web.switchable_repository(self.project, f"import:{URL}#18.0")["commit"])
+        (self.storage("alpha") / "code.py").write_text("old")
+        newer = "b" * 40
+
+        def clone(command, **kwargs):
+            if "rev-parse" in command:
+                return subprocess.CompletedProcess(command, 0, stdout=newer + "\n", stderr="")
+            return self.clone(command, **kwargs)
+
+        job = DummyJob()
+        with mock.patch.object(web.subprocess, "run", side_effect=clone):
+            web.switch_repository_branch_job(job, self.project, f"import:{URL}#18.0", "18.0")
+
+        self.assertEqual("new", (self.storage("alpha") / "code.py").read_text())
+        sources = web.read_imported_sources(self.project)
+        self.assertEqual({("18.0", newer)}, {(sources[name]["branch"], sources[name]["commit"]) for name in sources})
+        self.assertIn("addons : branche 18.0 mise à jour, commit aaaaaaa → bbbbbbb.", job.lines)
+        self.assertEqual(newer, job.result["commit"])
 
     def test_branch_switch_lists_every_base_that_uses_the_repository(self):
         states = {
@@ -581,6 +610,9 @@ class RepositoryModulesTests(ModuleLayoutTests):
         self.assertFalse(plain.args[-1])
         self.assertTrue(updating.args[-1])
         self.assertIn("mettre à jour les bases", updating.title)
+        with mock.patch.object(web, "validate_project", return_value=self.project):
+            same = web.switch_repository_branch_action({**payload, "branch": "18.0"})
+        self.assertEqual("Mettre à jour le dépôt · addons (18.0)", same.title)
 
     def test_sdk_archive_is_replaced_by_a_clone_of_the_chosen_branch(self):
         archive = self.storage("sdk-addons")
@@ -645,7 +677,8 @@ class RepositoryModulesTests(ModuleLayoutTests):
         branches = web.repository_branches(self.project, repository)
         self.assertEqual("master", branches["current"])
         self.assertEqual(
-            [{"name": "master", "default": True}, {"name": "feature", "default": False}], branches["branches"]
+            [("master", True), ("feature", False)],
+            [(branch["name"], branch["default"]) for branch in branches["branches"]],
         )
 
         (clone / "alpha/__manifest__.py").write_text("{'name': 'changed'}")
@@ -674,3 +707,66 @@ class RepositoryModulesTests(ModuleLayoutTests):
         web.switch_repository_branch_job(DummyJob(), self.project, repository, "master")
         self.assertEqual("master", web.git_checkouts.read_checkout(clone)["branch"])
         self.assertTrue((clone / "beta/__manifest__.py").is_file())
+
+    @unittest.skipUnless(shutil.which("git"), "Git requis")
+    def test_git_clone_is_compared_with_the_server_and_updated_on_its_branch(self):
+        def git(*arguments, cwd=None):
+            return subprocess.run(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.org", *arguments],
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+        work = self.root / "work"
+        (work / "alpha").mkdir(parents=True)
+        git("init", "-q", "-b", "master", cwd=work)
+        (work / "alpha/__manifest__.py").write_text("{'name': 'alpha'}")
+        git("add", ".", cwd=work)
+        git("commit", "-q", "-m", "Premier commit", cwd=work)
+        origin = self.root / "origin.git"
+        git("clone", "-q", "--bare", str(work), str(origin))
+        git("remote", "add", "origin", str(origin), cwd=work)
+        clone = self.storage("addons-repo")
+        git("clone", "-q", "--depth", "1", "--single-branch", "--branch", "master", origin.as_uri(), str(clone))
+        (self.project_root / "odoo/addons/alpha").symlink_to("../addons-store/addons-repo/alpha")
+        repository = str(web.safe_resolve(clone))
+        first = git("rev-parse", "HEAD", cwd=work)
+
+        branches = web.repository_branches(self.project, repository)
+        self.assertEqual(
+            (first, first, "same", "Premier commit"),
+            (branches["commit"], branches["remote_commit"], branches["commit_status"], branches["commit_subject"]),
+        )
+        self.assertTrue(branches["commit_date"])
+
+        # Un correctif arrive sur la même branche du serveur.
+        (work / "alpha/fix.py").write_text("fix")
+        git("add", ".", cwd=work)
+        git("commit", "-q", "-m", "Correctif", cwd=work)
+        git("push", "-q", "origin", "master", cwd=work)
+        fix = git("rev-parse", "HEAD", cwd=work)
+        branches = web.repository_branches(self.project, repository)
+        self.assertEqual(
+            (first, fix, "behind"), (branches["commit"], branches["remote_commit"], branches["commit_status"])
+        )
+
+        job = DummyJob()
+        web.switch_repository_branch_job(job, self.project, repository, "master")
+        self.assertEqual(fix, web.git_checkouts.read_checkout(clone)["commit"])
+        self.assertTrue((clone / "alpha/fix.py").is_file())
+        self.assertIn(f"addons-repo : branche master mise à jour, commit {first[:7]} → {fix[:7]}.", job.lines)
+        self.assertEqual("same", web.repository_branches(self.project, repository)["commit_status"])
+
+        job = DummyJob()
+        web.switch_repository_branch_job(job, self.project, repository, "master")
+        self.assertIn(
+            f"addons-repo : aucun nouveau commit récupéré sur la branche master (commit {fix[:7]}).", job.lines
+        )
+
+        # Commit enregistré dans le clone mais pas encore envoyé : rien à récupérer du serveur.
+        (clone / "alpha/local.py").write_text("local")
+        git("add", ".", cwd=clone)
+        git("commit", "-q", "-m", "Local", cwd=clone)
+        self.assertEqual("ahead", web.repository_branches(self.project, repository)["commit_status"])

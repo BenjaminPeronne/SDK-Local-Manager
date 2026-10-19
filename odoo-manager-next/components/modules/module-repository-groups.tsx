@@ -18,7 +18,9 @@ import {
   type ModuleRepositoryGroup,
   repositoryBranchSwitchable,
   repositoryRevision,
+  repositoryWebUrl,
   sharedReplacedRepository,
+  shortCommit,
 } from "@/lib/module-repositories";
 import type { Job, ModuleRepository } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -55,16 +57,13 @@ const SOURCE_DETAILS: Record<ModuleRepository["source"], { label: string; title:
   odoo: { label: "Code d'Odoo", title: "Code source d'Odoo du projet, sans dépôt Git." },
 };
 
-/** Page web du dépôt, déduite de son adresse : gitlab.sudokeys.com/OCA/pos → https://gitlab.sudokeys.com/OCA/pos. */
-function repositoryWebUrl(repository: ModuleRepository) {
-  return repository.remote_label.includes("/") ? `https://${repository.remote_label}` : "";
-}
-
 function RevisionBadge({ repository }: { repository: ModuleRepository }) {
   const revision = repositoryRevision(repository);
   if (!revision) return null;
   const Icon = revision.kind === "branch" ? GitBranch : revision.kind === "tag" ? Tag : GitCommitHorizontal;
   const titles = { branch: "Branche", tag: "Étiquette", commit: "Commit" };
+  // Plusieurs correctifs se suivent sur une même branche : le commit dit lequel est chargé.
+  const commit = revision.kind !== "commit" && repository.commit ? shortCommit(repository.commit) : "";
   return (
     <Badge
       variant="outline"
@@ -75,6 +74,7 @@ function RevisionBadge({ repository }: { repository: ModuleRepository }) {
     >
       <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
       <span className="truncate">{revision.label}</span>
+      {commit && <span className="shrink-0 font-normal text-muted-foreground">· {commit}</span>}
     </Badge>
   );
 }
@@ -197,6 +197,7 @@ export function ModuleRepositoryGroups({
                         <RepositoryBranchPicker
                           createJob={createJob}
                           moduleCount={group.modules.length}
+                          openUrl={openUrl}
                           projectName={projectName}
                           repository={repository}
                         />

@@ -53,7 +53,7 @@ REPOSITORY_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 # Branches lues au plus dans un dépôt : au-delà, la recherche de la liste suffit à s'y retrouver.
 MAX_REMOTE_BRANCHES = 2000
 REMOTE_HEAD_RE = re.compile(r"^ref:\s*refs/heads/(\S+)\s+HEAD$")
-REMOTE_BRANCH_RE = re.compile(r"^[0-9a-f]{40}\s+refs/heads/(\S+)$")
+REMOTE_BRANCH_RE = re.compile(r"^([0-9a-f]{40})\s+refs/heads/(\S+)$")
 
 
 def natural_key(name):
@@ -64,10 +64,11 @@ def natural_key(name):
 def remote_branches(ls_remote_output):
     """Branches d'un `git ls-remote --symref <dépôt> HEAD refs/heads/*`, branche par défaut en tête.
 
-    Les autres lignes (avertissements SSH mêlés à la sortie) sont ignorées.
+    Chaque branche porte son dernier commit sur le serveur. Les autres lignes (avertissements SSH
+    mêlés à la sortie) sont ignorées.
     """
     default = ""
-    names = set()
+    commits = {}
     for line in str(ls_remote_output or "").splitlines():
         line = line.strip()
         head = REMOTE_HEAD_RE.match(line)
@@ -76,9 +77,18 @@ def remote_branches(ls_remote_output):
             continue
         branch = REMOTE_BRANCH_RE.match(line)
         if branch:
-            names.add(branch.group(1))
-    ordered = sorted(names, key=lambda name: (name != default, natural_key(name)))[:MAX_REMOTE_BRANCHES]
-    return [{"name": name, "default": name == default} for name in ordered]
+            commits[branch.group(2)] = branch.group(1)
+    ordered = sorted(commits, key=lambda name: (name != default, natural_key(name)))[:MAX_REMOTE_BRANCHES]
+    return [{"name": name, "default": name == default, "commit": commits[name]} for name in ordered]
+
+
+def remote_branch_commit(ls_remote_output, branch):
+    """Dernier commit de `branch` sur le serveur, lu même au-delà des branches gardées par remote_branches."""
+    for line in str(ls_remote_output or "").splitlines():
+        match = REMOTE_BRANCH_RE.match(line.strip())
+        if match and match.group(2) == branch:
+            return match.group(1)
+    return ""
 
 
 def sparse_checkout_pattern(path):

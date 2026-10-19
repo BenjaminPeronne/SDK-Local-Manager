@@ -2,11 +2,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   filterBranches,
+  formatCommitDate,
   groupModulesByRepository,
   matchWantedModules,
   NO_REPOSITORY_GROUP,
   repositoryBranchSwitchable,
+  repositoryCommitUrl,
+  repositoryCompareUrl,
   repositoryRevision,
+  repositoryUpdatable,
+  repositoryWebUrl,
   sharedReplacedRepository,
 } from "./module-repositories.ts";
 import type { ModuleInfo, ModuleRepository, RepositoryModule } from "./types.ts";
@@ -66,6 +71,40 @@ test("the loaded revision is the branch, then the tag, then the short commit", (
     label: "4ca6a55",
   });
   assert.equal(repositoryRevision(repository("a")), null);
+});
+
+test("commit pages follow the GitLab or GitHub address of the repository", () => {
+  const gitlab = { remote_label: "gitlab.sudokeys.com/OCA/pos" };
+  assert.equal(repositoryWebUrl(gitlab), "https://gitlab.sudokeys.com/OCA/pos");
+  assert.equal(repositoryCommitUrl(gitlab, "abc123"), "https://gitlab.sudokeys.com/OCA/pos/-/commit/abc123");
+  assert.equal(
+    repositoryCompareUrl(gitlab, "abc123", "def456"),
+    "https://gitlab.sudokeys.com/OCA/pos/-/compare/abc123...def456",
+  );
+  const github = { remote_label: "github.com/OCA/pos" };
+  assert.equal(repositoryCommitUrl(github, "abc123"), "https://github.com/OCA/pos/commit/abc123");
+  assert.equal(repositoryCompareUrl(github, "abc123", "def456"), "https://github.com/OCA/pos/compare/abc123...def456");
+  // Sans adresse connue, ou sans commit, pas de lien.
+  assert.equal(repositoryCommitUrl({ remote_label: "" }, "abc123"), "");
+  assert.equal(repositoryCommitUrl(gitlab, ""), "");
+  assert.equal(repositoryCompareUrl(gitlab, "", "def456"), "");
+});
+
+test("only a branch behind the server, or with an unknown commit, can be updated", () => {
+  const branch = { current: "18.0", remote_commit: "b".repeat(40) };
+  assert.equal(repositoryUpdatable({ ...branch, commit_status: "behind" }), true);
+  assert.equal(repositoryUpdatable({ ...branch, commit_status: "unknown" }), true);
+  assert.equal(repositoryUpdatable({ ...branch, commit_status: "same" }), false);
+  assert.equal(repositoryUpdatable({ ...branch, commit_status: "ahead" }), false);
+  assert.equal(repositoryUpdatable({ ...branch, commit_status: "missing", remote_commit: "" }), false);
+  // Dépôt sur une étiquette : pas de branche à mettre à jour.
+  assert.equal(repositoryUpdatable({ ...branch, current: "", commit_status: "unknown" }), false);
+});
+
+test("the commit date is written in full, empty when unreadable", () => {
+  assert.match(formatCommitDate("2026-10-12T14:05:00+02:00"), /octobre 2026 à \d{2}:\d{2}$/);
+  assert.equal(formatCommitDate(""), "");
+  assert.equal(formatCommitDate("pas une date"), "");
 });
 
 test("the replaced repository is shown once when every replacing copy shares it", () => {
