@@ -386,7 +386,14 @@ export function RepositoryBranchPicker({
           <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
         </button>
       </Popover.Trigger>
-      <Popover.Content size="1" align="start" className="w-[min(22rem,calc(100vw-2rem))] p-0">
+      {/* Jamais plus haute que la place libre au-dessus ou au-dessous du bouton : la liste des branches
+          rétrécit d'abord, puis la fenêtre défile. Sans cette limite, elle sortait de la fenêtre. */}
+      <Popover.Content
+        size="1"
+        align="start"
+        collisionPadding={12}
+        className="flex max-h-[var(--radix-popover-content-available-height)] w-[min(22rem,calc(100vw-2rem))] flex-col p-0"
+      >
         {chosen ? (
           <div className="grid gap-3 p-3 text-sm">
             {updating && <p className="text-xs text-muted-foreground">Mise à jour de la branche {current}</p>}
@@ -425,7 +432,7 @@ export function RepositoryBranchPicker({
             </div>
           </div>
         ) : (
-          <div className="grid gap-2 p-2">
+          <div className="flex min-h-0 flex-col gap-2 p-2 [&>*]:shrink-0">
             <CommitStatus list={list} openUrl={openUrl} repository={repository} onUpdate={() => select(current)} />
             <p className="px-1 pt-1 text-xs font-medium text-muted-foreground">Changer de branche</p>
             <div className="flex items-center gap-1">
@@ -472,7 +479,12 @@ export function RepositoryBranchPicker({
               </Button>
             </div>
             <div
-              className="max-h-72 overflow-y-auto rounded-md border"
+              className={cn(
+                "max-h-72 min-h-24 !shrink overflow-y-auto rounded-md border",
+                // Place réservée pendant la lecture : la fenêtre choisit dès l'ouverture le côté où la
+                // liste tiendra, au lieu de s'ouvrir là où tient le seul message d'attente.
+                (list.status === "idle" || list.status === "loading") && "h-72",
+              )}
               role="listbox"
               id={listId}
               aria-label={`Branches de ${repository.name}`}
