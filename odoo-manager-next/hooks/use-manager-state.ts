@@ -137,7 +137,14 @@ export function useManagerState({
       setSystemStatus(payload);
       if (!immediate && previous && previous !== next) {
         if (payload.docker.running) pushToast("success", "Docker est maintenant disponible.");
-        else pushToast("error", payload.docker.message || "Docker n'est plus disponible.");
+        // Le message brut de Docker, en anglais, reste dans l'infobulle du bandeau.
+        else
+          pushToast(
+            "error",
+            next === "missing"
+              ? "Docker est introuvable sur cet ordinateur."
+              : "Docker s’est arrêté : tes projets ne peuvent plus démarrer.",
+          );
       }
       lastDockerState.current = next;
       return true;

@@ -3,6 +3,7 @@
 import { Activity, Boxes, CloudDownload, FolderPlus, GitBranch, KeyRound, Loader2, Play } from "lucide-react";
 import { desktopBridge, desktopErrorMessage } from "@/lib/desktop";
 import { isJobUnfinished } from "@/lib/jobs";
+import { dockerSummary } from "@/lib/system-notices";
 import type { Job, Overview, ProjectCreationPrerequisites, SystemStatus, Toast } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -99,7 +100,7 @@ export function OnboardingDialog({
             ready={Boolean(systemStatus?.docker.running)}
             icon={Boxes}
             title="Docker"
-            detail={systemStatus?.docker.message || "Vérification en cours…"}
+            detail={dockerSummary(systemStatus?.docker, false).message}
             action={
               systemStatus?.docker.running ? undefined : (
                 <Button size="sm" variant="outline" onClick={requestDockerStart} disabled={loading}>

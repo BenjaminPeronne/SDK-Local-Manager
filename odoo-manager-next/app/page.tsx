@@ -18,6 +18,7 @@ import { useToasts } from "@/hooks/use-toasts";
 import { useDismissedNotice } from "@/hooks/use-dismissed-notice";
 import { api, API_BASE, ApiUnavailableError, isProjectGone, uploadDatabaseBackup } from "@/lib/api";
 import { databaseToKeep, readRememberedDatabases, writeRememberedDatabases } from "@/lib/database-selection";
+import { DOCKER_START_WAIT_MS, dockerSummary, traefikNeedsAttention } from "@/lib/system-notices";
 import {
   desktopBridge,
   desktopErrorMessage,
@@ -94,13 +95,13 @@ import { AddonLinksNotice } from "@/components/notices/addon-links-notice";
 import { ApiUnavailableNotice } from "@/components/notices/api-unavailable-notice";
 import { DegradedBackendNotice } from "@/components/notices/degraded-backend-notice";
 import { DiskEncryptionNotice } from "@/components/notices/disk-encryption-notice";
-import { DockerNotice } from "@/components/notices/docker-notice";
+import { DockerAction, DockerNotice } from "@/components/notices/docker-notice";
 import { ICloudNotice } from "@/components/notices/icloud-notice";
 import { MigrationNotice } from "@/components/notices/migration-notice";
 import { RefinedInterfaceNotice } from "@/components/notices/refined-interface-notice";
 import { RetentionNotice } from "@/components/notices/retention-notice";
 import { StagingCleanupNotice } from "@/components/notices/staging-cleanup-notice";
-import { TraefikNotice } from "@/components/notices/traefik-notice";
+import { TraefikAction, TraefikNotice } from "@/components/notices/traefik-notice";
 import { OnboardingDialog } from "@/components/onboarding/onboarding-dialog";
 import { GitLabTokenDialog } from "@/components/onboarding/gitlab-token-dialog";
 import { SshKeyDialog } from "@/components/onboarding/ssh-key-dialog";
@@ -237,6 +238,8 @@ export default function Home() {
   const lastSynchronizedJobCompletion = useRef("");
   const modulesRequestGeneration = useRef(0);
   const schedule = useScheduledTimeouts();
+  // Clic sur « Ouvrir Docker » : Docker Desktop met une minute à répondre, l'écran le dit en attendant.
+  const [dockerStartRequestedAt, setDockerStartRequestedAt] = useState(0);
   const { toasts, pushToast, dismissToast } = useToasts();
   // Défini plus bas (il dépend de l'état de la vue) : la notification de fin d'action passe par ce relais.
   const openJobRef = useRef<((job: Job) => void) | null>(null);
@@ -855,18 +858,25 @@ export default function Home() {
     if (job) setActiveTab("logs");
   }
 
+  // Le bandeau et la carte Docker passent sur « Docker démarre… » : pas de notification en plus.
+  function markDockerStarting() {
+    setDockerStartRequestedAt(Date.now());
+    schedule(() => setDockerStartRequestedAt(0), DOCKER_START_WAIT_MS);
+  }
+
   async function requestDockerStart() {
     setLoading(true);
     try {
       const result = await api<{ ok: boolean; message: string }>("/api/system/docker/start", { method: "POST" });
-      pushToast("info", result.message || "Démarrage de Docker demandé.");
+      if (result.ok) markDockerStarting();
+      else pushToast("error", result.message || "Impossible de démarrer Docker.");
       schedule(refreshSystemStatus, 1500);
       schedule(refreshSystemStatus, 5000);
     } catch (err) {
       if (err instanceof ApiUnavailableError && isDesktopRuntime()) {
         try {
           await openDockerDesktopNative();
-          pushToast("info", "Ouverture de Docker Desktop demandée.");
+          markDockerStarting();
           schedule(refreshSystemStatus, 3000);
           return;
         } catch (nativeError) {
@@ -1396,6 +1406,8 @@ export default function Home() {
   }, [activeTab, awaitingFirstDatabase, selectedProjectHasJobs]);
   // Sans projet ouvert, les onglets n'offrent que des panneaux vides : l'accueil prend la place.
   const showWelcome = !projectViewOpen;
+  const dockerRunning = Boolean(systemStatus?.docker.running);
+  const docker = dockerSummary(systemStatus?.docker, dockerStartRequestedAt > 0);
 
   useEffect(() => {
     if (showWelcome || !selectedProject || selectedProjectOnline) return;
@@ -1713,23 +1725,26 @@ export default function Home() {
               {degradedBackendReason && (
                 <DegradedBackendNotice degradedBackendReason={degradedBackendReason} openUrl={openUrl} />
               )}
-              {systemStatus && !systemStatus.docker.running && (
+              {/* L'accueil montre déjà Docker et Traefik dans ses cartes, avec leur action : seul le guide
+                  d'installation de Docker, trop long pour une carte, y garde son bandeau. */}
+              {systemStatus && !dockerRunning && (!showWelcome || docker.state === "missing") && (
                 <DockerNotice
                   loading={loading}
                   openSettingsDialog={openSettingsDialog}
                   openUrl={openUrl}
                   requestDockerStart={requestDockerStart}
                   docker={systemStatus.docker}
+                  summary={docker}
                 />
               )}
-              {systemStatus?.traefik && !systemStatus.traefik.running && (
+              {!showWelcome && systemStatus?.traefik && traefikNeedsAttention(systemStatus.traefik, dockerRunning) && (
                 <TraefikNotice
                   loading={loading}
                   openSettingsDialog={openSettingsDialog}
                   requestLegacyTraefikStop={requestLegacyTraefikStop}
                   requestTraefikInstall={requestTraefikInstall}
                   traefik={systemStatus.traefik}
-                  dockerRunning={systemStatus.docker.running}
+                  dockerRunning={dockerRunning}
                 />
               )}
               {migrationBannerVisible && (
@@ -1797,12 +1812,35 @@ export default function Home() {
                   season={season}
                   hasProjects={Boolean(overview?.projects.length)}
                   docker={{
-                    ready: Boolean(systemStatus?.docker.running),
-                    message: systemStatus?.docker.message || "Vérification en cours…",
+                    state: docker.state,
+                    message: docker.message,
+                    detail: docker.detail,
+                    action:
+                      systemStatus && docker.state === "stopped" ? (
+                        <DockerAction
+                          docker={systemStatus.docker}
+                          loading={loading}
+                          openUrl={openUrl}
+                          requestDockerStart={requestDockerStart}
+                        />
+                      ) : undefined,
                   }}
                   traefik={
                     systemStatus?.traefik
-                      ? { ready: systemStatus.traefik.running, message: systemStatus.traefik.message }
+                      ? {
+                          ready: systemStatus.traefik.running,
+                          waiting: !dockerRunning && !systemStatus.traefik.running,
+                          message: dockerRunning ? systemStatus.traefik.message : "En attente de Docker.",
+                          action: traefikNeedsAttention(systemStatus.traefik, dockerRunning) ? (
+                            <TraefikAction
+                              dockerRunning={dockerRunning}
+                              loading={loading}
+                              requestLegacyTraefikStop={requestLegacyTraefikStop}
+                              requestTraefikInstall={requestTraefikInstall}
+                              traefik={systemStatus.traefik}
+                            />
+                          ) : undefined,
+                        }
                       : null
                   }
                   mailpit={systemStatus?.mailpit}

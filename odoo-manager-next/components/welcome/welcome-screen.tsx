@@ -1,8 +1,19 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { AlertTriangle, CheckCircle2, ExternalLink, FolderPlus, Mail, RefreshCcw, Settings } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  FolderPlus,
+  Hourglass,
+  Loader2,
+  Mail,
+  RefreshCcw,
+  Settings,
+} from "lucide-react";
 import { newYearGreeting, type Season } from "@/lib/seasonal";
+import type { DockerSummary } from "@/lib/system-notices";
 import type { MailpitStatus } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +26,8 @@ import { cn } from "@/lib/utils";
  *
  * Sans projet, les onglets ne montrent que des panneaux vides : l'écran dit plutôt ce que
  * l'application attend, si ses deux dépendances sont prêtes, et si les e-mails sont capturés.
+ * Chaque carte porte l'action qui la débloque : l'accueil n'affiche pas en plus les bandeaux
+ * Docker et Traefik, qui répétaient la même chose.
  */
 export function WelcomeScreen({
   icon,
@@ -32,8 +45,9 @@ export function WelcomeScreen({
   icon: { src: string };
   season: Season | null;
   hasProjects: boolean;
-  docker: { ready: boolean; message: string };
-  traefik: { ready: boolean; message: string } | null;
+  docker: { state: DockerSummary["state"]; message: string; detail: string; action?: ReactNode };
+  /** `waiting` : Docker arrêté, Traefik ne peut que l'attendre. */
+  traefik: { ready: boolean; waiting: boolean; message: string; action?: ReactNode } | null;
   mailpit: MailpitStatus | undefined;
   onStartMailpit: () => void;
   onOpenMailpit: () => void;
@@ -72,11 +86,25 @@ export function WelcomeScreen({
       </p>
 
       <div className="mt-8 grid w-full max-w-xl gap-3 sm:grid-cols-2">
-        <WelcomeStatus title="Docker" ready={docker.ready} message={docker.message} />
+        <WelcomeStatus
+          title="Docker"
+          ready={docker.state === "ready"}
+          busy={docker.state === "starting" || docker.state === "checking"}
+          pendingLabel={DOCKER_LABELS[docker.state]}
+          message={docker.message}
+          detail={docker.detail}
+          action={docker.action}
+          actionBelow
+        />
         <WelcomeStatus
           title="Traefik"
           ready={Boolean(traefik?.ready)}
+          busy={!traefik}
+          waiting={traefik?.waiting}
+          pendingLabel={traefik?.waiting ? "En attente" : traefik ? "À vérifier" : "Vérification"}
           message={traefik?.message || "Vérification en cours…"}
+          action={traefik?.action}
+          actionBelow
         />
         {mailpit && (
           <WelcomeStatus
@@ -126,30 +154,54 @@ export function WelcomeScreen({
   );
 }
 
+const DOCKER_LABELS: Record<DockerSummary["state"], string> = {
+  checking: "Vérification",
+  ready: "Prêt",
+  starting: "Démarrage",
+  stopped: "Arrêté",
+  missing: "À installer",
+};
+
 function WelcomeStatus({
   title,
   ready,
   message,
+  detail,
   readyLabel = "Prêt",
   pendingLabel = "À vérifier",
   action,
   className,
   optional = false,
+  busy = false,
+  waiting = false,
+  actionBelow = false,
 }: {
   title: string;
   ready: boolean;
   message: string;
+  /** Message technique, en infobulle seulement. */
+  detail?: string;
   readyLabel?: string;
   pendingLabel?: string;
   action?: ReactNode;
   className?: string;
   // Un outil facultatif arrêté n'est pas un problème : pas d'alerte orange.
   optional?: boolean;
+  /** Vérification ou démarrage en cours. */
+  busy?: boolean;
+  /** Dépend d'un autre outil encore arrêté : rien à faire de son côté. */
+  waiting?: boolean;
+  /** Carte étroite : le bouton passe sous le texte au lieu de l'écraser. */
+  actionBelow?: boolean;
 }) {
   return (
     <div className={cn("flex min-w-0 items-start gap-3 rounded-lg border bg-card px-4 py-3 text-left", className)}>
       {ready ? (
         <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+      ) : busy ? (
+        <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-muted-foreground" />
+      ) : waiting ? (
+        <Hourglass className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
       ) : optional ? (
         <Mail className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
       ) : (
@@ -160,9 +212,12 @@ function WelcomeStatus({
           {title}
           <Badge variant={ready ? "success" : "outline"}>{ready ? readyLabel : pendingLabel}</Badge>
         </div>
-        <p className="mt-0.5 break-words text-xs text-muted-foreground">{message}</p>
+        <p className="mt-0.5 break-words text-xs text-muted-foreground" title={detail || undefined}>
+          {message}
+        </p>
+        {action && actionBelow && <div className="mt-2">{action}</div>}
       </div>
-      {action && <div className="ml-auto shrink-0 self-center">{action}</div>}
+      {action && !actionBelow && <div className="ml-auto shrink-0 self-center">{action}</div>}
     </div>
   );
 }

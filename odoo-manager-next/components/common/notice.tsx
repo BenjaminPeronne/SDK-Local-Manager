@@ -68,6 +68,7 @@ const NOTICE_TONES: Record<
 export function Notice({
   tone,
   icon: Icon,
+  iconClassName,
   title,
   children,
   actions,
@@ -76,6 +77,8 @@ export function Notice({
 }: {
   tone: NoticeTone;
   icon: LucideIcon;
+  /** Animation de l'icône, comme la rotation d'une attente. */
+  iconClassName?: string;
   title: ReactNode;
   children?: ReactNode;
   actions?: ReactNode;
@@ -92,7 +95,7 @@ export function Notice({
       <div className={cn("flex flex-col gap-3 py-3.5 pl-5 pr-4 sm:flex-row sm:items-center", onDismiss && "pr-11")}>
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full", style.icon)}>
-            <Icon className="h-4 w-4" aria-hidden="true" />
+            <Icon className={cn("h-4 w-4", iconClassName)} aria-hidden="true" />
           </span>
           <div className="min-w-0 flex-1 pt-1 text-sm">
             <div className="font-semibold leading-5">{title}</div>
