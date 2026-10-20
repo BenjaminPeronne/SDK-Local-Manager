@@ -15,6 +15,7 @@ import {
   RefreshCcw,
   Search,
 } from "lucide-react";
+import { recordRepositoryCheck, useRepositoryCheck } from "@/hooks/use-repository-updates";
 import { api } from "@/lib/api";
 import { handleListKeys } from "@/lib/list-navigation";
 import {
@@ -24,6 +25,7 @@ import {
   repositoryCompareUrl,
   type RepositoryBranches,
   repositoryUpdatable,
+  repositoryUpdateAvailable,
   shortCommit,
 } from "@/lib/module-repositories";
 import type { Job, ModuleRepository, RepositoryDatabases } from "@/lib/types";
@@ -249,7 +251,8 @@ type RepositoryBranchPickerProps = {
 
 /**
  * Branche et commit chargés d'un dépôt ; un clic les compare au serveur, propose de récupérer le
- * dernier commit de la branche ou de changer de branche.
+ * dernier commit de la branche ou de changer de branche. Quand le contrôle de la vue « Par dépôt » a
+ * trouvé un commit plus récent, « Mise à jour disponible » le dit à côté et ouvre le même choix.
  */
 export function RepositoryBranchPicker({
   createJob,
@@ -270,6 +273,7 @@ export function RepositoryBranchPicker({
   const [submitting, setSubmitting] = useState(false);
   const current = repository.branch;
   const listId = useId();
+  const check = useRepositoryCheck(projectName, repository);
 
   useEffect(() => {
     if (!request) return;
@@ -279,6 +283,12 @@ export function RepositoryBranchPicker({
       body: JSON.stringify({ repository: repository.id }),
     })
       .then((result) => {
+        recordRepositoryCheck(projectName, repository.id, {
+          branch: result.current,
+          commit: result.commit,
+          remote_commit: result.remote_commit,
+          commit_status: result.commit_status,
+        });
         if (cancelled) return;
         setList({ status: "ready", result, refreshing: false });
         setActive(0);
@@ -386,6 +396,18 @@ export function RepositoryBranchPicker({
           <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
         </button>
       </Popover.Trigger>
+      {check && repositoryUpdateAvailable(check) && (
+        <button
+          type="button"
+          className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-300"
+          title={`Un commit plus récent (${shortCommit(check.remote_commit)}) est sur le serveur pour la branche ${current} — cliquer pour le voir et mettre à jour`}
+          aria-label={`Mise à jour disponible pour ${repository.name} : commit ${shortCommit(check.remote_commit)} sur le serveur`}
+          onClick={() => changeOpen(true)}
+        >
+          <ArrowDownToLine className="h-3 w-3 shrink-0" aria-hidden="true" />
+          Mise à jour disponible
+        </button>
+      )}
       {/* Jamais plus haute que la place libre au-dessus ou au-dessous du bouton : la liste des branches
           rétrécit d'abord, puis la fenêtre défile. Sans cette limite, elle sortait de la fenêtre. */}
       <Popover.Content

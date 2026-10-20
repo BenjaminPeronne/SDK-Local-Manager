@@ -770,3 +770,74 @@ class RepositoryModulesTests(ModuleLayoutTests):
         git("add", ".", cwd=clone)
         git("commit", "-q", "-m", "Local", cwd=clone)
         self.assertEqual("ahead", web.repository_branches(self.project, repository)["commit_status"])
+
+    @unittest.skipUnless(shutil.which("git"), "Git requis")
+    def test_update_check_flags_newer_commits_and_stays_silent_on_unreadable_repositories(self):
+        def git(*arguments, cwd=None):
+            return subprocess.run(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.org", *arguments],
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+        work = self.root / "work"
+        (work / "alpha").mkdir(parents=True)
+        git("init", "-q", "-b", "master", cwd=work)
+        (work / "alpha/__manifest__.py").write_text("{'name': 'alpha'}")
+        git("add", ".", cwd=work)
+        git("commit", "-q", "-m", "Premier commit", cwd=work)
+        origin = self.root / "origin.git"
+        git("clone", "-q", "--bare", str(work), str(origin))
+        git("remote", "add", "origin", str(origin), cwd=work)
+        clone = self.storage("addons-repo")
+        git("clone", "-q", "--depth", "1", "--single-branch", "--branch", "master", origin.as_uri(), str(clone))
+        (self.project_root / "odoo/addons/alpha").symlink_to("../addons-store/addons-repo/alpha")
+        repository = str(web.safe_resolve(clone))
+        # Clone dont le serveur a disparu : lu sans erreur, état inconnu.
+        lost = self.storage("addons-lost")
+        git("clone", "-q", origin.as_uri(), str(lost))
+        git("remote", "set-url", "origin", (self.root / "missing.git").as_uri(), cwd=lost)
+        first = git("rev-parse", "HEAD", cwd=work)
+
+        checks = web.repository_updates(
+            self.project, [repository, repository, str(web.safe_resolve(lost)), "/ailleurs"]
+        )
+        self.assertEqual(
+            {repository, str(web.safe_resolve(lost)), "/ailleurs"},
+            set(checks["repositories"]),
+        )
+        self.assertEqual(
+            {"branch": "master", "commit": first, "remote_commit": first, "commit_status": "same"},
+            checks["repositories"][repository],
+        )
+        self.assertEqual(
+            ("master", "unknown"),
+            tuple(checks["repositories"][str(web.safe_resolve(lost))][key] for key in ("branch", "commit_status")),
+        )
+        self.assertEqual("unknown", checks["repositories"]["/ailleurs"]["commit_status"])
+
+        # Un correctif arrive sur la même branche du serveur.
+        (work / "alpha/fix.py").write_text("fix")
+        git("add", ".", cwd=work)
+        git("commit", "-q", "-m", "Correctif", cwd=work)
+        git("push", "-q", "origin", "master", cwd=work)
+        fix = git("rev-parse", "HEAD", cwd=work)
+        check = web.repository_updates(self.project, [repository])["repositories"][repository]
+        self.assertEqual((first, fix, "behind"), (check["commit"], check["remote_commit"], check["commit_status"]))
+
+    def test_update_check_does_not_wait_for_a_silent_server(self):
+        release = web.threading.Event()
+        self.addCleanup(release.set)
+
+        def silent(_creator, _project, _repository_id):
+            release.wait(5)
+            return {"branch": "18.0", "commit": COMMIT, "remote_commit": "b" * 40, "commit_status": "behind"}
+
+        with (
+            mock.patch.object(web, "repository_update_check", side_effect=silent),
+            mock.patch.object(web, "REPOSITORY_UPDATE_DEADLINE", 0.05),
+        ):
+            checks = web.repository_updates(self.project, ["/a", "/b"])
+        self.assertEqual({"unknown"}, {check["commit_status"] for check in checks["repositories"].values()})

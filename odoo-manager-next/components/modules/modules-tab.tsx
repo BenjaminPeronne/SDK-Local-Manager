@@ -27,6 +27,7 @@ import {
   Search,
 } from "lucide-react";
 import { type ModuleFilters, type ModuleView, MODULES_PER_PAGE } from "@/hooks/use-module-filters";
+import { useRepositoryUpdateChecks } from "@/hooks/use-repository-updates";
 import { groupModulesByRepository } from "@/lib/module-repositories";
 import type { Job, ManagerSettings, ModuleInfo, ModuleRepository, Overview, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -162,6 +163,9 @@ export function ModulesTab({
     ],
   );
   const repositoryView = moduleFilters.view === "repository";
+  // Commits plus récents sur le serveur, cherchés à l'ouverture de la vue « Par dépôt » pour tous les
+  // dépôts du projet (pas seulement ceux de la recherche) : chaque en-tête le signale.
+  useRepositoryUpdateChecks(projectName, moduleRepositories, repositoryView && !loadingModules);
   // Les en-têtes de dépôt se collent sous l'en-tête du tableau, masqué (hauteur 0) sur écran étroit.
   // Ref de rappel : l'onglet démonte et remonte le tableau, la mesure suit chaque montage.
   const [tableHeaderHeight, setTableHeaderHeight] = useState(0);

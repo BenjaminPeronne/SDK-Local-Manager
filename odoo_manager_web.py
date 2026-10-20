@@ -234,6 +234,7 @@ API_ENDPOINTS = {
         "/api/projects/{project}/database-retention",
         "/api/projects/{project}/repository/inspect",
         "/api/projects/{project}/repository/branches",
+        "/api/projects/{project}/repository/updates",
         "/api/projects/{project}/repository/databases",
         "/api/projects/{project}/module-zip/inspect",
         "/api/projects/{project}/module-zip",
@@ -6831,6 +6832,17 @@ def checkout_commit_details(creator, root):
     return {"commit_date": date.strip(), "commit_subject": subject.strip()}
 
 
+def repository_ls_remote(creator, target, *patterns, timeout=60):
+    """`git ls-remote` vers le dépôt d'origine, avec la clé SSH qui servira au changement de branche."""
+    if target["kind"] == "git":
+        command = creator.git(
+            *CHECKOUT_GIT_OPTIONS, "-C", creator.command_path(target["root"]), "ls-remote", "--symref", "origin"
+        )
+    else:
+        command = creator.git(*REPOSITORY_GIT_OPTIONS, "ls-remote", "--symref", target["url"])
+    return creator.project_service.capture([*command, *patterns], cwd=creator.command_cwd, timeout=timeout)
+
+
 def repository_branches(project, repository_id):
     """Branches du dépôt d'origine, lues sur le serveur avec la clé SSH qui servira au changement.
 
@@ -6839,15 +6851,7 @@ def repository_branches(project, repository_id):
     """
     target = switchable_repository(project, repository_id)
     creator = ProjectCreator(SETTINGS, WORKSPACE, project_service())
-    if target["kind"] == "git":
-        command = creator.git(
-            *CHECKOUT_GIT_OPTIONS, "-C", creator.command_path(target["root"]), "ls-remote", "--symref", "origin"
-        )
-    else:
-        command = creator.git(*REPOSITORY_GIT_OPTIONS, "ls-remote", "--symref", target["url"])
-    code, output = creator.project_service.capture(
-        [*command, "HEAD", "refs/heads/*"], cwd=creator.command_cwd, timeout=60
-    )
+    code, output = repository_ls_remote(creator, target, "HEAD", "refs/heads/*")
     if code:
         raise repository_clone_error(output)
     remote_commit = remote_branch_commit(output, target["branch"]) if target["branch"] else ""
@@ -6870,6 +6874,77 @@ def repository_branches(project, repository_id):
 def repository_branches_view(request):
     payload = request.handler.read_json()
     return repository_branches(request.param("project"), payload.get("repository", ""))
+
+
+# Contrôle des mises à jour de la vue « Par dépôt » : quelques connexions à GitLab à la fois, pas des
+# dizaines. Il tourne derrière la liste : un serveur muet ne doit pas le faire durer, d'où une attente
+# bornée pour chaque dépôt puis pour l'ensemble.
+REPOSITORY_UPDATE_WORKERS = 4
+MAX_REPOSITORY_UPDATE_CHECKS = 60
+REPOSITORY_UPDATE_TIMEOUT = 20
+REPOSITORY_UPDATE_DEADLINE = 45
+
+
+def repository_update_check(creator, project, repository_id):
+    """Commit chargé d'un dépôt comparé au dernier commit de sa branche, sans lire ses autres branches.
+
+    Serveur injoignable ou clé refusée : état « unknown », sans erreur.
+    """
+    target = switchable_repository(project, repository_id)
+    check = {"branch": target["branch"], "commit": target["commit"], "remote_commit": "", "commit_status": "unknown"}
+    if not target["branch"]:
+        return check
+    branch = target["branch"]
+    code, output = repository_ls_remote(creator, target, f"refs/heads/{branch}", timeout=REPOSITORY_UPDATE_TIMEOUT)
+    if code:
+        return check
+    check["remote_commit"] = remote_branch_commit(output, branch)
+    check["commit_status"] = repository_commit_status(creator, target, check["remote_commit"])
+    return check
+
+
+def repository_updates(project, repository_ids):
+    """{dépôt: état face au serveur} pour les dépôts modifiables du projet, lus en parallèle.
+
+    Contrôle discret, lancé à l'ouverture de la vue « Par dépôt » : un dépôt illisible, un serveur
+    injoignable ou trop lent donnent « unknown » au lieu d'une erreur. Le sélecteur de branche, à son
+    ouverture, dit ce qui bloque.
+    """
+    project = validate_project(project)
+    ids = list(dict.fromkeys(str(item or "").strip() for item in repository_ids or []))
+    ids = [repository_id for repository_id in ids if repository_id][:MAX_REPOSITORY_UPDATE_CHECKS]
+    checks = {
+        repository_id: {"branch": "", "commit": "", "remote_commit": "", "commit_status": "unknown"}
+        for repository_id in ids
+    }
+    if not ids:
+        return {"repositories": checks}
+    creator = ProjectCreator(SETTINGS, WORKSPACE, project_service())
+    executor = ThreadPoolExecutor(
+        max_workers=min(REPOSITORY_UPDATE_WORKERS, len(ids)), thread_name_prefix="repository-updates"
+    )
+    futures = {
+        executor.submit(repository_update_check, creator, project, repository_id): repository_id
+        for repository_id in ids
+    }
+    try:
+        for future in as_completed(futures, timeout=REPOSITORY_UPDATE_DEADLINE):
+            try:
+                checks[futures[future]] = future.result()
+            except Exception:
+                continue
+    except TimeoutError:
+        pass
+    finally:
+        # Lectures encore en attente abandonnées : chacune s'arrête d'elle-même à son délai.
+        executor.shutdown(wait=False, cancel_futures=True)
+    return {"repositories": checks}
+
+
+def repository_updates_view(request):
+    payload = request.handler.read_json()
+    repositories = payload.get("repositories")
+    return repository_updates(request.param("project"), repositories if isinstance(repositories, list) else [])
 
 
 def repository_target_modules(target):
@@ -8545,6 +8620,7 @@ ROUTER = Router(
         api_route("POST", "/api/projects/{project}/database-retention", extend_database_retention_view),
         api_route("POST", "/api/projects/{project}/repository/inspect", inspect_repository_view),
         api_route("POST", "/api/projects/{project}/repository/branches", repository_branches_view),
+        api_route("POST", "/api/projects/{project}/repository/updates", repository_updates_view),
         api_route("POST", "/api/projects/{project}/repository/databases", repository_databases_view),
         api_route("POST", "/api/projects/{project}/module-zip/inspect", inspect_module_zip_view),
         api_route("POST", "/api/projects/{project}/module-zip", import_module_zip_view),

@@ -7,10 +7,16 @@ import {
   matchWantedModules,
   NO_REPOSITORY_GROUP,
   repositoryBranchSwitchable,
+  REPOSITORY_CHECK_TTL_MS,
+  repositoriesToCheck,
+  repositoryCheckKey,
+  type RepositoryCheckEntry,
   repositoryCommitUrl,
   repositoryCompareUrl,
   repositoryRevision,
   repositoryUpdatable,
+  repositoryUpdateAvailable,
+  type RepositoryUpdateCheck,
   repositoryWebUrl,
   sharedReplacedRepository,
 } from "./module-repositories.ts";
@@ -181,4 +187,45 @@ test("matchWantedModules retient un nom présent deux fois dès qu'une copie est
   const modules = [repositoryModule("base_rest", "blocked", "old/base_rest"), repositoryModule("base_rest", "add")];
   assert.deepEqual(matchWantedModules(modules, ["base_rest"]), { importable: ["base_rest"], blocked: [], absent: [] });
   assert.deepEqual(matchWantedModules([], []), { importable: [], blocked: [], absent: [] });
+});
+
+test("only branch repositories without a recent check are compared with the server", () => {
+  const now = 1_000_000_000;
+  const clone = repository("/store/clone", { branch: "18.0", commit: "a".repeat(40) });
+  const fresh = repository("/store/fresh", { branch: "18.0", commit: "b".repeat(40) });
+  const stale = repository("/store/stale", { branch: "18.0", commit: "c".repeat(40) });
+  const tagged = repository("/store/tagged", { tag: "v1", commit: "d".repeat(40) });
+  const odoo = repository("odoo", { branch: "18.0", standard: true, source: "odoo" });
+  const entries = new Map<string, RepositoryCheckEntry>([
+    [repositoryCheckKey("demo", fresh), { at: now - 1000, check: null }],
+    [repositoryCheckKey("demo", stale), { at: now - REPOSITORY_CHECK_TTL_MS, check: null }],
+    // Contrôle d'un autre projet ou d'un autre commit chargé : ne compte pas.
+    [repositoryCheckKey("other", clone), { at: now, check: null }],
+  ]);
+
+  assert.deepEqual(
+    repositoriesToCheck("demo", [clone, fresh, stale, tagged, odoo], entries, now).map((item) => item.id),
+    ["/store/clone", "/store/stale"],
+  );
+  // Nouveau commit chargé après une mise à jour : un nouveau contrôle.
+  assert.deepEqual(
+    repositoriesToCheck("demo", [{ ...fresh, commit: "e".repeat(40) }], entries, now).map((item) => item.id),
+    ["/store/fresh"],
+  );
+});
+
+test("an update is announced only when the server has a newer commit on the branch", () => {
+  const check = (values: Partial<RepositoryUpdateCheck>): RepositoryUpdateCheck => ({
+    branch: "18.0",
+    commit: "a".repeat(40),
+    remote_commit: "b".repeat(40),
+    commit_status: "behind",
+    ...values,
+  });
+  assert.equal(repositoryUpdateAvailable(check({})), true);
+  assert.equal(repositoryUpdateAvailable(check({ commit_status: "same" })), false);
+  assert.equal(repositoryUpdateAvailable(check({ commit_status: "ahead" })), false);
+  assert.equal(repositoryUpdateAvailable(check({ commit_status: "unknown" })), false);
+  assert.equal(repositoryUpdateAvailable(check({ remote_commit: "" })), false);
+  assert.equal(repositoryUpdateAvailable(null), false);
 });

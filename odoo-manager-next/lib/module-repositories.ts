@@ -143,6 +143,41 @@ export function repositoryUpdatable(result: Pick<RepositoryBranches, "current" |
   return result.commit_status === "behind" || result.commit_status === "unknown";
 }
 
+/** État d'un dépôt face au serveur, lu par le contrôle groupé de la vue « Par dépôt » (repository_updates). */
+export type RepositoryUpdateCheck = Pick<RepositoryBranches, "commit" | "remote_commit" | "commit_status"> & {
+  branch: string;
+};
+
+/** Contrôle en cours ou fait il y a moins de `REPOSITORY_CHECK_TTL_MS` ; `check` reste vide tant qu'aucune réponse n'est lue. */
+export type RepositoryCheckEntry = { at: number; check: RepositoryUpdateCheck | null };
+
+// Un contrôle vaut quelques minutes : rouvrir la vue juste après ne relit pas tous les dépôts sur GitLab.
+export const REPOSITORY_CHECK_TTL_MS = 5 * 60_000;
+
+/** Clé d'un contrôle : projet, dépôt et ce qu'il a de chargé ; un nouveau commit chargé appelle un nouveau contrôle. */
+export function repositoryCheckKey(project: string, repository: Pick<ModuleRepository, "id" | "branch" | "commit">) {
+  return [project, repository.id, repository.branch, repository.commit].join("\n");
+}
+
+/** Dépôts à comparer au serveur : modifiables, sur une branche, sans contrôle récent ni en cours. */
+export function repositoriesToCheck(
+  project: string,
+  repositories: ModuleRepository[],
+  entries: ReadonlyMap<string, RepositoryCheckEntry>,
+  now: number,
+) {
+  return repositories.filter((repository) => {
+    if (!repository.branch || !repositoryBranchSwitchable(repository)) return false;
+    const entry = entries.get(repositoryCheckKey(project, repository));
+    return !entry || now - entry.at >= REPOSITORY_CHECK_TTL_MS;
+  });
+}
+
+/** Le serveur a un commit plus récent sur la branche chargée : l'en-tête du dépôt le signale. */
+export function repositoryUpdateAvailable(check: RepositoryUpdateCheck | null | undefined) {
+  return check?.commit_status === "behind" && Boolean(check.remote_commit);
+}
+
 /** Branches dont le nom contient la recherche, sans tenir compte des majuscules ; l'ordre reçu est gardé. */
 export function filterBranches(branches: RemoteBranch[], search: string) {
   const query = search.trim().toLocaleLowerCase();
