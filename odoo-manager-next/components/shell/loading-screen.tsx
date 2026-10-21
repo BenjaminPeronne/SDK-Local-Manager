@@ -17,7 +17,9 @@ type LoadingScreenProps = {
 export function LoadingScreen({ appIcon, roundIcon, message, error, diagnostics, onRetry }: LoadingScreenProps) {
   return (
     <main className="sdk-shell grid min-h-screen place-items-center bg-background px-6">
-      <div className="w-full max-w-md rounded-lg border bg-card p-6 text-center shadow-sm">
+      {/* Couleur du texte explicite : au tout premier affichage, avant que la page prenne vie, le thème
+          des composants est encore clair alors que la page peut être sombre (titre noir sur noir). */}
+      <div className="w-full max-w-md rounded-lg border bg-card p-6 text-center text-foreground shadow-sm">
         <img
           src={appIcon.src}
           alt="SDK Local Manager"

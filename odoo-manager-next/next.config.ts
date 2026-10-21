@@ -37,6 +37,10 @@ const env = buildIdentity();
 
 const browserConfig: NextConfig = {
   agentRules: false,
+  // Next.js 16 ne fait fonctionner l'interface de développement qu'à l'adresse de son lancement :
+  // ouverte par 127.0.0.1 alors que `npm run dev` sert localhost (ou l'inverse), la page restait
+  // figée sur son premier affichage.
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
   env,
   outputFileTracingRoot: configDir,
   async rewrites() {
