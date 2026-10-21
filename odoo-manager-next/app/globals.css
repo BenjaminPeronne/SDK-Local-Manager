@@ -525,35 +525,98 @@ textarea {
   position: absolute;
   left: calc(-1 * var(--bat-size));
   width: var(--bat-size);
-  color: hsl(var(--foreground) / 0.45);
+  color: hsl(var(--foreground) / var(--bat-opacity));
   animation: sdk-bat-fly var(--bat-duration) linear var(--bat-delay) infinite var(--bat-direction);
 }
-.sdk-bat-wings {
+/* Ondulation et inclinaison, sur un rythme distinct de la traversée : la trajectoire ne se répète pas. */
+.sdk-bat-body {
+  display: block;
+  animation: sdk-bat-bob var(--bat-bob) ease-in-out var(--bat-delay) infinite;
+}
+.sdk-bat-body svg {
   display: block;
   width: 100%;
-  transform-origin: center 40%;
-  animation: sdk-bat-flap 0.28s ease-in-out infinite alternate;
+}
+/* Battement : ailes hautes, à l'horizontale, basses, à l'horizontale, un dessin à la fois. */
+.sdk-bat-frame {
+  opacity: 0;
+  animation: var(--bat-flap) linear var(--bat-delay) infinite;
+}
+.sdk-bat-frame-0 {
+  animation-name: sdk-bat-wings-up;
+}
+.sdk-bat-frame-1 {
+  animation-name: sdk-bat-wings-level;
+}
+.sdk-bat-frame-2 {
+  animation-name: sdk-bat-wings-down;
+}
+@keyframes sdk-bat-wings-up {
+  0%,
+  24.9% {
+    opacity: 1;
+  }
+  25%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes sdk-bat-wings-level {
+  0%,
+  24.9%,
+  50%,
+  74.9% {
+    opacity: 0;
+  }
+  25%,
+  49.9%,
+  75%,
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes sdk-bat-wings-down {
+  0%,
+  49.9%,
+  75%,
+  100% {
+    opacity: 0;
+  }
+  50%,
+  74.9% {
+    opacity: 1;
+  }
 }
 @keyframes sdk-bat-fly {
   0% {
     transform: translate3d(0, 0, 0);
   }
   25% {
-    transform: translate3d(25cqw, -14px, 0);
+    transform: translate3d(25cqw, -18px, 0);
   }
   50% {
-    transform: translate3d(50cqw, 6px, 0);
+    transform: translate3d(50cqw, 8px, 0);
   }
   75% {
-    transform: translate3d(75cqw, -10px, 0);
+    transform: translate3d(75cqw, -12px, 0);
   }
   100% {
     transform: translate3d(calc(100cqw + 2 * var(--bat-size)), 0, 0);
   }
 }
-@keyframes sdk-bat-flap {
-  to {
-    transform: scaleY(0.45);
+@keyframes sdk-bat-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-7px) rotate(-9deg);
+  }
+  50% {
+    transform: translateY(2px) rotate(2deg);
+  }
+  75% {
+    transform: translateY(-3px) rotate(8deg);
   }
 }
 
