@@ -8,6 +8,13 @@ const { randomBytes, randomUUID, createHash } = require("node:crypto");
 const APP_ORIGIN = "app://sdk";
 const API_TOKEN_HEADER = "X-SDK-Manager-Token";
 const API_TOKEN_VARIABLE = "ODOO_MANAGER_API_TOKEN";
+// Le backend s'arrête seul quand l'application disparaît sans l'arrêter (plantage, arrêt forcé) :
+// il surveille ce processus, et la fermeture de son entrée standard, que l'application garde
+// ouverte sans y écrire. Voir odoo_manager_core/parent_watch.py.
+const PARENT_PID_VARIABLE = "ODOO_MANAGER_PARENT_PID";
+const WATCH_STDIN_VARIABLE = "ODOO_MANAGER_WATCH_STDIN";
+// Temps laissé au backend d'une session précédente pour arrêter Docker et libérer le port.
+const LEFTOVER_STOP_MS = 5000;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function configPath(env = process.env, platform = process.platform, home = os.homedir()) {
@@ -58,10 +65,23 @@ function reservePort(port) {
   });
 }
 
-async function selectPort(preferred) {
+/**
+ * Réserve le port voulu, sinon un port libre au hasard.
+ *
+ * `reclaim(port)` peut libérer le port occupé avant le repli : il rend true quand le port est
+ * de nouveau libre.
+ */
+async function selectPort(preferred, reclaim = null) {
   try {
     return await reservePort(preferred);
   } catch {
+    if (reclaim && (await reclaim(preferred).catch(() => false))) {
+      try {
+        return await reservePort(preferred);
+      } catch {
+        /* Repris entre-temps par un autre programme. */
+      }
+    }
     return reservePort(0);
   }
 }
@@ -163,10 +183,56 @@ class Backend {
       fs.rmSync(path.join(this.logDir, "backend.previous.log"), { force: true });
       fs.renameSync(this.logPath, path.join(this.logDir, "backend.previous.log"));
     }
-    this.port = await selectPort(this.preferredPort || configuredPort(this.env));
+    this.port = await selectPort(this.preferredPort || configuredPort(this.env), (port) => this.stopLeftover(port));
     this.endpoint = `http://127.0.0.1:${this.port}`;
     this.log(`\n=== SDK Local Manager Electron · ${new Date().toISOString()} · ${this.endpoint} ===`);
     return this.endpoint;
+  }
+
+  /**
+   * Arrête le backend d'une session précédente resté sur le port habituel, et dit si le port est libre.
+   *
+   * Une application tuée (plantage, arrêt forcé) laissait son backend démarré : il gardait le
+   * port, et chaque session suivante se rabattait sur un port au hasard. Seul un backend qui
+   * accepte le jeton laissé sur disque par cette application est arrêté : un autre programme,
+   * ou le backend du script de développement (jeton à part), n'est jamais touché. Le verrou
+   * d'instance unique garantit qu'aucune autre fenêtre de l'application ne s'en sert.
+   */
+  async stopLeftover(port) {
+    let token = "";
+    try {
+      token = fs.readFileSync(this.tokenPath, "utf8").trim();
+    } catch {
+      return false;
+    }
+    if (!token || token === this.apiToken) return false;
+    const endpoint = `http://127.0.0.1:${port}`;
+    const headers = { [API_TOKEN_HEADER]: token };
+    try {
+      const response = await fetch(endpoint + "/api/health", { headers, signal: AbortSignal.timeout(750) });
+      const health = await response.json();
+      if (!response.ok || !health.ok) return false;
+      this.log(`Backend d'une session précédente encore actif sur le port ${port} (processus ${health.pid}) : arrêt.`);
+      await fetch(endpoint + "/api/system/shutdown", {
+        method: "POST",
+        headers,
+        signal: AbortSignal.timeout(1500),
+      });
+    } catch {
+      return false;
+    }
+    const deadline = Date.now() + LEFTOVER_STOP_MS;
+    while (Date.now() < deadline) {
+      try {
+        await reservePort(port);
+        this.log(`Port ${port} libéré.`);
+        return true;
+      } catch {
+        await sleep(100);
+      }
+    }
+    this.log(`Port ${port} toujours occupé après l'arrêt de l'ancien backend.`);
+    return false;
   }
 
   /**
@@ -206,11 +272,18 @@ class Backend {
           ODOO_MANAGER_LOG_DIR: this.logDir,
           ODOO_MANAGER_INSTANCE_ID: this.instance,
           [API_TOKEN_VARIABLE]: this.apiToken,
+          // Sans effet dans WSL, où ce numéro n'existe pas : là, seule l'entrée standard compte.
+          [PARENT_PID_VARIABLE]: String(process.pid),
+          [WATCH_STDIN_VARIABLE]: "1",
           ...(process.platform === "win32" ? { WSLENV: mergeWslenv(this.env.WSLENV, API_TOKEN_VARIABLE) } : {}),
         },
         windowsHide: true,
-        stdio: ["ignore", fd, fd],
+        // Tube jamais écrit : le système le ferme quand l'application disparaît, et le backend
+        // s'arrête en lisant la fin de fichier.
+        stdio: ["pipe", fd, fd],
       });
+      // Tube fermé à l'arrêt du backend : rien à signaler.
+      this.child.stdin.on("error", () => {});
       this.child.on("error", (error) => {
         this.error = error;
         this.log(error.message);

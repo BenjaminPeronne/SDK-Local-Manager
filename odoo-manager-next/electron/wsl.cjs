@@ -256,7 +256,9 @@ function backendCommand({
   // réglages du backend passent par `env`. Le jeton de l'API, secret, passe seul par
   // WSLENV (voir Backend.launch) pour ne pas figurer dans la ligne de commande.
   // Tuer wsl.exe arrête le processus Linux, ce qui interdit un backend orphelin.
-  const variables = [`ODOO_GUI_HOST=127.0.0.1`, `ODOO_GUI_PORT=${port}`];
+  // Le backend s'arrête à la fermeture de son entrée standard : `wsl.exe` la relaie depuis
+  // l'application, et la ferme quand l'application ou lui-même disparaît.
+  const variables = [`ODOO_GUI_HOST=127.0.0.1`, `ODOO_GUI_PORT=${port}`, `ODOO_MANAGER_WATCH_STDIN=1`];
   if (instance) variables.push(`ODOO_MANAGER_INSTANCE_ID=${instance}`);
   if (logLevel) variables.push(`ODOO_MANAGER_LOG_LEVEL=${logLevel}`);
   // Ancien dossier de projets Windows, vu sous /mnt : le backend y propose la migration.

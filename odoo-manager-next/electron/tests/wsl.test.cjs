@@ -68,6 +68,7 @@ test("backend runs inside the distribution with its port, since wsl.exe passes n
     "env",
     "ODOO_GUI_HOST=127.0.0.1",
     "ODOO_GUI_PORT=18771",
+    "ODOO_MANAGER_WATCH_STDIN=1",
     "ODOO_MANAGER_INSTANCE_ID=abc-123",
     BACKEND_PATH,
   ]);

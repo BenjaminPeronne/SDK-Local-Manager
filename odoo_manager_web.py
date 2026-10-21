@@ -121,6 +121,7 @@ from odoo_manager_core.migration import (
 )
 from odoo_manager_core.module_dependencies import dependency_report
 from odoo_manager_core.odoo_log_display import OdooLogDisplay, compact_odoo_log_text
+from odoo_manager_core.parent_watch import watch_parent
 from odoo_manager_core.platform import (
     command_uses_wsl,
     executable_available,
@@ -8641,6 +8642,20 @@ def address_is_already_in_use(error):
     return error.errno in {errno.EADDRINUSE, 48, 98, 10048}
 
 
+def stop_when_parent_exits(server):
+    """Application disparue sans arrêter son backend (plantage, arrêt forcé) : il s'arrête seul.
+
+    `serve_forever` rend alors la main, et `main` arrête Docker et les projets comme à un
+    arrêt demandé par l'application.
+    """
+
+    def stop(reason):
+        print(f"{reason} Arrêt du backend.", flush=True)
+        server.shutdown()
+
+    return watch_parent(stop)
+
+
 def main():
     url = f"http://{HOST}:{PORT}/"
     try:
@@ -8651,6 +8666,7 @@ def main():
             print("Utilise ./odoo_next_gui.sh --stop puis ./odoo_next_gui.sh --background pour recharger.")
             return
         raise
+    stop_when_parent_exits(server)
     print(f"Interface Odoo locale: {url}")
     print(f"Workspace: {WORKSPACE}")
     load_job_history(SETTINGS_STORE.path.with_name("jobs.json"))
