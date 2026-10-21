@@ -78,6 +78,14 @@ case "${1:-}" in
     ;;
 esac
 
+# Une interface lancee a part (npm run dev) sur le meme port repondrait a la place de la notre :
+# le script la croirait prete, puis arreterait tout quand la sienne echoue a demarrer.
+if lsof -tiTCP:"$FRONTEND_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "Une interface tourne deja sur le port $FRONTEND_PORT (lancee a part, par exemple avec npm run dev)." >&2
+  echo "Arrete-la avec ./odoo_next_gui.sh --stop, puis relance ./odoo_next_gui.sh" >&2
+  exit 1
+fi
+
 start_backend
 
 case "${1:-}" in
