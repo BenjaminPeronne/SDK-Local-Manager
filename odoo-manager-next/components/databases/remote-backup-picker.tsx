@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, LogIn, LogOut, RefreshCw, Search } from "lucide-react";
 import { api } from "@/lib/api";
+import type { StoredRikaCredentials } from "@/lib/desktop";
 import { formatBytes } from "@/lib/format";
 import type { RemoteBackup, RemoteBackupsState } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +17,19 @@ function formatBackupDate(value: string) {
   return date.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 }
 
-/** Choix d'une sauvegarde d'un client Sudokeys, après connexion avec le compte sudokeys.com. */
+async function storedSudokeysCredentials(): Promise<StoredRikaCredentials | null> {
+  try {
+    return (await window.sdkDesktop?.rikaCredentials()) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Choix d'une sauvegarde d'un client Sudokeys.
+ *
+ * Le compte est celui de RIKA : les identifiants déjà mémorisés dans le coffre-fort du système (création
+ * d'un projet depuis RIKA, Paramètres) servent directement, sans rien redemander.
+ */
 export function RemoteBackupPicker({
   selected,
   disabled,
@@ -31,36 +45,74 @@ export function RemoteBackupPicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  const [credentialStore, setCredentialStore] = useState<StoredRikaCredentials | null>(null);
+  const [remember, setRemember] = useState(true);
+
+  async function list(credentials: { login: string; password: string } | null) {
+    const result = await api<RemoteBackupsState>("/api/remote-backups", {
+      method: "POST",
+      body: JSON.stringify(credentials ?? {}),
+    });
+    setState(result);
+    setPassword("");
+    if (selected && !result.backups.some((backup) => backup.id === selected.id)) onSelect(null);
+  }
 
   useEffect(() => {
     let cancelled = false;
-    api<RemoteBackupsState>("/api/remote-backups")
-      .then((result) => {
+    async function load() {
+      const [current, stored] = await Promise.all([
+        api<RemoteBackupsState>("/api/remote-backups"),
+        storedSudokeysCredentials(),
+      ]);
+      if (cancelled) return;
+      setCredentialStore(stored);
+      setLogin((value) => value || stored?.login || current.login);
+      if (current.connected || !stored?.login || !stored.password) {
+        setState(current);
+        return;
+      }
+      // Compte mémorisé : connexion directe, le formulaire ne sert qu'en cas de refus.
+      setBusy(true);
+      try {
+        await list({ login: stored.login, password: stored.password });
+      } catch (err) {
         if (cancelled) return;
-        setState(result);
-        setLogin((current) => current || result.login);
-      })
-      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : "Lecture impossible."));
+        setState(current);
+        setError(
+          `${err instanceof Error ? err.message : "Connexion impossible."} Les identifiants mémorisés ont été refusés : saisis le mot de passe actuel.`,
+        );
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    }
+    load().catch((err) => !cancelled && setError(err instanceof Error ? err.message : "Lecture impossible."));
     return () => {
       cancelled = true;
     };
+    // Chargé une fois à l'ouverture de l'onglet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function connect(withPassword: boolean) {
     setBusy(true);
     setError("");
+    const credentials = withPassword ? { login: login.trim(), password } : null;
     try {
-      const result = await api<RemoteBackupsState>("/api/remote-backups", {
-        method: "POST",
-        body: JSON.stringify(withPassword ? { login: login.trim(), password } : {}),
-      });
-      setState(result);
-      setPassword("");
-      if (selected && !result.backups.some((backup) => backup.id === selected.id)) onSelect(null);
+      await list(credentials);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Connexion impossible.");
+      return;
     } finally {
       setBusy(false);
+    }
+    if (credentials && remember && credentialStore?.available) {
+      try {
+        // Même compte que RIKA : la création d'un projet en profitera aussi.
+        await window.sdkDesktop?.saveRikaCredentials(credentials.login, credentials.password);
+      } catch {
+        // La liste est affichée : un échec du coffre-fort ne doit pas la masquer.
+      }
     }
   }
 
@@ -90,7 +142,8 @@ export function RemoteBackupPicker({
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         {error || (
           <>
-            <Loader2 className="h-4 w-4 animate-spin" /> Chargement…
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {busy ? "Connexion avec ton compte Sudokeys mémorisé…" : "Chargement…"}
           </>
         )}
       </div>
@@ -107,11 +160,11 @@ export function RemoteBackupPicker({
         }}
       >
         <p className="text-sm text-muted-foreground">
-          Connecte-toi avec ton compte sudokeys.com pour voir les sauvegardes des clients auxquels tu as accès. Le mot
-          de passe est oublié à la fermeture de l’application.
+          Connecte-toi avec ton compte Sudokeys (le même que pour RIKA) pour voir les sauvegardes des clients auxquels
+          tu as accès.
         </p>
         <label className="grid gap-1.5 text-sm font-medium">
-          Identifiant sudokeys.com
+          Identifiant Sudokeys
           <Input
             value={login}
             autoComplete="username"
@@ -130,6 +183,23 @@ export function RemoteBackupPicker({
             onChange={(event) => setPassword(event.target.value)}
           />
         </label>
+        {credentialStore?.available && (
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox
+              className="mt-0.5"
+              checked={remember}
+              disabled={busy || disabled}
+              onCheckedChange={(checked) => setRemember(checked === true)}
+            />
+            <span>
+              Mémoriser sur cet ordinateur
+              <span className="block text-xs text-muted-foreground">
+                Dans le coffre-fort du système, comme pour RIKA : plus besoin de les saisir ici ni à la création d’un
+                projet.
+              </span>
+            </span>
+          </label>
+        )}
         {error && <p className="text-sm text-destructive">{error}</p>}
         <Button type="submit" variant="outline" disabled={busy || disabled || !login.trim() || !password}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
