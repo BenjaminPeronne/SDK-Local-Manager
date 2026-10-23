@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { API_BASE } from "@/lib/api";
+import { withApiToken } from "@/lib/browser-token";
 import type { Overview, SystemStatus } from "@/lib/types";
 
 type UseLiveUpdatesOptions = {
@@ -71,7 +72,7 @@ export function useLiveUpdates({
 
   useEffect(() => {
     if (initializing || typeof EventSource === "undefined") return;
-    const source = new EventSource(`${API_BASE}/api/stream`);
+    const source = new EventSource(withApiToken(`${API_BASE}/api/stream`));
     source.onopen = () => {
       setJobsStreamConnected(true);
       // Les signaux perdus pendant une coupure sont rattrapés en une lecture.

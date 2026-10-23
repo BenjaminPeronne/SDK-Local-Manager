@@ -683,9 +683,9 @@ def untrusted_request_reason(headers):
     return ""
 
 
-# Le proxy de `next dev` ne sait pas ajouter d'en-tête sans mettre les téléversements en
-# mémoire : il passe le jeton dans l'adresse réécrite, côté serveur, jamais vue du navigateur.
-# Le backend livré dans l'application ignore ce paramètre.
+# Interface ouverte dans un navigateur (odoo_next_gui.sh) : un flux EventSource ne sait pas
+# envoyer d'en-tête, la page passe alors son jeton dans l'adresse. Jamais le proxy de `next dev`,
+# qui le donnerait à tout ce qui joint son port. Le backend livré dans l'application ignore ce paramètre.
 DEV_TOKEN_QUERY_PARAMETER = "sdk_token"
 
 

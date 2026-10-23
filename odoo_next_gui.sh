@@ -23,15 +23,17 @@ if [ -z "${ODOO_MANAGER_API_TOKEN:-}" ]; then
   fi
   ODOO_MANAGER_API_TOKEN="$(cat "$TOKEN_FILE")"
 fi
-export ODOO_MANAGER_API_TOKEN
+# Le navigateur reçoit le jeton dans le fragment de l'adresse, jamais envoyé au serveur : Next
+# ne le connaît pas, et ce qui joint son port (un conteneur par host.docker.internal) non plus.
+INTERFACE_URL="$FRONTEND_URL/#sdk_token=$ODOO_MANAGER_API_TOKEN"
 
 open_url() {
   if command -v open >/dev/null 2>&1; then
-    open "$FRONTEND_URL" >/dev/null 2>&1 || true
+    open "$INTERFACE_URL" >/dev/null 2>&1 || true
   elif command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$FRONTEND_URL" >/dev/null 2>&1 || true
+    xdg-open "$INTERFACE_URL" >/dev/null 2>&1 || true
   elif command -v powershell.exe >/dev/null 2>&1; then
-    powershell.exe Start-Process "$FRONTEND_URL" >/dev/null 2>&1 || true
+    powershell.exe Start-Process "$INTERFACE_URL" >/dev/null 2>&1 || true
   fi
 }
 
@@ -48,7 +50,7 @@ start_backend() {
   echo "Demarrage backend Python: $BACKEND_URL"
   (
     cd "$SCRIPT_DIR"
-    nohup python3 -u odoo_manager_web.py > .odoo_manager_web.log 2>&1 < /dev/null &
+    ODOO_MANAGER_API_TOKEN="$ODOO_MANAGER_API_TOKEN" nohup python3 -u odoo_manager_web.py > .odoo_manager_web.log 2>&1 < /dev/null &
     echo $! > "$BACKEND_PID_FILE"
   )
 
@@ -91,7 +93,7 @@ start_backend
 case "${1:-}" in
   --background)
     if curl -fsS "$FRONTEND_URL" >/dev/null 2>&1; then
-      echo "Interface Next deja lancee : $FRONTEND_URL"
+      echo "Interface Next deja lancee : $INTERFACE_URL"
       open_url
       exit 0
     fi
@@ -110,7 +112,7 @@ case "${1:-}" in
     i=0
     while [ "$i" -lt 30 ]; do
       if curl -fsS "$FRONTEND_URL" >/dev/null 2>&1; then
-        echo "Interface Next lancee : $FRONTEND_URL"
+        echo "Interface Next lancee : $INTERFACE_URL"
         open_url
         exit 0
       fi
@@ -152,7 +154,7 @@ echo "$NEXT_PID" > "$NEXT_PID_FILE"
 i=0
 while [ "$i" -lt 40 ]; do
   if curl -fsS "$FRONTEND_URL" >/dev/null 2>&1; then
-    echo "Interface prete : $FRONTEND_URL"
+    echo "Interface prete : $INTERFACE_URL"
     open_url
     echo "Appuie sur Ctrl+C pour arreter la previsualisation."
     wait "$NEXT_PID"

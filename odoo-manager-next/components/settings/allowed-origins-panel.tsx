@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Globe, Plus, X } from "lucide-react";
+import { ExternalLink, Globe, Plus, X } from "lucide-react";
 import { LOCAL_INTERFACE_URL } from "@/lib/api";
+import { interfaceLinkWithToken } from "@/lib/browser-token";
 import type { ManagerSettings } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,17 +74,31 @@ export function AllowedOriginsPanel({
           {origins.map((origin) => (
             <li key={origin} className="flex items-center justify-between gap-2 rounded-md border px-3 py-1.5 text-sm">
               <code className="break-all">{origin}</code>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                aria-label={`Retirer ${origin}`}
-                onClick={() =>
-                  setSettingsDraft({ ...settingsDraft, allowed_origins: origins.filter((item) => item !== origin) })
-                }
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              <div className="flex shrink-0 items-center">
+                {/* Le lien porte la clé d'accès de cette page : l'autre adresse n'en a pas encore. */}
+                <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
+                  <a
+                    href={interfaceLinkWithToken(origin)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Ouvrir l’interface sur ${origin}`}
+                    title="Ouvrir l’interface à cette adresse"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  aria-label={`Retirer ${origin}`}
+                  onClick={() =>
+                    setSettingsDraft({ ...settingsDraft, allowed_origins: origins.filter((item) => item !== origin) })
+                  }
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
             </li>
           ))}
         </ul>

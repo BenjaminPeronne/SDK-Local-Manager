@@ -241,7 +241,7 @@ Installer les dépendances du frontend :
 cd odoo-manager-next && npm ci
 ```
 
-Lancer l'API Python et Next.js ensemble, puis ouvrir `http://127.0.0.1:3000/` :
+Lancer l'API Python et Next.js ensemble ; le script ouvre l'interface sur `http://127.0.0.1:3000/` :
 
 ```bash
 ./odoo_next_gui.sh
@@ -249,7 +249,7 @@ Lancer l'API Python et Next.js ensemble, puis ouvrir `http://127.0.0.1:3000/` :
 
 Variantes : `./odoo_next_gui.sh --background` (via tmux si disponible) et `./odoo_next_gui.sh --stop`.
 
-Le script protège l'API par un jeton, conservé dans `.odoo_manager_dev_token` (non suivi par Git) : sans lui, n'importe quel programme du poste, y compris un module Odoo dans un conteneur, pourrait piloter le gestionnaire. Next.js l'ajoute aux requêtes qu'il relaie vers le backend, le navigateur ne le voit pas. Un backend lancé à la main sans `ODOO_MANAGER_API_TOKEN` reste ouvert, comme avant.
+Le script protège l'API par un jeton, conservé dans `.odoo_manager_dev_token` (non suivi par Git) : sans lui, n'importe quel programme du poste, y compris un module Odoo dans un conteneur, pourrait piloter le gestionnaire. Il ouvre l'interface avec le jeton à la fin de l'adresse (`#sdk_token=…`, jamais envoyé au serveur) ; la page le garde pour cette adresse et l'envoie elle-même. Next.js ne l'ajoute pas aux requêtes qu'il relaie : tout ce qui joint le port 3000, un conteneur par `host.docker.internal` par exemple, l'obtiendrait. Une page ouverte sans ce lien est refusée : rouvrir l'adresse affichée par le script. Pour une autre adresse (route Traefik), le lien d'ouverture est dans Paramètres › Avancé. Un backend lancé à la main sans `ODOO_MANAGER_API_TOKEN` reste ouvert, comme avant.
 
 Lancer seulement le backend :
 

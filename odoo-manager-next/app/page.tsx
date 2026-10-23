@@ -17,6 +17,7 @@ import { useStickyProjectHeader } from "@/hooks/use-sticky-project-header";
 import { useToasts } from "@/hooks/use-toasts";
 import { useDismissedNotice } from "@/hooks/use-dismissed-notice";
 import { api, API_BASE, ApiUnavailableError, isProjectGone, uploadDatabaseBackup } from "@/lib/api";
+import { withApiToken } from "@/lib/browser-token";
 import { databaseToKeep, readRememberedDatabases, writeRememberedDatabases } from "@/lib/database-selection";
 import { DOCKER_START_WAIT_MS, dockerSummary, traefikNeedsAttention } from "@/lib/system-notices";
 import {
@@ -1175,7 +1176,7 @@ export default function Home() {
       return;
     }
     const source = new EventSource(
-      `${API_BASE}/api/projects/${encodeURIComponent(projectName)}/logs/stream${raw ? "?raw=1" : ""}`,
+      withApiToken(`${API_BASE}/api/projects/${encodeURIComponent(projectName)}/logs/stream${raw ? "?raw=1" : ""}`),
     );
     logStreamRef.current = source;
     const renderLines = () => {

@@ -149,12 +149,36 @@ class LocalApiRequestGuardTests(unittest.TestCase):
             self.assertEqual(200, self.get_status("/api/version", {"X-SDK-Manager-Token": "s3cret-token"}))
             self.assertEqual(200, self.get_status("/api/version", {"Authorization": "Bearer s3cret-token"}))
 
-    def test_next_dev_proxy_token_in_the_address_is_accepted_only_outside_the_packaged_app(self):
+    def test_a_token_in_the_address_is_accepted_only_outside_the_packaged_app(self):
         with patch.object(web, "API_TOKEN", "s3cret-token"):
             self.assertEqual(200, self.get_status("/api/version?sdk_token=s3cret-token"))
             self.assertEqual(401, self.get_status("/api/version?sdk_token=wrong"))
             with patch.object(web.sys, "frozen", True, create=True):
                 self.assertEqual(401, self.get_status("/api/version?sdk_token=s3cret-token"))
+
+    def test_a_container_going_through_the_development_proxy_gets_no_token(self):
+        """Un module Odoo joint `next dev` par host.docker.internal:3000 (ou une route Traefik vers
+        l'interface) : le proxy remplace Host par celui du backend, et l'Origin se forge. Seul le
+        jeton que la page tient du lien de odoo_next_gui.sh distingue le navigateur."""
+        relayed = {"X-Forwarded-Host": "host.docker.internal:3000", "Content-Type": "application/json"}
+        forged_origin = {**relayed, "Origin": "http://127.0.0.1:3000"}
+        with patch.object(web, "API_TOKEN", "s3cret-token"):
+            self.assertEqual(401, self.get_status("/api/settings", relayed))
+            self.assertEqual(401, self.post_report("container", relayed))
+            self.assertEqual(401, self.post_report("container-origin", forged_origin))
+            self.assertFalse(self.logged("container") or self.logged("container-origin"))
+            page = {"Origin": "http://127.0.0.1:3000", "X-SDK-Manager-Token": "s3cret-token"}
+            self.assertEqual(201, self.post_report("page", {**relayed, **page}))
+            self.assertEqual(200, self.get_status("/api/settings", {"X-SDK-Manager-Token": "s3cret-token"}))
+
+    def test_the_development_proxy_does_not_hand_out_the_token(self):
+        root = Path(__file__).resolve().parents[1]
+        next_config = (root / "odoo-manager-next" / "next.config.ts").read_text(encoding="utf-8")
+        launcher = (root / "odoo_next_gui.sh").read_text(encoding="utf-8")
+        self.assertNotIn("ODOO_MANAGER_API_TOKEN", next_config)
+        self.assertNotIn("sdk_token", next_config)
+        self.assertNotIn("export ODOO_MANAGER_API_TOKEN", launcher)
+        self.assertIn('INTERFACE_URL="$FRONTEND_URL/#sdk_token=$ODOO_MANAGER_API_TOKEN"', launcher)
 
     def test_packaged_backend_refuses_the_development_interface_origin(self):
         headers = {"Host": "127.0.0.1:18765", "Origin": "http://localhost:3000"}

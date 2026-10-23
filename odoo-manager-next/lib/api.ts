@@ -1,3 +1,4 @@
+import { API_TOKEN_HEADER, apiTokenHeaders, browserApiToken } from "@/lib/browser-token";
 import { invokeDesktop, isDesktopRuntime } from "@/lib/desktop-runtime";
 import type { Job, RestoreDatabasePayload } from "@/lib/types";
 
@@ -62,6 +63,15 @@ function refusedOriginMessage(error: unknown) {
   );
 }
 
+// Page ouverte sans le jeton que odoo_next_gui.sh ajoute à l'adresse (#sdk_token=…).
+function missingTokenMessage(status: number) {
+  if (status !== 401 || isDesktopRuntime()) return "";
+  return (
+    "Cette page n’a pas la clé d’accès au gestionnaire. " +
+    "Ouvre l’adresse affichée par ./odoo_next_gui.sh : elle contient la clé."
+  );
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response | undefined;
   const retryDelays = isDesktopRuntime() ? DESKTOP_API_RETRY_DELAYS_MS : [0];
@@ -82,8 +92,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
           // CORS, jamais mis en cache pour /api/jobs dont l'adresse change à chaque appel.
           headers:
             init?.body == null || init.body instanceof FormData
-              ? init?.headers
-              : { "Content-Type": "application/json", ...init.headers },
+              ? { ...apiTokenHeaders(), ...init?.headers }
+              : { "Content-Type": "application/json", ...apiTokenHeaders(), ...init.headers },
           signal: controller.signal,
         });
         break;
@@ -106,6 +116,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     const method = (init?.method || "GET").toUpperCase();
     throw new ApiError(
       refusedOriginMessage(payload.error) ||
+        missingTokenMessage(response.status) ||
         payload.error ||
         `${method} ${path} : ${response.status} ${response.statusText}`,
       response.status,
@@ -123,6 +134,8 @@ export function uploadDatabaseBackup(
     const request = new XMLHttpRequest();
     request.open("POST", `${API_BASE}/api/projects/${encodeURIComponent(payload.project)}/database-restore`);
     request.setRequestHeader("Content-Type", "application/zip");
+    const token = browserApiToken();
+    if (token) request.setRequestHeader(API_TOKEN_HEADER, token);
     request.setRequestHeader("X-Odoo-Database-Name", encodeURIComponent(payload.db));
     request.setRequestHeader("X-Odoo-Copy", payload.copy ? "1" : "0");
     request.setRequestHeader("X-Odoo-Neutralize", payload.neutralize ? "1" : "0");

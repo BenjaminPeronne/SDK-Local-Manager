@@ -3,12 +3,10 @@ import { execFileSync } from "node:child_process";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Le proxy relaie les requêtes sans y ajouter le jeton de l'API : tout ce qui joint ce port,
+// un module Odoo dans un conteneur par host.docker.internal par exemple, l'aurait obtenu avec.
+// La page l'envoie elle-même, depuis le lien ouvert par odoo_next_gui.sh (lib/browser-token.ts).
 const backend = process.env.ODOO_MANAGER_API || "http://127.0.0.1:18765";
-// Jeton de l'API en développement (odoo_next_gui.sh) : ajouté à l'adresse réécrite, côté
-// serveur. Le navigateur ne le voit pas, et un en-tête obligerait le proxy à garder les
-// téléversements en mémoire.
-const devToken = process.env.ODOO_MANAGER_API_TOKEN || "";
-const tokenQuery = devToken ? `?sdk_token=${encodeURIComponent(devToken)}` : "";
 const configDir = dirname(fileURLToPath(import.meta.url));
 const desktopBuild = process.env.ELECTRON_BUILD === "1";
 
@@ -47,7 +45,7 @@ const browserConfig: NextConfig = {
     return [
       {
         source: "/api/:path*",
-        destination: `${backend}/api/:path*${tokenQuery}`,
+        destination: `${backend}/api/:path*`,
       },
     ];
   },

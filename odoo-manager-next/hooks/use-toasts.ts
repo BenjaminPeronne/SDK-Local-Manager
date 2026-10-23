@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { API_BASE } from "@/lib/api";
+import { apiTokenHeaders } from "@/lib/browser-token";
 import type { Toast, ToastAction } from "@/lib/types";
 
 // Au-delà, les plus anciens partent : une rafale d'erreurs ne doit pas couvrir l'écran.
@@ -38,7 +39,7 @@ export function useToasts() {
     if (kind === "error") {
       void fetch(`${API_BASE}/api/errors/report`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...apiTokenHeaders() },
         body: JSON.stringify({ message }),
       }).catch(() => undefined);
     }
