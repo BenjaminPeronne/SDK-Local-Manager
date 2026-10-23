@@ -107,6 +107,7 @@ class FakeRunner:
         self.traefik_containers_after_up = None
         self.traefik_arguments = {}
         self.published_port_owners = {}
+        self.absent_container_files = set()
 
     def stream(self, command, cwd=None, log=None):
         self.streams.append((list(command), Path(cwd) if cwd else None))
@@ -172,6 +173,9 @@ class FakeRunner:
             else:
                 state = "running" if self.odoo_server_running else "exited:1"
             return (124, "") if state == "unknown" else (0, ODOO_STATE_MARKER + state)
+        if len(command) >= 5 and command[1] == "exec" and "then echo present" in command[-1]:
+            absent = any(path in command[-1] for path in self.absent_container_files)
+            return 0, "absent" if absent else "present"
         if len(command) >= 5 and command[1:3] == ["exec", "odoo-DEMO"] and command[3:5] == ["sh", "-lc"]:
             if "/proc/1/cmdline" in command[-1]:
                 init_command = self.odoo_init_commands.pop(0) if self.odoo_init_commands else "/bin/bash"
@@ -1168,6 +1172,46 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertTrue(any("Échec de la commande Odoo (code 255)" in line for line in logs))
         self.assertTrue(any("Journal complet de cette commande" in line for line in logs))
         self.assertFalse(any("Sortie du dernier lancement Odoo" in line for line in logs))
+
+    PARTIAL_IMPORT_OUTPUT = [
+        "2026-10-22 11:55:57,879 225 CRITICAL akaaz odoo.service.server: Failed to initialize database `akaaz`.",
+        "Traceback (most recent call last):",
+        '  File "/home/odoo/srv/server/addons/akaaz_base/models/__init__.py", line 1, in <module>',
+        "    from . import product_product, stock_rule, stock_landed_cost",
+        "ImportError: cannot import name 'stock_landed_cost' from partially initialized module "
+        "'odoo.addons.akaaz_base.models' (most likely due to a circular import) "
+        "(/home/odoo/srv/server/addons/akaaz_base/models/__init__.py)",
+    ]
+
+    def test_missing_imported_file_replaces_the_circular_import_message(self):
+        # Fusion de branches qui garde l'import d'un fichier supprimé : Python accuse un import circulaire.
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        self.runner.stream_codes = [255]
+        self.runner.stream_output = self.PARTIAL_IMPORT_OUTPUT
+        self.runner.absent_container_files = {"/home/odoo/srv/server/addons/akaaz_base/models/stock_landed_cost"}
+        logs = []
+
+        with self.assertRaises(RuntimeError) as raised:
+            self.service.run_odoo_module_command("DEMO", "akaaz", "akaaz_base", log=logs.append)
+
+        message = str(raised.exception)
+        self.assertIn("Le module akaaz_base demande le fichier models/stock_landed_cost.py", message)
+        self.assertIn("retire « stock_landed_cost » de models/__init__.py", message)
+        self.assertNotIn("circular import", message)
+        # Le message d'Odoo reste dans le journal de la tâche pour qui veut le détail.
+        self.assertTrue(any("circular import" in line for line in logs))
+
+    def test_real_circular_import_keeps_the_odoo_message(self):
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        self.runner.stream_codes = [255]
+        self.runner.stream_output = self.PARTIAL_IMPORT_OUTPUT
+
+        with self.assertRaisesRegex(RuntimeError, "circular import") as raised:
+            self.service.run_odoo_module_command("DEMO", "akaaz", "akaaz_base", log=lambda _line: None)
+
+        self.assertNotIn("demande le fichier", str(raised.exception))
 
     def test_module_error_survives_long_shutdown_output(self):
         self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}

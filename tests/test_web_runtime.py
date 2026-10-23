@@ -1857,6 +1857,42 @@ class ModuleFailureHintTests(unittest.TestCase):
 
         self.assertEqual("svglib", web.missing_python_import(message))
 
+    def test_partially_initialized_import_locates_the_file_in_the_module(self):
+        imported = command_output.partially_initialized_import(
+            "Dernière erreur Odoo : ImportError: cannot import name 'stock_landed_cost' from partially initialized "
+            "module 'odoo.addons.akaaz_base.models' (most likely due to a circular import) "
+            "(/home/odoo/srv/server/addons/akaaz_base/models/__init__.py)"
+        )
+
+        self.assertEqual(
+            {
+                "module": "akaaz_base",
+                "name": "stock_landed_cost",
+                "file": "models/stock_landed_cost.py",
+                "init": "models/__init__.py",
+                "directory": "/home/odoo/srv/server/addons/akaaz_base/models",
+            },
+            imported,
+        )
+
+    def test_partially_initialized_import_at_the_module_root(self):
+        imported = command_output.partially_initialized_import(
+            "ImportError: cannot import name 'wizard' from partially initialized module 'odoo.addons.sale_x' "
+            "(most likely due to a circular import) (/mnt/extra-addons/sale_x/__init__.py)"
+        )
+
+        self.assertEqual(("wizard.py", "__init__.py"), (imported["file"], imported["init"]))
+        self.assertEqual("/mnt/extra-addons/sale_x", imported["directory"])
+
+    def test_partially_initialized_import_ignores_python_packages_outside_odoo(self):
+        self.assertIsNone(
+            command_output.partially_initialized_import(
+                "ImportError: cannot import name 'x' from partially initialized module 'requests' "
+                "(most likely due to a circular import) (/usr/lib/python3/requests/__init__.py)"
+            )
+        )
+        self.assertIsNone(command_output.partially_initialized_import("SyntaxError: invalid syntax"))
+
     def test_import_name_is_mapped_to_its_pypi_package_name(self):
         self.assertEqual("Pillow", web.python_package_for_import("PIL"))
         self.assertEqual("svglib", web.python_package_for_import("svglib"))

@@ -15,7 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import data_conflicts, database_restore, job_progress, jobs, performance
-from .command_output import missing_python_import, python_package_for_import
+from .command_output import missing_python_import, partially_initialized_import, python_package_for_import
 from .platform import (
     command_uses_wsl,
     executable_search_path,
@@ -3277,6 +3277,10 @@ class ProjectService:
                 if module_output:
                     self.log(log, "Dernières lignes de la commande de mise à jour Odoo:")
                     self.log(log, module_output)
+                missing_file = self.missing_imported_file_reason(container, reason)
+                if missing_file:
+                    self.log(log, f"Odoo parle d'un import circulaire, mais un fichier manque. {missing_file}")
+                    reason = missing_file
                 raise OdooError(f"La commande Odoo a échoué avec le code {code}. {reason}")
             if was_neutralized:
                 self.log(log, "La base était neutralisée: nouvelle passe après l'opération module...")
@@ -3310,6 +3314,31 @@ class ProjectService:
             if explanation.search(line) and not line.startswith("<"):
                 return f" — {line[:250]}"
         return ""
+
+    def missing_imported_file_reason(self, container, reason):
+        """Explication à la place de « circular import » quand le fichier importé manque au module ; "" sinon."""
+        imported = partially_initialized_import(reason)
+        if not imported:
+            return ""
+        target = shlex.quote(f"{imported['directory']}/{imported['name']}")
+        code, output = self.capture(
+            self.docker(
+                "exec",
+                container,
+                "sh",
+                "-c",
+                f"if [ -e {target}.py ] || [ -d {target} ]; then echo present; else echo absent; fi",
+            ),
+            timeout=8,
+        )
+        # Fichier présent ou conteneur muet : un vrai import circulaire reste possible, le message d'Odoo est gardé.
+        if code != 0 or (output or "").strip() != "absent":
+            return ""
+        return (
+            f"Le module {imported['module']} demande le fichier {imported['file']}, qui manque dans son code "
+            "(souvent un fichier oublié lors d'un commit ou d'une fusion de branches). Remets ce fichier dans le "
+            f"module, ou retire « {imported['name']} » de {imported['init']}, puis relance."
+        )
 
     @classmethod
     def odoo_command_failure_reason(cls, lines):

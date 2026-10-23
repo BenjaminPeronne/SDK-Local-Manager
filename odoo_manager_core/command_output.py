@@ -179,6 +179,34 @@ def missing_python_import(message):
     return "" if root.lower() in {"odoo", "openerp"} else root
 
 
+# `from . import x` dans le __init__.py d'un module, sans fichier x.py à côté : le paquet est encore
+# en cours de chargement quand l'import échoue, Python accuse donc un import circulaire. Seule la
+# présence du fichier départage les deux causes.
+PARTIAL_MODULE_IMPORT_RE = re.compile(
+    r"cannot import name '(?P<name>\w+)' from partially initialized module "
+    r"'odoo\.addons\.(?P<module>\w+)(?P<subpackage>(?:\.\w+)*)'[^\n]*?\((?P<init>/[^()\n]+)/__init__\.py\)"
+)
+
+
+def partially_initialized_import(message):
+    """Import refusé dans le __init__.py d'un module Odoo, lu dans l'erreur Python ; None sinon.
+
+    `directory` est le dossier du __init__.py dans le conteneur, où chercher le fichier importé.
+    """
+    match = PARTIAL_MODULE_IMPORT_RE.search(message)
+    if not match:
+        return None
+    folder = "/".join(part for part in match.group("subpackage").split(".") if part)
+    prefix = f"{folder}/" if folder else ""
+    return {
+        "module": match.group("module"),
+        "name": match.group("name"),
+        "file": f"{prefix}{match.group('name')}.py",
+        "init": f"{prefix}__init__.py",
+        "directory": match.group("init"),
+    }
+
+
 def python_package_for_import(import_name):
     """Nom du paquet PyPI à installer pour satisfaire cet import (identique la plupart du temps)."""
     return PIP_PACKAGE_ALIASES.get(import_name.lower(), import_name)
