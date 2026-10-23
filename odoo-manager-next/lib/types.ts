@@ -275,6 +275,33 @@ export type RestoreDatabasePayload = {
   file: File;
 };
 
+/** Sauvegarde d'un client Sudokeys, désignée par un identifiant : le stockage reste côté backend. */
+export type RemoteBackup = {
+  id: string;
+  project: string;
+  branch: string;
+  database: string;
+  filename: string;
+  size: number;
+  last_modified: string;
+};
+
+export type RemoteBackupsState = {
+  connected: boolean;
+  login: string;
+  backups: RemoteBackup[];
+  /** Fichiers du stockage dont le nom ne suit pas le nommage des sauvegardes. */
+  ignored: number;
+  listed_at: string | null;
+};
+
+export type RestoreRemoteBackupPayload = {
+  project: string;
+  db: string;
+  neutralize: boolean;
+  backup: string;
+};
+
 /** odoo : code standard d'Odoo (Community), dans odoo/odoo du projet. */
 export type ModuleOrigin = "odoo" | "enterprise" | "other";
 

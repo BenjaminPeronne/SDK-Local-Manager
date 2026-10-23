@@ -59,6 +59,7 @@ import type {
   ProjectCreationPrerequisites,
   ProjectDiagnostics,
   RestoreDatabasePayload,
+  RestoreRemoteBackupPayload,
   SocleCatalog,
   SocleInstallPlan,
   SshPublicKey,
@@ -1360,6 +1361,14 @@ export default function Home() {
     }
   }
 
+  async function restoreRemoteBackup(payload: RestoreRemoteBackupPayload) {
+    const job = await createJob("restore_remote_backup", payload);
+    if (!job) return false;
+    setRestoreDbOpen(false);
+    schedule(refreshOverview, 2500);
+    return true;
+  }
+
   const selectedModuleList = useMemo(() => Array.from(selectedModules), [selectedModules]);
   const selectedInstalledModuleList = useMemo(
     () => selectedModuleList.filter((name) => moduleByName.get(name)?.state === "installed"),
@@ -2192,6 +2201,7 @@ export default function Home() {
         onOpenChange={setRestoreDbOpen}
         project={selectedProject}
         onSubmit={restoreDatabaseBackup}
+        onSubmitRemote={restoreRemoteBackup}
       />
 
       <NeutralizeDatabaseDialog

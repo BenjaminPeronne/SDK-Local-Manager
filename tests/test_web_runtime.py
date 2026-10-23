@@ -3101,5 +3101,77 @@ class DockerEventsWiringTests(unittest.TestCase):
         self.assertTrue(web.EVENT_WAKE.is_set())
 
 
+class RemoteBackupRestoreTests(unittest.TestCase):
+    def backup(self, size=1024):
+        access = web.remote_backups.S3Access("https://s3.example.test", "AK", "SK")
+        return web.remote_backups.RemoteBackup(
+            access, "backups", "d__client__main__x__client_prod__2026-10-22__0300.zip", size, "", "client", "main", "db"
+        )
+
+    def run_job(self, download, free_bytes=10 * 1024**3):
+        job = Mock()
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch("odoo_manager_web.validate_project", return_value="DEMO"),
+            patch("odoo_manager_web.database_restore_staging_root", return_value=Path(temporary) / "DEMO"),
+            patch("odoo_manager_web.shutil.disk_usage", return_value=Mock(free=free_bytes)),
+            patch("odoo_manager_web.remote_backups.download_backup", side_effect=download),
+            patch("odoo_manager_web.restore_database_job") as restore,
+        ):
+            try:
+                web.restore_remote_backup_job(job, "DEMO", self.backup(), "demo_restore", False)
+                error = None
+            except BaseException as exc:
+                error = exc
+            left = list((Path(temporary) / "DEMO").glob("*"))
+        return restore, error, left
+
+    def test_downloads_into_staging_then_hands_the_file_to_the_restore(self):
+        restore, error, _left = self.run_job(lambda backup, destination, **_kwargs: destination.write_bytes(b"zip"))
+
+        self.assertIsNone(error)
+        _job, project, path, filename, db_name = restore.call_args.args[:5]
+        self.assertEqual((project, db_name), ("DEMO", "demo_restore"))
+        self.assertEqual(filename, "d__client__main__x__client_prod__2026-10-22__0300.zip")
+        self.assertTrue(path.name.endswith(filename))
+        self.assertEqual(restore.call_args.kwargs, {"copy": True, "neutralize": False})
+
+    def test_cancelled_download_leaves_no_partial_file(self):
+        def download(backup, destination, **_kwargs):
+            destination.write_bytes(b"partial")
+            raise web.job_control.JobCancelled()
+
+        restore, error, left = self.run_job(download)
+
+        self.assertIsInstance(error, web.job_control.JobCancelled)
+        self.assertEqual(left, [])
+        restore.assert_not_called()
+
+    def test_refuses_before_downloading_when_the_disk_is_too_full(self):
+        download = Mock()
+        restore, error, _left = self.run_job(download, free_bytes=1024)
+
+        self.assertRegex(str(error), "Pas assez de place")
+        download.assert_not_called()
+
+    def test_action_refuses_a_backup_missing_from_the_current_list(self):
+        with (
+            patch("odoo_manager_web.validate_project", return_value="DEMO"),
+            patch.dict(web.REMOTE_BACKUPS, {"backups": {}}),
+            self.assertRaisesRegex(ValueError, "actualise la liste"),
+        ):
+            web.restore_remote_backup_action({"project": "DEMO", "db": "demo", "backup": "missing"})
+
+    def test_listing_keeps_s3_keys_out_of_the_interface(self):
+        backup = self.backup()
+        with patch.dict(web.REMOTE_BACKUPS, {"password": "pwd", "backups": {backup.id: backup}}):
+            payload = web.remote_backups_snapshot()
+
+        self.assertTrue(payload["connected"])
+        self.assertEqual(payload["backups"][0]["id"], backup.id)
+        self.assertNotIn("SK", json.dumps(payload))
+        self.assertNotIn("pwd", json.dumps(payload))
+
+
 if __name__ == "__main__":
     unittest.main()

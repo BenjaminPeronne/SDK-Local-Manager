@@ -124,6 +124,9 @@ class ManagerSettings:
     # Proposition de passer à l'interface affinée, faite une fois aux utilisateurs de
     # l'interface classique : fermée ou acceptée, elle ne revient plus.
     beta_interface_banner_dismissed: bool = False
+    # Identifiant sudokeys.com utilisé pour récupérer les sauvegardes des clients (le mot de passe
+    # n'est jamais enregistré).
+    sudokeys_login: str = ""
 
     @classmethod
     def from_dict(cls, payload, default_workspace):
@@ -173,6 +176,7 @@ class ManagerSettings:
             legacy_workspace=normalize_legacy_workspace(payload.get("legacy_workspace", "")),
             migration_banner_dismissed=bool(payload.get("migration_banner_dismissed", False)),
             beta_interface_banner_dismissed=bool(payload.get("beta_interface_banner_dismissed", False)),
+            sudokeys_login=str(payload.get("sudokeys_login") or "").strip(),
         )
 
     def to_dict(self):

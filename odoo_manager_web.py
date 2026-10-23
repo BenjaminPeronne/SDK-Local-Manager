@@ -41,6 +41,7 @@ from odoo_manager_core import (
     job_progress,
     job_queue,
     performance,
+    remote_backups,
     start_docker,
 )
 from odoo_manager_core import jobs as job_control
@@ -203,6 +204,7 @@ API_ENDPOINTS = {
         "/api/disk-usage",
         "/api/performance",
         "/api/settings",
+        "/api/remote-backups",
         "/api/errors",
         "/api/jobs",
         "/api/stream",
@@ -226,6 +228,7 @@ API_ENDPOINTS = {
         "/api/jobs",
         "/api/jobs/{job}/cancel",
         "/api/settings",
+        "/api/remote-backups",
         "/api/errors/report",
         "/api/system/shutdown",
         "/api/system/docker/start",
@@ -242,6 +245,7 @@ API_ENDPOINTS = {
     ),
     "DELETE": (
         "/api/errors",
+        "/api/remote-backups",
         "/api/jobs",
         "/api/jobs/{job}",
     ),
@@ -283,6 +287,7 @@ API_ACTIONS = (
     "reset_all_translations",
     "reset_module_translations",
     "restore_module_update_exclusions",
+    "restore_remote_backup",
     "apply_docker_resources",
     "start_mailpit",
     "start_project",
@@ -4185,6 +4190,51 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
                 pass
 
 
+# Marge laissée sur le disque une fois la sauvegarde téléchargée, comme pour un ZIP envoyé depuis l'interface.
+REMOTE_BACKUP_FREE_SPACE_MARGIN_BYTES = 512 * 1024 * 1024
+# Débit supposé du téléchargement tant que rien n'est mesuré.
+REMOTE_BACKUP_EXPECTED_BYTES_PER_SECOND = 20 * 1024 * 1024
+
+
+def restore_remote_backup_job(job, project, backup, db_name, neutralize=True):
+    """Télécharge une sauvegarde Sudokeys dans la zone de préparation, puis la restaure comme un ZIP envoyé."""
+    project = validate_project(project)
+    db_name = validate_new_db(db_name)
+    staging_root = database_restore_staging_root(project)
+    staging_root.mkdir(parents=True, exist_ok=True)
+    size_label = database_restore.format_bytes(backup.size)
+    if shutil.disk_usage(staging_root).free < backup.size + REMOTE_BACKUP_FREE_SPACE_MARGIN_BYTES:
+        raise ValueError(
+            f"Pas assez de place sur le disque pour télécharger cette sauvegarde ({size_label}). "
+            "Libère de la place depuis Paramètres › Espace disque, puis relance."
+        )
+    filename = SAFE_IMPORT_NAME_RE.sub("_", backup.filename) or "backup.zip"
+    destination = staging_root / f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns()}_{filename}"
+    job.add(f"Sauvegarde Sudokeys : {backup.project} › {backup.branch} › {backup.database}")
+    job.add(f"Téléchargement de {filename} ({size_label})...")
+    job_progress.span(
+        "Téléchargement de la sauvegarde",
+        end=40,
+        expected=30 + backup.size / REMOTE_BACKUP_EXPECTED_BYTES_PER_SECOND,
+    )
+    started = time.monotonic()
+    try:
+        remote_backups.download_backup(
+            backup,
+            destination,
+            on_progress=job_progress.measure,
+            checkpoint=job_control.checkpoint,
+            log=job.add,
+        )
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
+    elapsed = int(time.monotonic() - started)
+    job.add(f"Sauvegarde téléchargée en {elapsed // 60} min {elapsed % 60:02d} s.")
+    # La restauration devient propriétaire du fichier et le supprime à la fin, réussie ou non.
+    restore_database_job(job, project, destination, filename, db_name, copy=True, neutralize=neutralize)
+
+
 def create_database_job(job, project, db_name, master_pwd, login, password, lang, country, demo):
     project = validate_project(project)
     db_name = validate_new_db(db_name)
@@ -8043,6 +8093,87 @@ def restore_database_upload(request):
     return {"job": job_creation_payload(job), "backup": details}, 201
 
 
+# Connexion aux sauvegardes Sudokeys : identifiants et liste restent en mémoire, le temps que le
+# gestionnaire tourne. Le mot de passe n'est jamais écrit sur le disque ; seul l'identifiant est
+# retenu dans les réglages pour pré-remplir le formulaire.
+REMOTE_BACKUPS_LOCK = threading.Lock()
+REMOTE_BACKUPS = {"login": "", "password": "", "backups": {}, "ignored": 0, "listed_at": None}
+
+
+def remote_backups_snapshot():
+    with REMOTE_BACKUPS_LOCK:
+        backups = list(REMOTE_BACKUPS["backups"].values())
+        connected = bool(REMOTE_BACKUPS["password"])
+        login = REMOTE_BACKUPS["login"] or SETTINGS.sudokeys_login
+        ignored = REMOTE_BACKUPS["ignored"]
+        listed_at = REMOTE_BACKUPS["listed_at"]
+    return {
+        "connected": connected,
+        "login": login,
+        "backups": [backup.to_payload() for backup in backups],
+        "ignored": ignored,
+        "listed_at": listed_at,
+    }
+
+
+def remote_backups_view(_request):
+    return remote_backups_snapshot()
+
+
+def list_remote_backups_view(request):
+    """Se connecte à sudokeys.com (identifiants envoyés ou retenus) et relit la liste des sauvegardes."""
+    global SETTINGS
+    payload = request.handler.read_json()
+    with REMOTE_BACKUPS_LOCK:
+        login = str(payload.get("login") or REMOTE_BACKUPS["login"] or "").strip()
+        password = str(payload.get("password") or "") or (
+            REMOTE_BACKUPS["password"] if login == REMOTE_BACKUPS["login"] else ""
+        )
+    if not login or not password:
+        raise ValueError("Saisis ton identifiant et ton mot de passe sudokeys.com.")
+    try:
+        accesses = remote_backups.fetch_backup_accesses(login, password)
+        backups, ignored = remote_backups.list_backups(accesses)
+    except remote_backups.RemoteBackupError as exc:
+        raise ValueError(str(exc)) from exc
+    with REMOTE_BACKUPS_LOCK:
+        REMOTE_BACKUPS.update(
+            login=login,
+            password=password,
+            backups={backup.id: backup for backup in backups},
+            ignored=ignored,
+            listed_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+        )
+    if SETTINGS.sudokeys_login != login:
+        # Sans apply_settings : changer l'identifiant ne touche à aucun chemin ni à Docker.
+        try:
+            SETTINGS = SETTINGS_STORE.update({"sudokeys_login": login})
+        except (OSError, ValueError) as exc:
+            print(f"Identifiant Sudokeys non retenu : {exc}", file=sys.stderr)
+    return remote_backups_snapshot()
+
+
+def forget_remote_backups_view(_request):
+    with REMOTE_BACKUPS_LOCK:
+        REMOTE_BACKUPS.update(password="", backups={}, ignored=0, listed_at=None)
+    return remote_backups_snapshot()
+
+
+def restore_remote_backup_action(payload):
+    project = payload_project(payload)
+    db_name = validate_new_db(str(payload.get("db", "")))
+    with REMOTE_BACKUPS_LOCK:
+        backup = REMOTE_BACKUPS["backups"].get(str(payload.get("backup", "")))
+    if backup is None:
+        raise ValueError("Cette sauvegarde n'est plus dans la liste : actualise la liste des sauvegardes Sudokeys.")
+    return Job(
+        f"Récupérer et restaurer {db_name} dans {project}",
+        restore_remote_backup_job,
+        (project, backup, db_name, truthy(payload.get("neutralize", True))),
+        project=project,
+    )
+
+
 def inspect_repository_view(request):
     payload = request.handler.read_json()
     db_name = str(payload.get("db") or "")
@@ -8544,6 +8675,7 @@ JOB_ACTIONS = {
     "start_mailpit": lambda _payload: Job("Démarrer Mailpit", start_mailpit_job, resources={"mailpit"}),
     "stop_mailpit": lambda _payload: Job("Arrêter Mailpit", stop_mailpit_job, resources={"mailpit"}),
     "create_database": create_database_action,
+    "restore_remote_backup": restore_remote_backup_action,
     "drop_database": drop_database_action,
     "duplicate_database": duplicate_database_action,
     "neutralize_database": database_job("Neutraliser {db}", neutralize_database_job),
@@ -8594,6 +8726,7 @@ ROUTER = Router(
         api_route("GET", "/api/bootstrap", payload_view(bootstrap_snapshot)),
         api_route("GET", "/api/overview", payload_view(overview)),
         api_route("GET", "/api/settings", payload_view(lambda: {"settings": settings_snapshot()})),
+        api_route("GET", "/api/remote-backups", remote_backups_view),
         api_route("GET", "/api/errors", payload_view(manager_errors_snapshot)),
         api_route("GET", "/api/jobs", jobs_payload),
         api_route("GET", "/api/stream", serve_event_stream),
@@ -8615,6 +8748,7 @@ ROUTER = Router(
         api_route("POST", "/api/jobs", create_job_view),
         api_route("POST", "/api/jobs/{job}/cancel", cancel_job_view, cancel_route_errors),
         api_route("POST", "/api/settings", update_settings),
+        api_route("POST", "/api/remote-backups", list_remote_backups_view),
         api_route("POST", "/api/errors/report", report_interface_error),
         api_route("POST", "/api/system/shutdown", shutdown_service),
         api_route("POST", "/api/system/docker/start", start_docker_engine),
@@ -8629,6 +8763,7 @@ ROUTER = Router(
         api_route("POST", "/api/projects/{project}/module-zip/inspect", inspect_module_zip_view),
         api_route("POST", "/api/projects/{project}/module-zip", import_module_zip_view),
         api_route("DELETE", "/api/errors", clear_errors_view),
+        api_route("DELETE", "/api/remote-backups", forget_remote_backups_view),
         api_route("DELETE", "/api/jobs", clear_jobs_view),
         api_route("DELETE", "/api/jobs/{job}", delete_job_view),
     )
