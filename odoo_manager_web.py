@@ -7013,7 +7013,10 @@ def switch_checkout_branch(job, creator, root, branch):
     code, changes = git("status", "--porcelain", "--untracked-files=no")
     if code:
         raise RuntimeError(f"Lecture de l'état du dépôt {root.name} impossible.")
-    changed = [line[3:].strip() for line in changes.splitlines() if line.strip()]
+    # La capture retire l'espace de tête de la première ligne (« ␣M fichier » pour un fichier modifié non
+    # indexé) : couper à l'espace suivant le code d'état, pas à la colonne 3, qui mangerait une lettre.
+    # Git met entre guillemets les chemins contenant des espaces, le découpage ne les coupe donc pas.
+    changed = [line.split(maxsplit=1)[-1] for line in changes.splitlines() if line.strip()]
     if changed:
         raise RuntimeError(
             f"{root.name} contient des fichiers modifiés et non enregistrés dans Git ({len(changed)}) : "

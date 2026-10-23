@@ -682,7 +682,9 @@ class RepositoryModulesTests(ModuleLayoutTests):
         )
 
         (clone / "alpha/__manifest__.py").write_text("{'name': 'changed'}")
-        with self.assertRaisesRegex(RuntimeError, "non enregistrés dans Git"):
+        # Fichier modifié non indexé : la ligne de `git status` commence par une espace, que la capture
+        # retire de la première ligne ; le nom du fichier doit rester entier.
+        with self.assertRaisesRegex(RuntimeError, r"non enregistrés dans Git \(1\) : alpha/__manifest__\.py\."):
             web.switch_repository_branch_job(DummyJob(), self.project, repository, "feature")
         self.assertEqual("master", web.git_checkouts.read_checkout(clone)["branch"])
         git("checkout", "--", "alpha", cwd=clone)
