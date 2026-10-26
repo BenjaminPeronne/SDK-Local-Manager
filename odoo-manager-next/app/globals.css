@@ -462,7 +462,9 @@ textarea {
     radial-gradient(circle, var(--garland-1) 2px, transparent 2.5px) 0 0 / 36px 6px repeat-x,
     radial-gradient(circle, var(--garland-2) 2px, transparent 2.5px) 12px 0 / 36px 6px repeat-x,
     radial-gradient(circle, var(--garland-3) 2px, transparent 2.5px) 24px 0 / 36px 6px repeat-x;
-  animation: sdk-garland-twinkle 2.4s ease-in-out infinite alternate;
+  /* Quelques scintillements à l'ouverture, puis immobile : la guirlande reste à l'écran en permanence et
+     une animation sans fin ferait recalculer l'affichage soixante fois par seconde, pendant des heures. */
+  animation: sdk-garland-twinkle 2.4s ease-in-out 6 alternate;
 }
 @keyframes sdk-garland-twinkle {
   from {
@@ -518,27 +520,26 @@ textarea {
   }
 }
 
-.sdk-bats {
-  container-type: size;
-}
+/* Chaque chauve-souris vole dans une bande de toute la largeur, qu'elle traverse en se déplaçant d'un
+   pourcentage de sa propre largeur : un déplacement que la carte graphique sait animer seule. */
 .sdk-bat {
   position: absolute;
-  left: calc(-1 * var(--bat-size));
-  width: var(--bat-size);
+  inset-inline: 0;
   color: hsl(var(--foreground) / var(--bat-opacity));
   animation: sdk-bat-fly var(--bat-duration) linear var(--bat-delay) infinite var(--bat-direction);
 }
 /* Ondulation et inclinaison, sur un rythme distinct de la traversée : la trajectoire ne se répète pas. */
 .sdk-bat-body {
-  display: block;
+  display: grid;
+  width: var(--bat-size);
+  margin-left: calc(-1 * var(--bat-size));
   animation: sdk-bat-bob var(--bat-bob) ease-in-out var(--bat-delay) infinite;
-}
-.sdk-bat-body svg {
-  display: block;
-  width: 100%;
 }
 /* Battement : ailes hautes, à l'horizontale, basses, à l'horizontale, un dessin à la fois. */
 .sdk-bat-frame {
+  grid-area: 1 / 1;
+  display: block;
+  width: 100%;
   opacity: 0;
   animation: var(--bat-flap) linear var(--bat-delay) infinite;
 }
@@ -587,21 +588,22 @@ textarea {
     opacity: 1;
   }
 }
+/* 80 px de plus que la largeur : de quoi sortir entièrement, même la plus grande (38 px). */
 @keyframes sdk-bat-fly {
   0% {
     transform: translate3d(0, 0, 0);
   }
   25% {
-    transform: translate3d(25cqw, -18px, 0);
+    transform: translate3d(calc(25% + 20px), -18px, 0);
   }
   50% {
-    transform: translate3d(50cqw, 8px, 0);
+    transform: translate3d(calc(50% + 40px), 8px, 0);
   }
   75% {
-    transform: translate3d(75cqw, -12px, 0);
+    transform: translate3d(calc(75% + 60px), -12px, 0);
   }
   100% {
-    transform: translate3d(calc(100cqw + 2 * var(--bat-size)), 0, 0);
+    transform: translate3d(calc(100% + 80px), 0, 0);
   }
 }
 @keyframes sdk-bat-bob {

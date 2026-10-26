@@ -64,16 +64,21 @@ export function Bats() {
             } as CSSProperties
           }
         >
+          {/* Un dessin entier par position d'ailes : l'opacité animée sur le <svg> lui-même reste confiée à la
+              carte graphique, alors que sur un groupe interne elle redessinerait la chauve-souris à chaque image. */}
           <span className="sdk-bat-body">
-            <svg viewBox="0 0 48 25" fill="currentColor">
-              {WING_FRAMES.map((wing, frame) => (
-                <g key={frame} className={`sdk-bat-frame sdk-bat-frame-${frame}`}>
-                  <path d={wing} />
-                  <path d={wing} transform="matrix(-1 0 0 1 48 0)" />
-                </g>
-              ))}
-              <path d={BAT_BODY} />
-            </svg>
+            {WING_FRAMES.map((wing, frame) => (
+              <svg
+                key={frame}
+                viewBox="0 0 48 25"
+                fill="currentColor"
+                className={`sdk-bat-frame sdk-bat-frame-${frame}`}
+              >
+                <path d={wing} />
+                <path d={wing} transform="matrix(-1 0 0 1 48 0)" />
+                <path d={BAT_BODY} />
+              </svg>
+            ))}
           </span>
         </span>
       ))}
