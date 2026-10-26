@@ -109,7 +109,7 @@ class ManagerSettings:
     interface_icon: str = "manager"
     # « refined » : onglets dans l'en-tête et panneau arrondi ; « classic » : onglets sous l'en-tête.
     interface_layout: str = "refined"
-    # Petites décorations pendant les fêtes (Halloween, Noël, Nouvel An) : activées tant qu'on ne les coupe pas.
+    # Petites décorations pendant les fêtes (Pâques, Halloween, Noël, Nouvel An) : activées tant qu'on ne les coupe pas.
     seasonal_decorations: bool = True
     # Réglages PostgreSQL de chaque projet calculés d'après la mémoire et les processeurs de Docker
     # (odoo_manager_core/performance.py). Désactivé, le gestionnaire retire ceux qu'il avait posés.

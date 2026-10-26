@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChristmasHat } from "@/components/seasonal/christmas";
+import { BunnyEars } from "@/components/seasonal/easter";
 import { WitchHat } from "@/components/seasonal/halloween";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/shell/update-banner";
@@ -117,6 +118,7 @@ export function AppSidebar({
                   )}
                 />
                 {season === "christmas" && <ChristmasHat />}
+                {season === "easter" && <BunnyEars />}
                 {season === "halloween" && <WitchHat />}
               </span>
               <div className="min-w-0">

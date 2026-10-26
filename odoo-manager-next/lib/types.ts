@@ -181,7 +181,7 @@ export type ManagerSettings = {
   sticky_header: boolean;
   interface_icon: InterfaceIcon;
   interface_layout: "classic" | "refined";
-  /** Petites décorations pendant les fêtes (Halloween, Noël, Nouvel An). */
+  /** Petites décorations pendant les fêtes (Pâques, Halloween, Noël, Nouvel An). */
   seasonal_decorations: boolean;
   /** Réglages PostgreSQL de chaque projet calculés d'après la mémoire et les processeurs de Docker. */
   tune_postgres?: boolean;

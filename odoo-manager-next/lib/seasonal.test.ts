@@ -1,6 +1,33 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { confettiPreviewRequested, localDayKey, newYearGreeting, seasonAt, seasonOverride } from "./seasonal.ts";
+import {
+  confettiPreviewRequested,
+  easterSunday,
+  localDayKey,
+  newYearGreeting,
+  seasonAt,
+  seasonOverride,
+} from "./seasonal.ts";
+
+test("easter sunday moves every year", () => {
+  assert.deepEqual(easterSunday(2024), new Date(2024, 2, 31));
+  assert.deepEqual(easterSunday(2025), new Date(2025, 3, 20));
+  assert.deepEqual(easterSunday(2026), new Date(2026, 3, 5));
+  assert.deepEqual(easterSunday(2027), new Date(2027, 2, 28));
+  assert.deepEqual(easterSunday(2038), new Date(2038, 3, 25));
+});
+
+test("easter decorations run from Palm Sunday to Easter Monday", () => {
+  assert.equal(seasonAt(new Date(2026, 2, 28, 23, 59)), null);
+  assert.equal(seasonAt(new Date(2026, 2, 29, 0, 0)), "easter");
+  assert.equal(seasonAt(new Date(2026, 3, 5, 12, 0)), "easter");
+  assert.equal(seasonAt(new Date(2026, 3, 6, 23, 59)), "easter");
+  assert.equal(seasonAt(new Date(2026, 3, 7, 0, 0)), null);
+  // Pâques 2027 tombe juste après le passage à l'heure d'été (28 mars) : le lundi compte encore.
+  assert.equal(seasonAt(new Date(2027, 2, 21, 0, 0)), "easter");
+  assert.equal(seasonAt(new Date(2027, 2, 29, 23, 59)), "easter");
+  assert.equal(seasonAt(new Date(2027, 2, 30, 0, 0)), null);
+});
 
 test("halloween decorations run from the twenty-fifth to the thirty-first of October", () => {
   assert.equal(seasonAt(new Date(2026, 9, 25, 0, 0)), "halloween");
@@ -30,6 +57,7 @@ test("no decoration outside the season", () => {
 test("the address can force or turn off a season", () => {
   assert.equal(seasonOverride(""), undefined);
   assert.equal(seasonOverride("?project=demo"), undefined);
+  assert.equal(seasonOverride("?season=easter"), "easter");
   assert.equal(seasonOverride("?season=halloween"), "halloween");
   assert.equal(seasonOverride("?season=christmas"), "christmas");
   assert.equal(seasonOverride("?season=new-year"), "new-year");

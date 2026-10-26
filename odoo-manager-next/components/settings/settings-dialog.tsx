@@ -595,9 +595,10 @@ export function SettingsDialog({
                         <span className="min-w-0">
                           <span className="block font-medium">Décorations de saison</span>
                           <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
-                            Petites touches festives pendant les fêtes : chapeau de sorcière et chauves-souris à
-                            Halloween, bonnet, guirlande et flocons à Noël, confettis au Nouvel An quand une action se
-                            termine bien (une fois par jour). Tes projets ne sont pas concernés.
+                            Petites touches festives pendant les fêtes : oreilles de lapin et œufs à Pâques, chapeau de
+                            sorcière et chauves-souris à Halloween, bonnet, guirlande et flocons à Noël, confettis au
+                            Nouvel An quand une action se termine bien (une fois par jour). Tes projets ne sont pas
+                            concernés.
                           </span>
                         </span>
                       </label>

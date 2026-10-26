@@ -18,6 +18,7 @@ import type { MailpitStatus } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChristmasHat, Snowfall } from "@/components/seasonal/christmas";
+import { BunnyEars, EasterEggs } from "@/components/seasonal/easter";
 import { Bats, WitchHat } from "@/components/seasonal/halloween";
 import { cn } from "@/lib/utils";
 
@@ -58,6 +59,7 @@ export function WelcomeScreen({
   return (
     <div className="relative isolate mx-auto flex max-w-[1500px] flex-col items-center px-4 py-12 text-center sm:py-16">
       {season === "christmas" && <Snowfall />}
+      {season === "easter" && <EasterEggs />}
       {season === "halloween" && <Bats />}
       <span className="relative">
         <img
@@ -67,11 +69,15 @@ export function WelcomeScreen({
           className="h-16 w-16 rounded-2xl object-cover shadow-sm sm:h-[72px] sm:w-[72px]"
         />
         {season === "christmas" && <ChristmasHat />}
+        {season === "easter" && <BunnyEars />}
         {season === "halloween" && <WitchHat />}
       </span>
       <h2 className="mt-5 text-2xl font-semibold sm:text-3xl">SDK Local Manager</h2>
       {season === "christmas" && (
         <p className="mt-1 text-sm font-medium text-red-700 dark:text-red-400">Joyeux Noël et belles fêtes ! 🎄</p>
+      )}
+      {season === "easter" && (
+        <p className="mt-1 text-sm font-medium text-pink-700 dark:text-pink-400">Joyeuses Pâques ! 🐣</p>
       )}
       {season === "halloween" && (
         <p className="mt-1 text-sm font-medium text-orange-700 dark:text-orange-400">Joyeux Halloween ! 🎃</p>

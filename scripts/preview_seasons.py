@@ -27,6 +27,10 @@ CASES = {
         "?season=none",
         "Interface habituelle : ni chapeau, ni guirlande, ni animation.",
     ),
+    "paques": (
+        "?season=easter",
+        "Oreilles de lapin sur les logos, guirlande pastel, œufs qui tombent et « Joyeuses Pâques » sur l'accueil.",
+    ),
     "halloween": (
         "?season=halloween",
         "Chapeau de sorcière sur les logos, guirlande orange et violette, chauves-souris et « Joyeux Halloween »"
@@ -101,7 +105,7 @@ def main() -> int:
         webbrowser.open_new_tab(url)
         # Laisse le navigateur ouvrir les onglets dans l'ordre.
         time.sleep(0.4)
-    print("\nRéduire les animations dans le système coupe les flocons et les confettis : c'est voulu.")
+    print("\nRéduire les animations dans le système coupe les œufs, chauves-souris, flocons et confettis : c'est voulu.")
     return 0
 
 

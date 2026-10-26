@@ -431,8 +431,13 @@ textarea {
 }
 
 /* Décorations de saison (data-season sur .sdk-shell) : guirlande sous la marque, aux couleurs de la fête,
-   chauves-souris sur l'accueil à Halloween, flocons à Noël. Les confettis du Nouvel An sont dessinés à
+   œufs sur l'accueil à Pâques, chauves-souris à Halloween, flocons à Noël. Les confettis du Nouvel An sont dessinés à
    part, dans un canevas. */
+.sdk-shell[data-season="easter"] {
+  --garland-1: #f6a5c0;
+  --garland-2: #f2c94c;
+  --garland-3: #7cc4e8;
+}
 .sdk-shell[data-season="halloween"] {
   --garland-1: #f4791f;
   --garland-2: #7e4bb0;
@@ -497,6 +502,15 @@ textarea {
   transform: rotate(34deg);
   transform-origin: 45% 84%;
 }
+/* Les oreilles se dressent au-dessus du logo, à peine décalées vers la droite, le serre-tête posé sur son
+   bord haut (vers 90 % de la hauteur du dessin). */
+.sdk-season-hat-easter {
+  left: 26%;
+  top: -38%;
+  width: 52%;
+  transform: rotate(5deg);
+  transform-origin: 50% 90%;
+}
 
 .sdk-snowfall {
   container-type: size;
@@ -517,6 +531,39 @@ textarea {
 @keyframes sdk-snowflake-fall {
   to {
     transform: translate3d(var(--flake-drift), calc(100cqh + 24px), 0);
+  }
+}
+
+/* Chaque œuf descend dans une colonne de toute la hauteur, qu'il parcourt en se déplaçant d'un
+   pourcentage de sa propre hauteur : un déplacement que la carte graphique sait animer seule. */
+.sdk-easter-eggs {
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+.sdk-egg {
+  position: absolute;
+  inset-block: 0;
+  width: var(--egg-size);
+  animation: sdk-egg-fall var(--egg-duration) linear var(--egg-delay) infinite;
+}
+.sdk-egg-shape {
+  display: block;
+  width: 100%;
+  margin-top: calc(-1.4 * var(--egg-size));
+  opacity: 0.75;
+  transform-origin: 50% 0;
+  animation: sdk-egg-sway var(--egg-sway) ease-in-out var(--egg-delay) infinite alternate;
+}
+@keyframes sdk-egg-fall {
+  to {
+    transform: translate3d(0, calc(100% + 48px), 0);
+  }
+}
+@keyframes sdk-egg-sway {
+  from {
+    transform: rotate(-14deg);
+  }
+  to {
+    transform: rotate(14deg);
   }
 }
 
@@ -627,6 +674,7 @@ textarea {
     animation: none;
   }
   .sdk-snowfall,
+  .sdk-easter-eggs,
   .sdk-bats {
     display: none;
   }
