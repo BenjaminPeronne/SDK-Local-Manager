@@ -117,7 +117,7 @@ import { AboutDialog } from "@/components/shell/about-dialog";
 import { AppSidebar } from "@/components/shell/app-sidebar";
 import { LoadingScreen } from "@/components/shell/loading-screen";
 import { WelcomeScreen } from "@/components/welcome/welcome-screen";
-import { useSeason } from "@/hooks/use-season";
+import { useSeason, useSeasonResting } from "@/hooks/use-season";
 import { celebrateWithConfetti } from "@/components/seasonal/confetti";
 import { confettiPreviewRequested, type Season } from "@/lib/seasonal";
 import { WslSetupDialog } from "@/components/wsl-setup";
@@ -402,6 +402,7 @@ export default function Home() {
   const refinedInterface = settings?.interface_layout !== "classic";
   const stickyHeader = settings?.sticky_header ?? false;
   const season = useSeason(settings?.seasonal_decorations !== false);
+  const seasonResting = useSeasonResting(season);
   useEffect(() => {
     seasonRef.current = season;
     if (season === "new-year" && confettiPreviewRequested(window.location.search)) {
@@ -1651,6 +1652,7 @@ export default function Home() {
       className={cn("sdk-shell min-h-screen overflow-x-clip", refinedInterface && "lg:h-screen lg:overflow-hidden")}
       data-layout={refinedInterface ? "refined" : "classic"}
       data-season={season ?? undefined}
+      data-season-resting={seasonResting || undefined}
     >
       <div className="flex min-h-screen min-w-0 flex-col lg:flex-row">
         <AppSidebar

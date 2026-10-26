@@ -512,25 +512,45 @@ textarea {
   transform-origin: 50% 90%;
 }
 
+/* Animations de fond au repos (fenêtre au second plan ou personne devant depuis une minute) : elles
+   s'estompent puis se figent, et l'affichage cesse de se renouveler jusqu'au prochain geste. */
+.sdk-snowfall,
+.sdk-easter-eggs,
+.sdk-bats {
+  transition: opacity 1.2s ease;
+}
+.sdk-shell[data-season-resting] :is(.sdk-snowfall, .sdk-easter-eggs, .sdk-bats) {
+  opacity: 0;
+}
+.sdk-shell[data-season-resting] :is(.sdk-snowfall, .sdk-easter-eggs, .sdk-bats) * {
+  animation-play-state: paused;
+}
+
 .sdk-snowfall {
-  container-type: size;
   mask-image: linear-gradient(to bottom, #000 55%, transparent);
 }
+/* Comme les œufs : chaque flocon descend une colonne de toute la hauteur, en pourcentage de sa propre
+   hauteur, un déplacement que la carte graphique sait animer seule. Le flocon est dessiné en haut. */
 .sdk-snowflake {
   position: absolute;
-  top: -12px;
+  inset-block: 0;
   width: var(--flake-size);
-  height: var(--flake-size);
-  border-radius: 9999px;
-  background: hsl(208 45% 72% / 0.7);
   animation: sdk-snowflake-fall var(--flake-duration) linear var(--flake-delay) infinite;
 }
-.dark .sdk-snowflake {
+.sdk-snowflake::before {
+  content: "";
+  display: block;
+  height: var(--flake-size);
+  margin-top: -12px;
+  border-radius: 9999px;
+  background: hsl(208 45% 72% / 0.7);
+}
+.dark .sdk-snowflake::before {
   background: hsl(0 0% 100% / 0.65);
 }
 @keyframes sdk-snowflake-fall {
   to {
-    transform: translate3d(var(--flake-drift), calc(100cqh + 24px), 0);
+    transform: translate3d(var(--flake-drift), calc(100% + 24px), 0);
   }
 }
 
