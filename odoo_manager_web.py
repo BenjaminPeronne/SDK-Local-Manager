@@ -4146,6 +4146,21 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
         job_progress.span("Finalisation de la restauration", end=99, expected=90 if neutralize else 40)
         if not service.run_postgres_sql(project, db_name, "SELECT count(*) FROM ir_module_module;")[0].isdigit():
             raise RuntimeError("La base chargée ne contient pas les modules Odoo : la sauvegarde est incomplète.")
+        # Les sauvegardes sans manifest.json (Sudokeys) n'ont pas pu être vérifiées avant l'envoi :
+        # ouverte par une autre version, la base casse la neutralisation et tout le serveur Odoo.
+        base_version = service.run_postgres_sql(project, db_name, database_restore.BASE_VERSION_SQL)
+        loaded_version = database_restore.odoo_series(base_version[0] if base_version else "")
+        if loaded_version and not details["odoo_version"]:
+            job.add(f"Version Odoo de la base chargée : {loaded_version}")
+        try:
+            ensure_backup_matches_project_version(project, {"odoo_version": loaded_version})
+        except ValueError:
+            job.add(f"Version incompatible : suppression de la base {db_name}...")
+            try:
+                drop_partial_database(job, project, db_name)
+            except Exception as exc:
+                job.add(f"Suppression impossible ({exc}) : supprime la base {db_name} depuis l'onglet Bases.")
+            raise
         if copy:
             job.add("Nouvel identifiant de base (copie)...")
             service.run_postgres_sql(project, db_name, database_restore.copy_parameters_sql())

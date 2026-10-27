@@ -241,6 +241,12 @@ class OrderedPostDataTests(unittest.TestCase):
 
 
 class RestoreSqlTests(unittest.TestCase):
+    def test_odoo_series_comes_from_the_base_module_version(self):
+        self.assertEqual("18.0", database_restore.odoo_series("18.0.1.3"))
+        self.assertEqual("17.4", database_restore.odoo_series("saas~17.4.1.3"))
+        self.assertEqual("", database_restore.odoo_series(""))
+        self.assertEqual("", database_restore.odoo_series("361"))
+
     def test_copy_gets_a_new_identity_like_odoo_does(self):
         sql = database_restore.copy_parameters_sql(
             now=datetime(2026, 10, 5, 21, 0, 0), database_uuid="new-uuid", database_secret="new'secret"

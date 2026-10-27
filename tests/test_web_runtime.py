@@ -591,14 +591,14 @@ class DatabaseRestoreTests(unittest.TestCase):
         service.project_url.return_value = "http://dev.demo.localhost/"
         return service
 
-    def run_restore(self, service, neutralize=True, databases=((), ("demo_restore",))):
+    def run_restore(self, service, neutralize=True, databases=((), ("demo_restore",)), project_version=""):
         job = Mock()
         with tempfile.TemporaryDirectory() as temporary:
             path = self.make_backup(temporary)
             with (
                 patch("odoo_manager_web.project_service", return_value=service),
                 patch("odoo_manager_web.validate_project", return_value="DEMO"),
-                patch("odoo_manager_web.project_odoo_version", return_value=""),
+                patch("odoo_manager_web.project_odoo_version", return_value=project_version),
                 patch("odoo_manager_web.list_databases_for", side_effect=[list(item) for item in databases]),
                 patch("odoo_manager_web.module_dependency_graph", return_value={}),
                 patch("odoo_manager_web.remember_database_arrival") as arrival,
@@ -703,6 +703,34 @@ class DatabaseRestoreTests(unittest.TestCase):
 
         self.assertIsInstance(error, web.OdooError)
         self.assertRegex(str(error), "crons métier, serveurs de messagerie et synchronisation bancaire désactivés")
+        drop.assert_not_called()
+
+    def test_a_database_of_another_odoo_version_is_removed_before_odoo_opens_it(self):
+        # Recette : sauvegarde Sudokeys d'Odoo 18 sans manifest.json, restaurée dans un projet 17.0.
+        service = self.restore_service()
+        service.run_postgres_sql.side_effect = lambda _project, _db, sql: (
+            ["18.0.1.3"] if sql == database_restore.BASE_VERSION_SQL else ["361"]
+        )
+
+        job, error, backup_left, arrival, drop = self.run_restore(service, project_version="17.0")
+
+        self.assertIsInstance(error, ValueError)
+        self.assertRegex(str(error), r"vient d'Odoo 18\.0, mais le projet DEMO est en Odoo 17\.0")
+        drop.assert_called_once_with(job, "DEMO", "demo_restore")
+        self.assertFalse(backup_left)
+        service.run_odoo_neutralize_command.assert_not_called()
+        service.start_odoo_server.assert_called_once_with("DEMO", log=job.add)
+        arrival.assert_not_called()
+
+    def test_a_database_of_the_project_version_is_restored(self):
+        service = self.restore_service()
+        service.run_postgres_sql.side_effect = lambda _project, _db, sql: (
+            ["17.0.1.3"] if sql == database_restore.BASE_VERSION_SQL else ["361"]
+        )
+
+        _job, error, _backup_left, _arrival, drop = self.run_restore(service, project_version="17.0")
+
+        self.assertIsNone(error)
         drop.assert_not_called()
 
     @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo_restore"])

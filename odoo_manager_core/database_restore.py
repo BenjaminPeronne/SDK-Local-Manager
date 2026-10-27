@@ -168,6 +168,8 @@ INSTALLED_MODULES_SQL = (
     "SELECT name FROM ir_module_module WHERE state IN ('installed', 'to upgrade', 'to install') ORDER BY name;"
 )
 
+BASE_VERSION_SQL = "SELECT coalesce((SELECT latest_version FROM ir_module_module WHERE name = 'base' LIMIT 1), '');"
+
 
 def backup_contents(archive):
     """Taille décompressée de dump.sql et entrées du filestore d'une archive Odoo ouverte."""
@@ -182,6 +184,12 @@ def backup_contents(archive):
     if dump is None:
         raise ValueError("Archive Odoo invalide: le fichier dump.sql est absent.")
     return dump, filestore
+
+
+def odoo_series(module_version):
+    """Version d'Odoo (« 18.0 ») d'une version de module enregistrée en base (« 18.0.1.3 »)."""
+    match = re.match(r"(?:saas~)?(\d+)\.(\d+)\.", str(module_version or "").strip())
+    return f"{match.group(1)}.{match.group(2)}" if match else ""
 
 
 def space_needed(dump_bytes, filestore_bytes=0):
