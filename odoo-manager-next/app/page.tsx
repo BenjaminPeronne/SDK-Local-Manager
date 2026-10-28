@@ -683,21 +683,40 @@ export default function Home() {
     }
   }, [retentionDeletions]);
 
-  const extendDatabaseRetention = useCallback(
-    async (project: string, db: string) => {
-      setExtendingRetention(`${project}/${db}`);
-      try {
-        const result = await api<{ database: string; expires_at: number }>(
-          `/api/projects/${encodeURIComponent(project)}/database-retention`,
-          { method: "POST", body: JSON.stringify({ db }) },
-        );
-        pushToast("success", `La base ${db} est gardée jusqu’au ${deletionDate(result.expires_at)}.`);
-        void refreshOverview();
-      } catch (err) {
-        pushToast("error", err instanceof Error ? err.message : "La base n’a pas pu être gardée plus longtemps.");
-      } finally {
-        setExtendingRetention("");
+  // Une base après l'autre : un seul message à la fin, qu'on en garde une ou toute une liste.
+  const extendDatabasesRetention = useCallback(
+    async (databases: { project: string; db: string }[]) => {
+      const kept: { db: string; expiresAt: number }[] = [];
+      const failures: string[] = [];
+      for (const { project, db } of databases) {
+        setExtendingRetention(`${project}/${db}`);
+        try {
+          const result = await api<{ database: string; expires_at: number }>(
+            `/api/projects/${encodeURIComponent(project)}/database-retention`,
+            { method: "POST", body: JSON.stringify({ db }) },
+          );
+          kept.push({ db, expiresAt: result.expires_at });
+        } catch (err) {
+          failures.push(
+            `${db} : ${err instanceof Error ? err.message : "la base n’a pas pu être gardée plus longtemps."}`,
+          );
+        }
       }
+      setExtendingRetention("");
+      if (kept.length === 1) {
+        pushToast("success", `La base ${kept[0].db} est gardée jusqu’au ${deletionDate(kept[0].expiresAt)}.`);
+      } else if (kept.length > 1) {
+        const dates = new Set(kept.map((base) => deletionDate(base.expiresAt)));
+        pushToast(
+          "success",
+          dates.size === 1
+            ? `${kept.length} bases sont gardées jusqu’au ${[...dates][0]}.`
+            : `${kept.length} bases sont gardées 30 jours de plus.`,
+        );
+      }
+      if (failures.length) pushToast("error", failures.join("\n"));
+      if (kept.length) void refreshOverview();
+      return failures.length === 0;
     },
     [pushToast, refreshOverview],
   );
@@ -1785,7 +1804,7 @@ export default function Home() {
                 <RetentionNotice
                   deletions={retentionDeletions}
                   extending={extendingRetention}
-                  extendDatabaseRetention={(project, db) => void extendDatabaseRetention(project, db)}
+                  extendDatabasesRetention={extendDatabasesRetention}
                 />
               )}
               {(systemStatus?.abandoned_staging?.count ?? 0) > 0 && (
@@ -1885,7 +1904,7 @@ export default function Home() {
                       chooseDatabase={chooseDatabase}
                       dependencyReport={databaseDependencies.report}
                       executeDatabaseAction={executeDatabaseAction}
-                      extendDatabaseRetention={(project, db) => void extendDatabaseRetention(project, db)}
+                      extendDatabaseRetention={(project, db) => void extendDatabasesRetention([{ project, db }])}
                       loading={loading}
                       odooDatabases={odooDatabases}
                       openingPostgresql={openingPostgresql}
