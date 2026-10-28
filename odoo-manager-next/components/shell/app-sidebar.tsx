@@ -5,6 +5,7 @@ import { Circle, FolderPlus, Info, Loader2, Search, Settings } from "lucide-reac
 import type { StaticImageData } from "next/image";
 import { statusVariant } from "@/lib/format";
 import { isJobActive, isJobUnfinished, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
+import { odooServerStopped } from "@/lib/projects";
 import type { Season } from "@/lib/seasonal";
 import type { AppUpdate, ExternalLogView, Job, ManagerSettings, Overview, Project, SystemStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -187,12 +188,14 @@ export function AppSidebar({
           ))}
           {filteredProjects.map((project) => {
             const running = project.odoo_status === "running";
+            const serverStopped = odooServerStopped(project);
             const absent = project.odoo_status === "absent" || project.odoo_status === "docker off";
             const lifecycleJob =
               projectLifecycleJobs.get(`Démarrer ${project.name}`) ||
               projectLifecycleJobs.get(`Arrêter ${project.name}`);
             const switchingOn = lifecycleJob?.title.startsWith("Démarrer ") ?? false;
-            const displayedRunning = running || switchingOn;
+            const displayedRunning = (running && !serverStopped) || switchingOn;
+            const displayedServerStopped = serverStopped && !switchingOn;
             const busyJob = lifecycleJob || projectBusyJobs.get(project.name);
 
             return (
@@ -239,10 +242,19 @@ export function AppSidebar({
                         className={cn(
                           "inline-flex h-6 w-6 shrink-0 items-center justify-center",
                           // Un projet arrêté n'est pas en erreur : le gris laisse le rouge aux vraies pannes.
-                          displayedRunning ? "text-emerald-500" : "text-muted-foreground/45",
+                          displayedRunning
+                            ? "text-emerald-500"
+                            : displayedServerStopped
+                              ? "text-amber-500"
+                              : "text-muted-foreground/45",
                         )}
                         role="img"
-                        aria-label={`${project.name} : ${displayedRunning ? "allumé" : "éteint"}`}
+                        aria-label={`${project.name} : ${displayedRunning ? "allumé" : displayedServerStopped ? "conteneur démarré, Odoo arrêté" : "éteint"}`}
+                        title={
+                          displayedServerStopped
+                            ? "Le conteneur tourne, mais pas le serveur Odoo : Démarrer ou Ouvrir Odoo le relance."
+                            : undefined
+                        }
                       >
                         <Circle className="h-5 w-5 fill-current" aria-hidden="true" />
                       </span>
@@ -260,6 +272,7 @@ export function AppSidebar({
                 {settings?.show_technical_details && (
                   <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2 text-xs">
                     <Badge variant={statusVariant(project.odoo_status)}>Odoo {project.odoo_status}</Badge>
+                    {serverStopped && <Badge variant="warning">serveur Odoo arrêté</Badge>}
                     <Badge variant={statusVariant(project.postgres_status)}>PostgreSQL {project.postgres_status}</Badge>
                     <Badge variant="outline">
                       {project.databases?.filter((db) => db !== "postgres").length || 0} base(s)

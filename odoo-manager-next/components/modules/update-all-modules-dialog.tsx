@@ -2,9 +2,9 @@
 
 import { type Dispatch, type SetStateAction, useMemo } from "react";
 import { AlertTriangle, Info, Loader2, PackageX, RefreshCcw } from "lucide-react";
-import { api } from "@/lib/api";
+import { waitForJob } from "@/lib/api";
 import type { FilestoreStatus, Job, PendingModuleOperation, Project, Toast } from "@/lib/types";
-import { cn, delay } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -87,22 +87,6 @@ export function UpdateAllModulesDialog({
   const someMissingPendingModulesSelected =
     pendingModulesWithMissingCode.some((module) => missingModulesToIgnore.has(module.name)) &&
     !allMissingPendingModulesSelected;
-  async function waitForJob(jobId: number, timeoutMilliseconds = 960000) {
-    const deadline = Date.now() + timeoutMilliseconds;
-    while (Date.now() < deadline) {
-      const payload = await api<{ jobs: Job[] }>("/api/jobs");
-      applyJobs(payload.jobs);
-      const current = payload.jobs.find((job) => job.id === jobId);
-      if (!current) throw new Error("L'action de démarrage est introuvable dans l'historique.");
-      if (current.status === "done") return current;
-      if (current.status === "error") {
-        const detail = current.lines.filter(Boolean).at(-1) || "Le projet n'a pas pu démarrer.";
-        throw new Error(detail);
-      }
-      await delay(800);
-    }
-    throw new Error("Le démarrage d'Odoo prend trop de temps. Consulte les logs de l'action.");
-  }
   function toggleMissingModuleToIgnore(moduleName: string, checked: boolean) {
     setMissingModulesToIgnore((current) => {
       const next = new Set(current);
@@ -128,7 +112,7 @@ export function UpdateAllModulesDialog({
     if (job) {
       onOpenChange(false);
       try {
-        await waitForJob(job.id);
+        await waitForJob(job.id, { onJobs: applyJobs });
         pushToast("success", "Les opérations locales ont été annulées. Le précontrôle est actualisé.");
         await refreshModules();
         await requestUpdateAllOdooModules();

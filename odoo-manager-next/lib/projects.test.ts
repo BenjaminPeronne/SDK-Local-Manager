@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { odooAccessUrl, windowsPathFromMount } from "./projects.ts";
+import { odooAccessUrl, odooServerStopped, windowsPathFromMount } from "./projects.ts";
 
 test("a Windows drive mounted in the Linux environment is shown as Windows writes it", () => {
   assert.equal(windowsPathFromMount("/mnt/d/Projets/Odoo"), "D:\\Projets\\Odoo");
@@ -23,4 +23,13 @@ test("Odoo opens on the selected database", () => {
 test("debug modes are added to the Odoo URL, with or without a database", () => {
   assert.equal(odooAccessUrl(project, "demo", "1"), "http://dev.demo.localhost:8080/web?db=demo&debug=1");
   assert.equal(odooAccessUrl(project, "", "assets"), "http://dev.demo.localhost:8080/web?debug=assets");
+});
+
+test("a started container without its Odoo server is told apart from a running project", () => {
+  assert.equal(odooServerStopped({ odoo_status: "running", odoo_server: "stopped" }), true);
+  assert.equal(odooServerStopped({ odoo_status: "running", odoo_server: "running" }), false);
+  // Docker trop lent pour répondre : rien ne prouve que le serveur est arrêté.
+  assert.equal(odooServerStopped({ odoo_status: "running", odoo_server: "unknown" }), false);
+  assert.equal(odooServerStopped({ odoo_status: "exited", odoo_server: null }), false);
+  assert.equal(odooServerStopped(undefined), false);
 });

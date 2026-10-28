@@ -1095,6 +1095,82 @@ class EventWatchCostTests(unittest.TestCase):
         self.assertEqual({"A": ["a"], "B": ["b"], "CACHED": ["cached"], "C": ["c"]}, result)
         self.assertEqual({"A", "B", "C"}, {call.args[0] for call in list_databases.call_args_list})
 
+    def test_odoo_server_state_is_cached_but_an_unanswered_docker_is_retried(self):
+        web.invalidate_overview_odoo_servers()
+        self.addCleanup(web.invalidate_overview_odoo_servers)
+        service = Mock()
+        service.odoo_server_state.side_effect = ["unknown", "exited:1", "running"]
+
+        with patch.object(web, "project_service", return_value=service):
+            self.assertEqual("unknown", web.overview_odoo_servers(["DEMO"], max_age=15)["DEMO"])
+            self.assertEqual("stopped", web.overview_odoo_servers(["DEMO"], max_age=15)["DEMO"])
+            self.assertEqual("stopped", web.overview_odoo_servers(["DEMO"], max_age=15)["DEMO"])
+            self.assertEqual(2, service.odoo_server_state.call_count)
+
+            web.on_docker_event("container start odoo-DEMO")
+            self.assertEqual("running", web.overview_odoo_servers(["DEMO"], max_age=15)["DEMO"])
+
+        service.odoo_server_state.assert_called_with("odoo-DEMO")
+
+    def test_a_container_without_odoo_process_is_reported_as_stopped(self):
+        service = Mock()
+        service.odoo_server_state.return_value = "absent"
+        with patch.object(web, "project_service", return_value=service):
+            self.assertEqual("stopped", web.odoo_server_status("DEMO"))
+
+    @patch("odoo_manager_web.overview_databases_by_project", return_value={"ON": [], "BROKEN": []})
+    @patch("odoo_manager_web.detected_traefik", return_value={"http_port": 80})
+    @patch("odoo_manager_web.project_dirs", return_value=["ON", "BROKEN", "OFF"])
+    def test_overview_tells_a_started_container_from_a_running_odoo_server(self, *_mocks):
+        statuses = {
+            "odoo-ON": "running",
+            "postgresql-ON": "running",
+            "odoo-BROKEN": "running",
+            "postgresql-BROKEN": "running",
+            "odoo-OFF": "exited",
+            "postgresql-OFF": "exited",
+        }
+        servers = {"ON": "running", "BROKEN": "stopped"}
+        with (
+            patch.object(web, "container_statuses", side_effect=lambda names: {name: statuses[name] for name in names}),
+            patch.object(web, "odoo_server_status", side_effect=servers.__getitem__) as server_status,
+        ):
+            payload = web.overview({"running": True, "message": ""})
+
+        by_name = {project["name"]: project for project in payload["projects"]}
+        self.assertEqual("running", by_name["BROKEN"]["odoo_status"])
+        self.assertEqual("stopped", by_name["BROKEN"]["odoo_server"])
+        self.assertEqual("running", by_name["ON"]["odoo_server"])
+        self.assertIsNone(by_name["OFF"]["odoo_server"])
+        self.assertEqual({"ON", "BROKEN"}, {call.args[0] for call in server_status.call_args_list})
+
+    def test_the_odoo_server_route_reads_the_state_without_the_cache(self):
+        web.invalidate_overview_odoo_servers()
+        self.addCleanup(web.invalidate_overview_odoo_servers)
+        web.OVERVIEW_ODOO_SERVERS_CACHE["DEMO"] = (time.monotonic(), "running")
+        request = RouteRequest(None, {"project": "DEMO"}, {})
+        with (
+            patch.object(web, "validate_project", side_effect=lambda project: project),
+            patch.object(web, "container_statuses", return_value={"odoo-DEMO": "running"}),
+            patch.object(web, "odoo_server_status", return_value="stopped"),
+        ):
+            payload = web.project_odoo_server_payload(request)
+
+        self.assertEqual({"project": "DEMO", "odoo_status": "running", "odoo_server": "stopped"}, payload)
+        self.assertEqual("stopped", web.cached_overview_odoo_server("DEMO", 15))
+
+    def test_the_odoo_server_route_does_not_probe_a_stopped_container(self):
+        request = RouteRequest(None, {"project": "DEMO"}, {})
+        with (
+            patch.object(web, "validate_project", side_effect=lambda project: project),
+            patch.object(web, "container_statuses", return_value={"odoo-DEMO": "exited"}),
+            patch.object(web, "odoo_server_status") as server_status,
+        ):
+            payload = web.project_odoo_server_payload(request)
+
+        self.assertIsNone(payload["odoo_server"])
+        server_status.assert_not_called()
+
     @patch("odoo_manager_web.wsl_executable_available", return_value=True)
     def test_wsl_shell_detection_is_not_relaunched_for_every_module_listing(self, detect):
         web.WSL_SHELL_AVAILABILITY.clear()

@@ -223,6 +223,7 @@ API_ENDPOINTS = {
         "/api/projects/{project}/logs",
         "/api/projects/{project}/logs/stream",
         "/api/projects/{project}/diagnostics",
+        "/api/projects/{project}/odoo-server",
     ),
     "POST": (
         "/api/jobs",
@@ -447,6 +448,12 @@ EVENT_DEBOUNCE_SECONDS = 0.3
 EVENT_DATABASES_MAX_AGE_SECONDS = 30
 OVERVIEW_DATABASES_CACHE = {}
 OVERVIEW_DATABASES_CACHE_LOCK = threading.Lock()
+# Le serveur Odoo est lancé par `docker exec` : il ne revient pas quand son conteneur redémarre hors
+# du gestionnaire, et sa disparition ne produit aucun événement Docker. Un `docker exec` par projet
+# démarré le vérifie, au plus toutes les 15 s dans la boucle.
+EVENT_ODOO_SERVERS_MAX_AGE_SECONDS = 15
+OVERVIEW_ODOO_SERVERS_CACHE = {}
+OVERVIEW_ODOO_SERVERS_CACHE_LOCK = threading.Lock()
 # Sondes `docker exec` simultanées (overview, diagnostic) ; au-delà elles attendent leur tour.
 DOCKER_PROBE_WORKERS = 8
 EVENT_DOCKER_REFRESH = threading.Event()
@@ -3010,33 +3017,83 @@ def probe_overview_databases(project, max_age=None):
     return databases
 
 
-def overview_databases_by_project(projects, max_age=None):
-    """Bases de chaque projet démarré ; les sondes que le cache ne sert pas partent en parallèle.
+def probe_projects(projects, cached, probe, thread_name_prefix):
+    """Résultat de `probe` pour chaque projet ; les sondes que `cached` ne sert pas partent en parallèle.
 
-    Chaque sonde est un `docker exec psql` (~50 ms sous Docker Desktop). En série, l'overview
+    Chaque sonde est un `docker exec` (~50 ms sous Docker Desktop). En série, l'overview
     grandissait avec le nombre de projets démarrés : 233 ms pour 5 contre 92 ms en parallèle.
     """
     results = {}
     pending = []
     for project in projects:
-        cached = cached_overview_databases(project, max_age)
-        if cached is None:
+        value = cached(project)
+        if value is None:
             pending.append(project)
         else:
-            results[project] = cached
+            results[project] = value
     if len(pending) == 1:
-        results[pending[0]] = probe_overview_databases(pending[0], max_age)
+        results[pending[0]] = probe(pending[0])
     elif pending:
         workers = min(DOCKER_PROBE_WORKERS, len(pending))
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="overview-databases") as executor:
-            results.update(
-                zip(
-                    pending,
-                    executor.map(lambda project: probe_overview_databases(project, max_age), pending),
-                    strict=True,
-                )
-            )
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=thread_name_prefix) as executor:
+            results.update(zip(pending, executor.map(probe, pending), strict=True))
     return results
+
+
+def overview_databases_by_project(projects, max_age=None):
+    """Bases de chaque projet démarré, par un `docker exec psql` que le cache ne sert pas."""
+    return probe_projects(
+        projects,
+        lambda project: cached_overview_databases(project, max_age),
+        lambda project: probe_overview_databases(project, max_age),
+        "overview-databases",
+    )
+
+
+def invalidate_overview_odoo_servers(project=None):
+    with OVERVIEW_ODOO_SERVERS_CACHE_LOCK:
+        if project is None:
+            OVERVIEW_ODOO_SERVERS_CACHE.clear()
+        else:
+            OVERVIEW_ODOO_SERVERS_CACHE.pop(project, None)
+
+
+def odoo_server_status(project):
+    """`running`, `stopped` ou `unknown` : le serveur Odoo du conteneur démarré, pas le conteneur lui-même."""
+    state = project_service().odoo_server_state(f"odoo-{project}")
+    if state in {"running", "unknown"}:
+        return state
+    return "stopped"
+
+
+def cached_overview_odoo_server(project, max_age):
+    if max_age is None:
+        return None
+    with OVERVIEW_ODOO_SERVERS_CACHE_LOCK:
+        cached = OVERVIEW_ODOO_SERVERS_CACHE.get(project)
+    if cached and time.monotonic() - cached[0] < max_age:
+        return cached[1]
+    return None
+
+
+def probe_overview_odoo_server(project, max_age=None):
+    now = time.monotonic()
+    status = odoo_server_status(project)
+    # Docker trop lent pour répondre : l'état sera relu au prochain passage.
+    if status != "unknown" and max_age is not None:
+        with OVERVIEW_ODOO_SERVERS_CACHE_LOCK:
+            OVERVIEW_ODOO_SERVERS_CACHE[project] = (now, status)
+    return status
+
+
+def overview_odoo_servers(projects, max_age=None):
+    """État du serveur Odoo de chaque projet dont le conteneur Odoo tourne."""
+    return probe_projects(
+        projects,
+        lambda project: cached_overview_odoo_server(project, max_age),
+        lambda project: probe_overview_odoo_server(project, max_age),
+        "overview-odoo-servers",
+    )
 
 
 def docker_poll_seconds():
@@ -3046,7 +3103,7 @@ def docker_poll_seconds():
         return 10
 
 
-def overview(docker=None, databases_max_age=None):
+def overview(docker=None, databases_max_age=None, odoo_servers_max_age=None):
     docker = docker or docker_status(SETTINGS)
     docker_ok = docker["running"]
     docker_message = docker["message"]
@@ -3056,6 +3113,8 @@ def overview(docker=None, databases_max_age=None):
     traefik_port = detected_traefik(docker_ok)["http_port"] if project_names else None
     running_postgres = [project for project in project_names if statuses.get(f"postgresql-{project}") == "running"]
     databases_by_project = overview_databases_by_project(running_postgres, databases_max_age)
+    running_odoo = [project for project in project_names if statuses.get(f"odoo-{project}") == "running"]
+    odoo_servers = overview_odoo_servers(running_odoo, odoo_servers_max_age)
     projects = []
     for project in project_names:
         odoo_status = statuses.get(f"odoo-{project}", "absent") if docker_ok else "docker off"
@@ -3071,6 +3130,8 @@ def overview(docker=None, databases_max_age=None):
                 "name": project,
                 "odoo_version": project_odoo_version(project),
                 "odoo_status": odoo_status,
+                # Conteneur démarré, serveur Odoo absent : Traefik répondrait 502 Bad Gateway.
+                "odoo_server": odoo_servers.get(project),
                 "postgres_status": pg_status,
                 "url": url,
                 "database_manager_url": urllib.parse.urljoin(url, "web/database/manager"),
@@ -3297,6 +3358,7 @@ JOB_CANCEL_POLICIES = {
 def refresh_after_job():
     """Une action a pu démarrer ou arrêter des conteneurs, créer ou supprimer des bases."""
     invalidate_overview_databases()
+    invalidate_overview_odoo_servers()
     EVENT_DOCKER_REFRESH.set()
     EVENT_WAKE.set()
 
@@ -7381,7 +7443,11 @@ def event_watch_loop():
                     EVENT_DOCKER_REFRESH.clear()
                     docker = docker_status(SETTINGS)
                     docker_checked_at = now
-                overview_payload = overview(docker, databases_max_age=EVENT_DATABASES_MAX_AGE_SECONDS)
+                overview_payload = overview(
+                    docker,
+                    databases_max_age=EVENT_DATABASES_MAX_AGE_SECONDS,
+                    odoo_servers_max_age=EVENT_ODOO_SERVERS_MAX_AGE_SECONDS,
+                )
                 overview_json = json.dumps(overview_payload, sort_keys=True, ensure_ascii=False)
                 if overview_json != last_overview_json:
                     last_overview_json = overview_json
@@ -7423,6 +7489,8 @@ def on_docker_event(line):
     # Ligne vide : l'écoute s'est coupée, Docker vient peut-être de s'arrêter.
     if not line:
         EVENT_DOCKER_REFRESH.set()
+    # Un conteneur Odoo démarré ou arrêté hors du gestionnaire change l'état de son serveur.
+    invalidate_overview_odoo_servers()
     EVENT_WAKE.set()
 
 
@@ -7930,6 +7998,17 @@ def project_logs_payload(request):
 
 def project_diagnostics_payload(request):
     return project_diagnostics(validate_project(request.param("project")))
+
+
+def project_odoo_server_payload(request):
+    """État du serveur Odoo relu sans cache, juste avant d'ouvrir le navigateur."""
+    project = validate_project(request.param("project"))
+    status = container_statuses((f"odoo-{project}",))[f"odoo-{project}"]
+    server = odoo_server_status(project) if status == "running" else None
+    if server is not None and server != "unknown":
+        with OVERVIEW_ODOO_SERVERS_CACHE_LOCK:
+            OVERVIEW_ODOO_SERVERS_CACHE[project] = (time.monotonic(), server)
+    return {"project": project, "odoo_status": status, "odoo_server": server}
 
 
 # --- Écritures --------------------------------------------------------------
@@ -8760,6 +8839,7 @@ ROUTER = Router(
         api_route("GET", "/api/projects/{project}/logs", project_logs_payload),
         api_route("GET", "/api/projects/{project}/logs/stream", serve_project_log_stream),
         api_route("GET", "/api/projects/{project}/diagnostics", project_diagnostics_payload),
+        api_route("GET", "/api/projects/{project}/odoo-server", project_odoo_server_payload),
         api_route("POST", "/api/jobs", create_job_view),
         api_route("POST", "/api/jobs/{job}/cancel", cancel_job_view, cancel_route_errors),
         api_route("POST", "/api/settings", update_settings),
