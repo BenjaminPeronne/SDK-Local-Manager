@@ -17,6 +17,10 @@ export interface WslStatus {
   release: string;
   /** Lue avant l'installation de l'environnement ; `unknown` quand Windows ne répond pas nettement. */
   virtualization?: "enabled" | "disabled" | "unknown";
+  /** Paquet WSL présent, mais composant Windows « Sous-système Windows pour Linux » inactif. */
+  wslComponentMissing?: boolean;
+  /** Un composant Windows activé attend le redémarrage de l'ordinateur. */
+  rebootPending?: boolean;
   /** Mémoire de l'ordinateur, en octets. */
   memory?: { total: number; free: number };
   /** Vrai quand une préparation tourne déjà, lancée au démarrage de l'application. */
@@ -47,6 +51,7 @@ export function memoryWarning(status: WslStatus | null): string {
 export type WslSetupStep =
   | "unsupported"
   | "virtualization-disabled"
+  | "reboot-required"
   | "install-wsl"
   | "outdated-wsl"
   | "install-environment"
@@ -92,6 +97,19 @@ export function wslSetupState(status: WslStatus | null, applicationVersion: stri
         "La virtualisation est désactivée sur cet ordinateur : l'environnement Linux ne peut pas démarrer sans elle. " +
         "Elle s'active dans le BIOS, au démarrage de l'ordinateur (option « Intel VT-x », « AMD-V » ou « SVM »). " +
         "Redémarre ensuite, et l'application reprendra ici.",
+      actionLabel: "Vérifier à nouveau",
+      needsElevation: false,
+    };
+  }
+  // WSL activé, mais pas encore démarrable : seul le redémarrage de l'ordinateur termine
+  // l'activation. Relancer l'activation ou la préparation n'y changerait rien.
+  if (status.wslComponentMissing && status.rebootPending) {
+    return {
+      step: "reboot-required",
+      title: "Redémarrer l'ordinateur",
+      detail:
+        "Windows a activé sa fonction Linux (WSL), mais elle ne sera utilisable qu'après un redémarrage de l'ordinateur. " +
+        "Redémarre, puis rouvre l'application : la préparation reprendra ici.",
       actionLabel: "Vérifier à nouveau",
       needsElevation: false,
     };
@@ -157,6 +175,11 @@ export function wslSetupError(error: unknown): string {
   }
   if (/0x80370102|HCS_E_HYPERV_NOT_INSTALLED|virtuali[sz]ation/i.test(message)) {
     return "La virtualisation est désactivée dans le BIOS de ce poste. Active-la, puis réessaie.";
+  }
+  // Composant Windows inactif : aucun nouvel essai n'y change rien, seul le redémarrage termine
+  // l'activation de WSL.
+  if (/WSL_E_WSL_OPTIONAL_COMPONENT_REQUIRED|Sous-système Windows pour Linux/i.test(message)) {
+    return "Windows n'a pas encore terminé l'activation de sa fonction Linux (WSL). Redémarre l'ordinateur, puis rouvre l'application : la préparation reprendra ici.";
   }
   // L'application a déjà redémarré l'environnement Linux et réessayé : il reste le redémarrage
   // de l'ordinateur, que l'utilisateur fait seul. La cause technique est dans le journal.

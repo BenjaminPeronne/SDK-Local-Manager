@@ -90,8 +90,8 @@ export function WslSetupDialog({
       stepRef.current = joined?.step ?? "";
       setStepStartedAt(0);
       try {
-        if (state.step === "virtualization-disabled") {
-          // Rien à lancer : l'utilisateur a changé le réglage, l'écran relit l'état.
+        if (state.step === "virtualization-disabled" || state.step === "reboot-required") {
+          // Rien à lancer : l'utilisateur a changé le réglage ou redémarré, l'écran relit l'état.
           await refresh();
           return;
         }

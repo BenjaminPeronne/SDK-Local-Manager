@@ -52,6 +52,9 @@ const TIMEOUTS = {
   control: 2 * 60_000,
   // Import de l'image : plusieurs minutes sur un disque lent, antivirus compris.
   import: 30 * 60_000,
+  // Activation de WSL : deux composants Windows puis le téléchargement du paquet WSL. Au-delà,
+  // seule la commande d'ici serait arrêtée : la fenêtre élevée continuerait sans être attendue.
+  activation: 30 * 60_000,
   // Copie du backend par /mnt, provisionnement (démarrage de Docker).
   step: 15 * 60_000,
 };
@@ -61,6 +64,65 @@ const VIRTUALIZATION_ERROR = /HCS_E_HYPERV_NOT_INSTALLED|0x80370102|virtuali[sz]
 
 function isVirtualizationError(error) {
   return VIRTUALIZATION_ERROR.test(String(error?.message || error || ""));
+}
+
+// Composant Windows « Sous-système Windows pour Linux » absent, ou activé mais en attente du
+// redémarrage de l'ordinateur. `wsl --version` répond quand même : seules les commandes qui
+// démarrent WSL échouent, avec ce code. Aucun nouvel essai n'y change rien.
+const WSL_COMPONENT_ERROR = /WSL_E_WSL_OPTIONAL_COMPONENT_REQUIRED/;
+
+function isComponentError(error) {
+  return WSL_COMPONENT_ERROR.test(String(error?.message || error || ""));
+}
+
+const WSL_COMPONENT_MESSAGE =
+  "Le composant Windows « Sous-système Windows pour Linux » n'est pas encore actif : " +
+  "redémarre l'ordinateur, puis rouvre l'application.";
+
+const ELEVATION_REFUSED_MESSAGE =
+  "L'autorisation administrateur a été refusée : Windows n'a rien activé. Clique à nouveau sur « Activer » " +
+  "et accepte la demande de Windows ; sans droits administrateur sur ce poste, demande-les à qui gère les postes.";
+
+// Clé posée par Windows quand un composant activé attend le redémarrage de l'ordinateur.
+const REBOOT_PENDING_PROBE =
+  "Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending'";
+
+// Codes de sortie de l'activation : 3010 et 1641, succès avec redémarrage requis ; 1223,
+// autorisation refusée (fenêtre de Windows fermée ou « Non ») : rien n'a été installé.
+const EXIT_REBOOT_REQUIRED = new Set([3010, 1641]);
+const EXIT_ELEVATION_REFUSED = 1223;
+
+// Exécuté avec les droits administrateur, dans une fenêtre dont la sortie ne revient pas ici :
+// seul son code de sortie est lisible. Les deux composants sont activés explicitement, car
+// `wsl --install` seul rendait 0 sans dire qu'un redémarrage restait à faire.
+const ENABLE_WSL_SCRIPT = [
+  "$restart = 0",
+  "foreach ($feature in 'Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform') {",
+  "  & dism.exe /online /enable-feature /featurename:$feature /all /norestart /quiet | Out-Null",
+  "  if ($LASTEXITCODE -eq 3010 -or $LASTEXITCODE -eq 1641) { $restart = 3010 }",
+  "  elseif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
+  "}",
+  // Le paquet WSL lui-même. Son code est ignoré : avant le redémarrage, il peut échouer sur
+  // le composant tout juste activé, et l'état relu ensuite dit ce qu'il reste à faire.
+  "& wsl.exe --install --no-distribution | Out-Null",
+  "exit $restart",
+].join("\n");
+
+/**
+ * Commande PowerShell qui lance un script élevé, une seule demande d'autorisation, et rend son code.
+ *
+ * Le script passe encodé (`-EncodedCommand`) : aucun guillemet à échapper. Une autorisation
+ * refusée fait échouer `Start-Process` : elle rend 1223, comme Windows. C'est de loin la cause
+ * la plus courante, mais pas la seule : le message réel part sur la sortie d'erreur, que ce
+ * PowerShell non élevé rend bien, pour que le journal garde la vraie raison.
+ */
+function elevatedCommand(script) {
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  return (
+    "try { $p = Start-Process -FilePath powershell.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden " +
+    `-ArgumentList '-NoProfile','-NonInteractive','-EncodedCommand','${encoded}'; exit $p.ExitCode } ` +
+    `catch { [Console]::Error.WriteLine($_.Exception.Message); exit ${EXIT_ELEVATION_REFUSED} }`
+  );
 }
 
 // Interroge le processeur et Windows. Un hyperviseur déjà actif (WSL, Hyper-V) masque l'option
@@ -108,6 +170,12 @@ function wslStartFailureReason(error) {
     return (
       "La virtualisation est désactivée sur ce poste : WSL ne peut plus démarrer. Active-la dans le BIOS ou l'UEFI, " +
       "puis vérifie le composant Windows « Plateforme d'ordinateur virtuel »."
+    );
+  }
+  if (isComponentError(message)) {
+    return (
+      "Le composant Windows « Sous-système Windows pour Linux » n'est pas actif : WSL ne peut pas démarrer. " +
+      "Redémarre l'ordinateur ; si cela persiste, relance la préparation du poste."
     );
   }
   if (/Wsl\/|wsl\.exe|WSL/i.test(message)) {
@@ -356,6 +424,20 @@ class WslEnvironment {
     return state;
   }
 
+  /** Un composant Windows activé attend-il le redémarrage de l'ordinateur ? Faux dans le doute. */
+  async rebootPending() {
+    try {
+      const { stdout } = await this.run(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", REBOOT_PENDING_PROBE],
+        { allowFailure: true, timeout: TIMEOUTS.control },
+      );
+      return /^true$/i.test(decodeWslOutput(stdout).trim());
+    } catch {
+      return false;
+    }
+  }
+
   async wslVersion() {
     try {
       const { stdout } = await this.run("wsl.exe", ["--version"]);
@@ -371,6 +453,28 @@ class WslEnvironment {
       return parseDistributions(stdout);
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * Distributions inscrites, et WSL est-il réellement utilisable ?
+   *
+   * `wsl --version` répond dès que le paquet WSL est posé, même quand le composant Windows n'est
+   * pas actif ou attend le redémarrage : seule une commande qui démarre WSL, comme celle-ci, le
+   * révèle. Une liste illisible pour une autre raison reste tolérée (`unknown`), comme avant.
+   */
+  async listing() {
+    try {
+      const { stdout, stderr, code } = await this.run("wsl.exe", ["--list", "--quiet"], {
+        allowFailure: true,
+        timeout: TIMEOUTS.control,
+      });
+      if (WSL_COMPONENT_ERROR.test(decodeWslOutput(stdout) + "\n" + decodeWslOutput(stderr))) {
+        return { usable: "component-missing", names: [] };
+      }
+      return code === 0 ? { usable: "yes", names: parseDistributions(stdout) } : { usable: "unknown", names: [] };
+    } catch (error) {
+      return { usable: isComponentError(error) ? "component-missing" : "unknown", names: [] };
     }
   }
 
@@ -441,10 +545,13 @@ class WslEnvironment {
   /** État complet, sans rien modifier : c'est ce que l'écran d'installation affiche. */
   async status() {
     const version = await this.wslVersion();
-    const names = version ? await this.distributions() : [];
+    const { usable, names } = version ? await this.listing() : { usable: "no", names: [] };
+    // Paquet WSL présent, composant Windows inactif : WSL n'est pas utilisable, l'écran doit
+    // proposer de l'activer ou de redémarrer, jamais de préparer l'environnement.
+    const componentMissing = usable === "component-missing";
     const installed = names.some((name) => name.toLowerCase() === this.distribution.toLowerCase());
     return {
-      wslInstalled: Boolean(version),
+      wslInstalled: Boolean(version) && !componentMissing,
       wslVersion: version,
       supportsFileImport: supportsFileImport(version),
       distribution: this.distribution,
@@ -453,6 +560,9 @@ class WslEnvironment {
       // Lue seulement avant l'installation : une distribution déjà installée prouve qu'elle
       // démarrait, et un arrêt ultérieur est expliqué par la bascule sur le backend Windows.
       virtualization: installed ? "unknown" : await this.virtualization(),
+      // Présents seulement quand le composant manque : activation jamais faite, ou faite et en
+      // attente du redémarrage de l'ordinateur.
+      ...(componentMissing ? { wslComponentMissing: true, rebootPending: await this.rebootPending() } : {}),
       memory: this.memory(),
       ...this.preparation(),
     };
@@ -523,8 +633,10 @@ class WslEnvironment {
       try {
         return await action(attempt);
       } catch (error) {
-        // Virtualisation absente : seul l'utilisateur peut l'activer, un nouvel essai serait vain.
-        if (!error?.command || isVirtualizationError(error) || attempt >= recoveries.length) throw error;
+        // Virtualisation absente ou composant Windows inactif : seul l'utilisateur peut y remédier
+        // (BIOS, redémarrage de l'ordinateur), un nouvel essai serait vain.
+        if (!error?.command || isVirtualizationError(error) || isComponentError(error) || attempt >= recoveries.length)
+          throw error;
         this.log(`Étape « ${label} » interrompue (${error.message}) : nouvel essai.`);
         if (!(await recoveries[attempt]())) throw error;
         // L'écran dit qu'un nouvel essai est en cours, au lieu d'une barre qui semble figée.
@@ -537,22 +649,42 @@ class WslEnvironment {
     }
   }
 
-  /** Installe WSL lui-même. Une seule élévation, et Windows peut demander un redémarrage. */
+  /**
+   * Active WSL : les deux composants Windows puis le paquet WSL, sous une seule autorisation.
+   *
+   * La commande élevée tourne dans sa propre fenêtre : sa sortie n'arrive jamais ici, seul son
+   * code de sortie. Un code 0 ne prouve donc pas que WSL est utilisable : l'état est relu après,
+   * et tant que WSL ne démarre pas, c'est que le redémarrage de l'ordinateur reste à faire.
+   */
   async installWsl() {
-    const { stdout, stderr, code } = await this.run(
+    const { code, stderr } = await this.run(
       "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "$p = Start-Process -FilePath wsl.exe -ArgumentList '--install','--no-distribution' -Verb RunAs -Wait -PassThru; exit $p.ExitCode",
-      ],
-      { allowFailure: true },
+      ["-NoProfile", "-NonInteractive", "-Command", elevatedCommand(ENABLE_WSL_SCRIPT)],
+      { allowFailure: true, timeout: TIMEOUTS.activation },
     );
-    const output = decodeWslOutput(stdout) + decodeWslOutput(stderr);
-    const rebootRequired = code !== 0 || /redémarr|restart/i.test(output);
-    this.log(`Installation de WSL: code ${code}. ${output.trim()}`);
-    return { ok: code === 0, rebootRequired, message: output.trim() };
+    if (code === EXIT_ELEVATION_REFUSED) {
+      const cause = decodeWslOutput(stderr).trim();
+      this.log(
+        `Installation de WSL : autorisation administrateur refusée, rien n'a été activé.${cause ? ` (${cause})` : ""}`,
+      );
+      return { ok: false, rebootRequired: false, elevationRefused: true, message: ELEVATION_REFUSED_MESSAGE };
+    }
+    const ok = code === 0 || EXIT_REBOOT_REQUIRED.has(code);
+    if (!ok) {
+      this.log(`Installation de WSL : échec, code ${code}.`);
+      return { ok, rebootRequired: false, message: `Windows n'a pas pu activer sa fonction Linux (code ${code}).` };
+    }
+    const version = await this.wslVersion();
+    const { usable } = version ? await this.listing() : { usable: "no" };
+    // Lu même quand WSL répond : `wsl --list` marche sans « Plateforme d'ordinateur virtuel »,
+    // qui peut encore attendre le redémarrage, et l'import échouerait alors comme sur un BIOS
+    // sans virtualisation. Un redémarrage de trop (mise à jour Windows en attente) coûte moins.
+    const rebootRequired =
+      EXIT_REBOOT_REQUIRED.has(code) || !version || usable === "component-missing" || (await this.rebootPending());
+    this.log(
+      `Installation de WSL : code ${code}, ${rebootRequired ? "redémarrage de l'ordinateur requis" : "WSL utilisable"}.`,
+    );
+    return { ok, rebootRequired, message: rebootRequired ? WSL_COMPONENT_MESSAGE : "" };
   }
 
   /** Importe l'image, après vérification de son empreinte. */
@@ -705,6 +837,12 @@ class WslEnvironment {
 
   async prepareOnce({ version, backendSource, archive, checksum, provisionScript = "", restartAllowed = true }) {
     const state = await this.status();
+    // Constaté avant tout : sans le composant, chaque commande échouait, était rejouée deux
+    // fois, puis l'écran parlait d'un échec « après plusieurs essais » au lieu du redémarrage.
+    if (state.wslComponentMissing) {
+      this.log(WSL_COMPONENT_MESSAGE);
+      throw new Error(WSL_COMPONENT_MESSAGE);
+    }
     if (!state.wslInstalled) throw new Error("WSL n'est pas installé.");
     // Constatée avant l'import : sans elle, l'import échouait après la vérification de l'image.
     if (!state.distributionInstalled && state.virtualization === "disabled") {
@@ -719,6 +857,12 @@ class WslEnvironment {
       // Le journal garde la cause technique et la commande ; l'écran reçoit une phrase simple.
       this.log(`Échec de l'étape « ${label} » : ${error.message}`);
       if (error.command) this.log(`  Commande : ${error.command}`);
+      if (isComponentError(error)) {
+        const blocked = new Error(WSL_COMPONENT_MESSAGE);
+        blocked.step = error.step;
+        blocked.cause = error;
+        return blocked;
+      }
       if (!error.command || isVirtualizationError(error)) return error;
       const plain = new Error(`La préparation s'est arrêtée à l'étape « ${label} » après plusieurs essais.`);
       plain.step = error.step;
@@ -921,6 +1065,7 @@ function defaultRunner(executable, args, options = {}) {
 module.exports = {
   BACKEND_PATH,
   DISTRIBUTION,
+  ENABLE_WSL_SCRIPT,
   LINUX_WORKSPACE,
   WslEnvironment,
   backendCommand,
@@ -932,6 +1077,8 @@ module.exports = {
   wslResourcesRequest,
   commandError,
   decodeWslOutput,
+  elevatedCommand,
+  isComponentError,
   isVirtualizationError,
   parseVirtualization,
   expectedChecksum,
