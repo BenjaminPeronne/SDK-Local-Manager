@@ -15,7 +15,12 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import data_conflicts, database_restore, job_progress, jobs, performance
-from .command_output import missing_python_import, partially_initialized_import, python_package_for_import
+from .command_output import (
+    missing_python_import,
+    missing_view_field,
+    partially_initialized_import,
+    python_package_for_import,
+)
 from .platform import (
     command_uses_wsl,
     executable_search_path,
@@ -3281,6 +3286,10 @@ class ProjectService:
                 if missing_file:
                     self.log(log, f"Odoo parle d'un import circulaire, mais un fichier manque. {missing_file}")
                     reason = missing_file
+                stale_code = self.stale_module_code_reason(project, db_name, modules, reason)
+                if stale_code:
+                    self.log(log, f"Le champ manquant vient d'un autre module de la base. {stale_code}")
+                    reason = stale_code
                 raise OdooError(f"La commande Odoo a échoué avec le code {code}. {reason}")
             if was_neutralized:
                 self.log(log, "La base était neutralisée: nouvelle passe après l'opération module...")
@@ -3338,6 +3347,41 @@ class ProjectService:
             f"Le module {imported['module']} demande le fichier {imported['file']}, qui manque dans son code "
             "(souvent un fichier oublié lors d'un commit ou d'une fusion de branches). Remets ce fichier dans le "
             f"module, ou retire « {imported['name']} » de {imported['init']}, puis relance."
+        )
+
+    def stale_module_code_reason(self, project, db_name, modules, reason):
+        """Explication quand une vue cite un champ qu'un autre module installé a créé dans la base ; "" sinon.
+
+        Cas typique : base copiée de la production, code local (Enterprise…) plus ancien. La vue de
+        ce module enregistrée dans la base vient de la version de production et cite un champ que le
+        code local ne connaît pas ; Odoo accuse pourtant le module en cours d'installation, dont la
+        vue hérite du même formulaire.
+        """
+        field = missing_view_field(reason)
+        if not field:
+            return ""
+        try:
+            owners = self._postgres_lines(
+                project,
+                db_name,
+                "SELECT DISTINCT d.module FROM ir_model_fields f "
+                "JOIN ir_model_data d ON d.model = 'ir.model.fields' AND d.res_id = f.id "
+                f"WHERE f.name = {database_restore.sql_literal(field)} ORDER BY 1;",
+                timeout=15,
+            )
+        except (RuntimeError, OSError):
+            return ""
+        requested = {name.strip() for name in str(modules).split(",") if name.strip()}
+        # Champ inconnu de la base (faute de frappe dans la vue) ou module relancé ici : le message d'Odoo suffit.
+        if not owners or "all" in requested or requested & set(owners):
+            return ""
+        names = ", ".join(owners)
+        label = "le module" if len(owners) == 1 else "les modules"
+        return (
+            f"Le champ « {field} » a été créé dans cette base par {label} {names}, mais le code de {names} "
+            "présent dans ce projet ne le contient pas : ce code est plus ancien que celui qui a servi à créer "
+            "la base (cas courant avec une base copiée de la production). Mets à jour le code de "
+            f"{names} à la même version que la production, ou relance en mettant aussi à jour {names}."
         )
 
     @classmethod

@@ -207,6 +207,20 @@ def partially_initialized_import(message):
     }
 
 
+# Vue refusée parce qu'elle cite un champ que le code chargé ne définit pas. Odoo 17+ écrit
+# « Le champ `x` n'existe pas » (ou « Field `x` does not exist »), les versions plus anciennes
+# mettent le nom entre guillemets droits.
+MISSING_VIEW_FIELD_RE = re.compile(
+    r"(?:Le champ|Field)\s+[`\"'«]\s*(?P<field>\w+)\s*[`\"'»]\s+(?:n'existe pas|does not exist)", re.IGNORECASE
+)
+
+
+def missing_view_field(message):
+    """Nom du champ qu'une vue cite sans que le code d'Odoo le définisse ; "" sinon."""
+    match = MISSING_VIEW_FIELD_RE.search(message)
+    return match.group("field") if match else ""
+
+
 def python_package_for_import(import_name):
     """Nom du paquet PyPI à installer pour satisfaire cet import (identique la plupart du temps)."""
     return PIP_PACKAGE_ALIASES.get(import_name.lower(), import_name)

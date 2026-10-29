@@ -1213,6 +1213,61 @@ class ProjectServiceTests(unittest.TestCase):
 
         self.assertNotIn("demande le fichier", str(raised.exception))
 
+    STALE_VIEW_FIELD_OUTPUT = [
+        "2026-10-29 13:57:56,406 2588 CRITICAL demo odoo.service.server: Failed to initialize database `demo`.",
+        "Traceback (most recent call last):",
+        "odoo.tools.convert.ParseError: while parsing "
+        "/home/odoo/srv/server/addons/sudokeys_pilotage/views/res_config_settings.xml:3",
+        "Erreur lors de la validation de la vue :",
+        '<form string="Settings" class="oe_form_configuration" js_class="base_settings">',
+        "Le champ `payslip_generate_and_send_trigger` n'existe pas",
+        "View error context:",
+    ]
+
+    def test_view_field_from_an_older_local_module_names_that_module(self):
+        # Base copiée de la production : la vue de hr_payroll en base cite un champ que le code
+        # Enterprise local, plus ancien, ne définit pas. Odoo accuse le module installé.
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        self.runner.stream_codes = [255]
+        self.runner.stream_output = self.STALE_VIEW_FIELD_OUTPUT
+        self.runner.database_query_outputs = {"'payslip_generate_and_send_trigger'": "hr_payroll\n"}
+        logs = []
+
+        with self.assertRaises(RuntimeError) as raised:
+            self.service.run_odoo_module_command("DEMO", "demo", "sudokeys_pilotage", option="-i", log=logs.append)
+
+        message = str(raised.exception)
+        self.assertIn("créé dans cette base par le module hr_payroll", message)
+        self.assertIn("relance en mettant aussi à jour hr_payroll", message)
+        self.assertNotIn("sudokeys_pilotage", message)
+        self.assertTrue(any("payslip_generate_and_send_trigger` n'existe pas" in line for line in logs))
+
+    def test_view_field_unknown_to_the_database_keeps_the_odoo_message(self):
+        # Faute de frappe dans la vue du module lui-même : aucun module de la base n'a créé le champ.
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        self.runner.stream_codes = [255]
+        self.runner.stream_output = self.STALE_VIEW_FIELD_OUTPUT
+        self.runner.database_query_outputs = {"'payslip_generate_and_send_trigger'": ""}
+
+        with self.assertRaisesRegex(RuntimeError, "n'existe pas") as raised:
+            self.service.run_odoo_module_command("DEMO", "demo", "sudokeys_pilotage", log=lambda _line: None)
+
+        self.assertNotIn("créé dans cette base", str(raised.exception))
+
+    def test_view_field_of_the_module_being_updated_keeps_the_odoo_message(self):
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        self.runner.stream_codes = [255]
+        self.runner.stream_output = self.STALE_VIEW_FIELD_OUTPUT
+        self.runner.database_query_outputs = {"'payslip_generate_and_send_trigger'": "hr_payroll\n"}
+
+        with self.assertRaisesRegex(RuntimeError, "n'existe pas") as raised:
+            self.service.run_odoo_module_command("DEMO", "demo", "sudokeys_pilotage,hr_payroll", log=lambda _line: None)
+
+        self.assertNotIn("créé dans cette base", str(raised.exception))
+
     def test_module_error_survives_long_shutdown_output(self):
         self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
         self.runner.odoo_server_running = False
