@@ -52,6 +52,7 @@ from .traefik import (
     substitute_port_candidates,
     url_with_port,
 )
+from .windows_links import remove_link_entry
 
 COMPOSE_FILENAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
 # Première page Odoo servie dans le conteneur : 2xx/3xx/4xx = serveur prêt, 5xx ou exception = pas encore.
@@ -3344,8 +3345,10 @@ class ProjectService:
             try:
                 if entry.is_symlink() and not (target.exists() or target.is_symlink()):
                     entry.rename(target)
+                    if entry.is_symlink() and target.is_symlink() and target.resolve() == entry.resolve():
+                        remove_link_entry(entry)
                 elif entry.is_symlink() and target.resolve() == entry.resolve():
-                    entry.unlink()
+                    remove_link_entry(entry)
                 else:
                     blocked.append(entry.name)
                     continue
