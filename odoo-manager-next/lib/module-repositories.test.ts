@@ -6,7 +6,8 @@ import {
   groupModulesByRepository,
   matchWantedModules,
   NO_REPOSITORY_GROUP,
-  repositoryBranchSwitchable,
+  repositoryBranchLocked,
+  repositoryRevisionManageable,
   REPOSITORY_CHECK_TTL_MS,
   repositoriesToCheck,
   repositoryCheckKey,
@@ -123,13 +124,15 @@ test("the replaced repository is shown once when every replacing copy shares it"
   assert.equal(sharedReplacedRepository([copy("a")]), null);
 });
 
-test("only project repositories and imported copies can switch branch", () => {
-  assert.equal(repositoryBranchSwitchable(repository("addons")), true);
-  assert.equal(repositoryBranchSwitchable(repository("archive", { source: "sdk" })), true);
-  assert.equal(repositoryBranchSwitchable(repository("import:x#dev", { source: "import", path: "" })), true);
-  assert.equal(repositoryBranchSwitchable(repository("odoo", { source: "odoo", standard: true })), false);
-  assert.equal(repositoryBranchSwitchable(repository("enterprise", { standard: true })), false);
-  assert.equal(repositoryBranchSwitchable(repository("unknown", { path: "" })), false);
+test("project repositories, imported copies, Odoo and Enterprise are updated from the list; Odoo keeps its branch", () => {
+  assert.equal(repositoryRevisionManageable(repository("addons")), true);
+  assert.equal(repositoryRevisionManageable(repository("archive", { source: "sdk" })), true);
+  assert.equal(repositoryRevisionManageable(repository("import:x#dev", { source: "import", path: "" })), true);
+  assert.equal(repositoryRevisionManageable(repository("odoo", { source: "odoo", standard: true, path: "" })), false);
+  assert.equal(repositoryRevisionManageable(repository("enterprise", { standard: true })), true);
+  assert.equal(repositoryBranchLocked(repository("enterprise", { standard: true })), true);
+  assert.equal(repositoryBranchLocked(repository("addons")), false);
+  assert.equal(repositoryRevisionManageable(repository("unknown", { path: "" })), false);
 });
 
 test("branch search ignores case and keeps the server order", () => {

@@ -99,11 +99,18 @@ export function sharedReplacedRepository(modules: ModuleInfo[]) {
   return labels.size === 1 ? { label: [...labels][0], count } : null;
 }
 
-/** Clone ou archive rangé dans le projet, ou copie importée : sa branche peut changer depuis la liste. */
-export function repositoryBranchSwitchable(repository: ModuleRepository) {
-  if (repository.standard) return false;
+/**
+ * Clone ou archive rangé dans le projet, ou copie importée : sa mise à jour se fait depuis la liste,
+ * et sa branche y change sauf pour Odoo et Enterprise (voir repositoryBranchLocked).
+ */
+export function repositoryRevisionManageable(repository: ModuleRepository) {
   if (repository.source === "import") return true;
   return (repository.source === "git" || repository.source === "sdk") && Boolean(repository.path);
+}
+
+/** Odoo et Enterprise suivent la version du projet : leur branche reçoit ses nouveaux commits mais ne change pas. */
+export function repositoryBranchLocked(repository: ModuleRepository) {
+  return repository.standard;
 }
 
 export type RemoteBranch = { name: string; default: boolean; commit: string };
@@ -126,6 +133,10 @@ export type RepositoryBranches = {
   /** Date ISO et titre du commit chargé, lus seulement dans un clone Git. */
   commit_date: string;
   commit_subject: string;
+  /** Odoo ou Enterprise : seule la mise à jour de la branche est proposée. */
+  core?: boolean;
+  /** Dépôt du projet (dépôt de production rangé dans odoo/) qui suit aussi ces fichiers ; vide sinon. */
+  tracked_by?: string;
 };
 
 /** Date d'un commit, à l'heure de l'ordinateur : « 12 octobre 2026 à 14:05 » ; vide si illisible. */
@@ -167,7 +178,7 @@ export function repositoriesToCheck(
   now: number,
 ) {
   return repositories.filter((repository) => {
-    if (!repository.branch || !repositoryBranchSwitchable(repository)) return false;
+    if (!repository.branch || !repositoryRevisionManageable(repository)) return false;
     const entry = entries.get(repositoryCheckKey(project, repository));
     return !entry || now - entry.at >= REPOSITORY_CHECK_TTL_MS;
   });

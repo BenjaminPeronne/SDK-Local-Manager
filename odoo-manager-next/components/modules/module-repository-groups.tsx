@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import {
   type ModuleRepositoryGroup,
-  repositoryBranchSwitchable,
+  repositoryRevisionManageable,
   repositoryRevision,
   repositoryWebUrl,
   sharedReplacedRepository,
@@ -143,7 +143,7 @@ export function ModuleRepositoryGroups({
         const replacing = replaced
           ? group.modules.filter((module) => module.replaced_repository === replaced.label).map((module) => module.name)
           : [];
-        const switchable = Boolean(repository && projectName && repositoryBranchSwitchable(repository));
+        const switchable = Boolean(repository && projectName && repositoryRevisionManageable(repository));
         // Tout l'en-tête plie le dépôt, sauf ses contrôles (et le sélecteur de branche, rendu en portail).
         const foldFromHeader = (event: ReactMouseEvent<HTMLElement>) => {
           const target = event.target as HTMLElement;

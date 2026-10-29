@@ -442,15 +442,100 @@ class RepositoryModulesTests(ModuleLayoutTests):
         self.assertEqual("3" * 40, web.remote_branch_commit(output, "10.0"))
         self.assertEqual("", web.remote_branch_commit(output, "absente"))
 
-    def test_only_repositories_of_addons_store_can_switch_branch(self):
+    def test_only_odoo_enterprise_and_repositories_of_addons_store_can_be_updated(self):
         (self.project_root / "odoo/odoo/.git").mkdir()
+        (self.project_root / "odoo/odoo/.git/HEAD").write_text("ref: refs/heads/18.0\n")
         enterprise = self.storage("odoo_entreprise")
         (enterprise / ".git").mkdir(parents=True)
-        for repository in (self.project_root / "odoo/odoo", enterprise, Path("relative"), self.root / "elsewhere"):
+        (enterprise / ".git/HEAD").write_text("ref: refs/heads/18.0\n")
+        # Odoo et Enterprise suivent la version du projet : marqués `core`, leur branche ne change pas.
+        for repository in (self.project_root / "odoo/odoo", enterprise):
+            target = web.switchable_repository(self.project, str(web.safe_resolve(repository)))
+            self.assertEqual(("git", "18.0", True), (target["kind"], target["branch"], target["core"]))
+        for repository in (Path("relative"), self.root / "elsewhere", self.project_root / "odoo"):
             with self.assertRaises(ValueError):
                 web.switchable_repository(self.project, str(repository))
         with self.assertRaisesRegex(ValueError, "Aucun module importé"):
             web.switchable_repository(self.project, f"import:{URL}#18.0")
+
+    def test_enterprise_archive_is_refreshed_as_an_archive_and_odoo_restarted(self):
+        # Projet RIKA dont odoo/ est le dépôt de production : Enterprise y est suivi tel quel.
+        (self.project_root / "odoo/.git").mkdir()
+        enterprise = self.storage("odoo_entreprise")
+        (enterprise / "hr_payroll").mkdir(parents=True)
+        (enterprise / "hr_payroll/__manifest__.py").write_text("{'name': 'Payroll'}")
+        enterprise_url = "ssh://git@gitlab.sudokeys.com:10022/sudokeys/odoo_entreprise.git"
+        info = {"remotes": {"origin": enterprise_url}, "active_branch": "18.0", "branchs": ["17.0", "18.0"]}
+        (enterprise / "info.sdk").write_text(json.dumps({**info, "commit": "1" * 40}))
+        (self.project_root / "odoo/addons/hr_payroll").symlink_to("../addons-store/odoo_entreprise/hr_payroll")
+        repository = str(web.safe_resolve(enterprise))
+
+        def clone(creator, url, branch, destination, log=None):
+            self.assertEqual((enterprise_url, "18.0"), (url, branch))
+            for name in ("hr_payroll", "hr_payroll_new"):
+                (destination / name).mkdir(parents=True)
+                (destination / name / "__manifest__.py").write_text(f"{{'name': '{name}'}}")
+            (destination / ".git").mkdir()
+
+        with mock.patch.object(web, "validate_project", return_value=self.project):
+            with self.assertRaisesRegex(ValueError, "seule sa mise à jour est possible"):
+                web.switch_repository_branch_job(DummyJob(), self.project, repository, "17.0")
+
+        job = DummyJob()
+        with (
+            mock.patch.object(web.ProjectCreator, "clone", autospec=True, side_effect=clone),
+            mock.patch.object(web, "checkout_git", return_value=(0, COMMIT + "\n")),
+            mock.patch.object(web.ProjectService, "odoo_server_state", return_value="running"),
+            mock.patch.object(web.ProjectService, "wait_project_http"),
+            mock.patch.object(web, "restart_odoo_server") as restart,
+        ):
+            web.switch_repository_branch_job(job, self.project, repository, "18.0")
+
+        self.assertFalse((enterprise / ".git").exists())
+        self.assertEqual({**info, "commit": COMMIT}, json.loads((enterprise / "info.sdk").read_text()))
+        self.assertTrue((self.project_root / "odoo/addons/hr_payroll_new/__manifest__.py").is_file(), job.lines)
+        self.assertIn(f"odoo_entreprise : branche 18.0 mise à jour, commit 1111111 → {COMMIT[:7]}.", job.lines)
+        self.assertTrue(any("aussi suivis par le dépôt odoo" in line for line in job.lines), job.lines)
+        restart.assert_called_once()
+        self.assertIn("Odoo a redémarré avec ce code.", job.lines)
+
+    @unittest.skipUnless(shutil.which("git"), "Git requis")
+    def test_odoo_clone_receives_the_last_commit_of_its_branch(self):
+        def git(*arguments, cwd=None):
+            return subprocess.run(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.org", *arguments],
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+        work = self.root / "work"
+        work.mkdir()
+        git("init", "-q", "-b", "18.0", cwd=work)
+        (work / "odoo-bin").write_text("v1")
+        git("add", ".", cwd=work)
+        git("commit", "-q", "-m", "v1", cwd=work)
+        origin = self.root / "origin.git"
+        git("clone", "-q", "--bare", str(work), str(origin))
+        git("remote", "add", "origin", str(origin), cwd=work)
+        odoo_source = self.project_root / "odoo/odoo"
+        shutil.rmtree(odoo_source)
+        git("clone", "-q", "--depth", "1", "--single-branch", "--branch", "18.0", origin.as_uri(), str(odoo_source))
+        (work / "odoo-bin").write_text("v2")
+        git("commit", "-q", "-am", "v2", cwd=work)
+        git("push", "-q", "origin", "18.0", cwd=work)
+        repository = str(web.safe_resolve(odoo_source))
+
+        branches = web.repository_branches(self.project, repository)
+        self.assertEqual(("behind", True, ""), (branches["commit_status"], branches["core"], branches["tracked_by"]))
+
+        job = DummyJob()
+        with mock.patch.object(web.ProjectService, "odoo_server_state", return_value="exited"):
+            web.switch_repository_branch_job(job, self.project, repository, "18.0")
+
+        self.assertEqual("v2", (odoo_source / "odoo-bin").read_text())
+        self.assertIn("Odoo est arrêté : il utilisera ce code à son prochain démarrage.", job.lines)
 
     def test_imported_copies_are_reimported_from_the_new_branch(self):
         self.run_import(["alpha", "beta"])

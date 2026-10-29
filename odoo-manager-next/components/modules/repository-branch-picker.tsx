@@ -22,6 +22,7 @@ import {
   filterBranches,
   formatCommitDate,
   repositoryCommitUrl,
+  repositoryBranchLocked,
   repositoryCompareUrl,
   type RepositoryBranches,
   repositoryUpdatable,
@@ -55,6 +56,10 @@ function switchEffect(repository: ModuleRepository, moduleCount: number, branch:
 
 /** Ce que la mise à jour fait au code du projet : la même branche, à son dernier commit. */
 function updateEffect(repository: ModuleRepository, moduleCount: number, branch: string) {
+  if (repositoryBranchLocked(repository))
+    return repository.source === "sdk"
+      ? `Les fichiers de ${repository.name} sont remplacés par ceux du dernier commit de la branche ${branch}, puis Odoo redémarre s’il tournait. L’ancien dossier est mis de côté.`
+      : `Les fichiers de ${repository.name} reçoivent les derniers commits de la branche ${branch}, puis Odoo redémarre s’il tournait. Si des fichiers ont été modifiés sans être enregistrés dans Git, rien n’est changé.`;
   if (repository.source === "import")
     return `Les ${moduleCount} module(s) copiés depuis ${repository.name} sont recopiés depuis le dernier commit de la branche ${branch}. Les copies actuelles sont mises de côté.`;
   if (repository.source === "sdk")
@@ -132,7 +137,9 @@ function CommitStatus({
         </p>
       ) : result.commit_status === "missing" ? (
         <p className="text-amber-700 dark:text-amber-300">
-          La branche {result.current} n’existe plus sur le serveur : choisis-en une autre ci-dessous.
+          {repositoryBranchLocked(repository)
+            ? `La branche ${result.current} n’existe pas sur le serveur : rien à récupérer.`
+            : `La branche ${result.current} n’existe plus sur le serveur : choisis-en une autre ci-dessous.`}
         </p>
       ) : repositoryUpdatable(result) ? (
         <div className="grid gap-2">
@@ -272,6 +279,8 @@ export function RepositoryBranchPicker({
   const [updateDatabases, setUpdateDatabases] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const current = repository.branch;
+  // Odoo et Enterprise : pas de liste de branches ni de bases à mettre à jour, seulement le dernier commit.
+  const locked = repositoryBranchLocked(repository);
   const listId = useId();
   const check = useRepositoryCheck(projectName, repository);
 
@@ -304,7 +313,7 @@ export function RepositoryBranchPicker({
 
   // Bases concernées, relues à chaque branche choisie : une base a pu changer entre-temps.
   useEffect(() => {
-    if (!chosen) return;
+    if (!chosen || locked) return;
     let cancelled = false;
     api<RepositoryDatabases>(`/api/projects/${encodeURIComponent(projectName)}/repository/databases`, {
       method: "POST",
@@ -323,7 +332,7 @@ export function RepositoryBranchPicker({
     return () => {
       cancelled = true;
     };
-  }, [chosen, projectName, repository.id]);
+  }, [chosen, locked, projectName, repository.id]);
 
   const matches = useMemo(
     () => (list.status === "ready" ? filterBranches(list.result.branches, search) : []),
@@ -371,7 +380,7 @@ export function RepositoryBranchPicker({
         project: projectName,
         repository: repository.id,
         branch: chosen,
-        update_databases: updateDatabases && !nothingToUpdate,
+        update_databases: updateDatabases && !nothingToUpdate && !locked,
       });
       if (job) changeOpen(false);
     } finally {
@@ -385,8 +394,8 @@ export function RepositoryBranchPicker({
         <button
           type="button"
           className="inline-flex h-6 max-w-full shrink-0 items-center gap-1 rounded-md border bg-background px-1.5 font-mono text-xs font-medium transition-colors hover:border-primary/50 hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-primary/60 data-[state=open]:bg-hover"
-          title={`Branche ${current || "inconnue"}${repository.commit ? ` · commit ${repository.commit}` : ""} — cliquer pour vérifier les mises à jour ou changer de branche`}
-          aria-label={`Branche ${current || "inconnue"}${repository.commit ? `, commit ${shortCommit(repository.commit)}` : ""} de ${repository.name} : vérifier les mises à jour ou changer de branche`}
+          title={`Branche ${current || "inconnue"}${repository.commit ? ` · commit ${repository.commit}` : ""} — cliquer pour vérifier les mises à jour${locked ? "" : " ou changer de branche"}`}
+          aria-label={`Branche ${current || "inconnue"}${repository.commit ? `, commit ${shortCommit(repository.commit)}` : ""} de ${repository.name} : vérifier les mises à jour${locked ? "" : " ou changer de branche"}`}
         >
           <GitBranch className="h-3 w-3 shrink-0" aria-hidden="true" />
           <span className="truncate">{current || "branche ?"}</span>
@@ -431,12 +440,16 @@ export function RepositoryBranchPicker({
             <p className="text-muted-foreground">
               {updating ? updateEffect(repository, moduleCount, chosen) : switchEffect(repository, moduleCount, chosen)}
             </p>
-            <AffectedDatabases
-              databases={databases}
-              previous={updating ? "l’ancien commit" : "l’ancienne branche"}
-              update={updateDatabases}
-              onUpdateChange={setUpdateDatabases}
-            />
+            {locked ? (
+              <TrackedElsewhere list={list} />
+            ) : (
+              <AffectedDatabases
+                databases={databases}
+                previous={updating ? "l’ancien commit" : "l’ancienne branche"}
+                update={updateDatabases}
+                onUpdateChange={setUpdateDatabases}
+              />
+            )}
             <div className="flex justify-end gap-2">
               <Button type="button" size="sm" variant="ghost" onClick={() => setChosen("")}>
                 Retour
@@ -456,118 +469,184 @@ export function RepositoryBranchPicker({
         ) : (
           <div className="flex min-h-0 flex-col gap-2 p-2 [&>*]:shrink-0">
             <CommitStatus list={list} openUrl={openUrl} repository={repository} onUpdate={() => select(current)} />
-            <p className="px-1 pt-1 text-xs font-medium text-muted-foreground">Changer de branche</p>
-            <div className="flex items-center gap-1">
-              <div className="relative min-w-0 flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className="pl-9"
-                  value={search}
-                  onChange={(event) => {
-                    setSearch(event.target.value);
-                    setActive(0);
-                  }}
-                  onKeyDown={(event) =>
-                    handleListKeys(event, visible.length, active, setActive, (index) => {
-                      const branch = visible[index];
-                      if (branch) choose(branch.name);
-                    })
-                  }
-                  placeholder="Filtrer les branches"
-                  aria-label={`Filtrer les branches de ${repository.name}`}
-                  role="combobox"
-                  aria-expanded={visible.length > 0}
-                  aria-controls={listId}
-                  aria-activedescendant={visible.length ? `${listId}-${active}` : undefined}
-                  autoFocus
-                />
-              </div>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="h-8 w-8 shrink-0"
-                disabled={list.status === "loading" || (list.status === "ready" && list.refreshing)}
-                title="Relire le serveur"
-                aria-label="Relire le serveur"
-                onClick={reload}
-              >
-                <RefreshCcw
-                  className={cn(
-                    "h-4 w-4",
-                    (list.status === "loading" || (list.status === "ready" && list.refreshing)) && "animate-spin",
-                  )}
-                />
-              </Button>
-            </div>
-            <div
-              className={cn(
-                "max-h-72 min-h-24 !shrink overflow-y-auto rounded-md border",
-                // Place réservée pendant la lecture : la fenêtre choisit dès l'ouverture le côté où la
-                // liste tiendra, au lieu de s'ouvrir là où tient le seul message d'attente.
-                (list.status === "idle" || list.status === "loading") && "h-72",
-              )}
-              role="listbox"
-              id={listId}
-              aria-label={`Branches de ${repository.name}`}
-            >
-              {list.status === "loading" || list.status === "idle" ? (
-                <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Lecture des branches sur le serveur…
-                </p>
-              ) : list.status === "error" ? (
-                <p className="p-3 text-sm text-destructive">{list.error}</p>
-              ) : visible.length ? (
-                <div className="divide-y">
-                  {visible.map((branch, index) => {
-                    const isCurrent = branch.name === current;
-                    return (
-                      <button
-                        key={branch.name}
-                        id={`${listId}-${index}`}
-                        type="button"
-                        role="option"
-                        tabIndex={-1}
-                        aria-selected={isCurrent}
-                        aria-disabled={isCurrent}
-                        className={cn(
-                          "flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm",
-                          isCurrent ? "cursor-default bg-selected font-medium" : "hover:bg-hover",
-                          index === active && !isCurrent && "bg-hover ring-1 ring-inset ring-primary/40",
-                        )}
-                        onMouseMove={() => setActive(index)}
-                        onClick={() => choose(branch.name)}
-                      >
-                        <span className="flex min-w-0 items-center gap-2">
-                          {isCurrent ? (
-                            <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-                          ) : (
-                            <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                          )}
-                          <span className="truncate font-mono text-[13px]">{branch.name}</span>
-                        </span>
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {isCurrent ? "Actuelle" : branch.default ? "Par défaut" : ""}
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {matches.length > visible.length && (
-                    <p className="px-3 py-2 text-xs text-muted-foreground">
-                      {matches.length - visible.length} autre(s) : précise la recherche.
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <p className="p-3 text-sm text-muted-foreground">
-                  {search.trim() ? "Aucune branche ne correspond à cette recherche." : "Aucune branche sur le serveur."}
-                </p>
-              )}
-            </div>
+            {locked ? (
+              <p className="px-1 text-xs text-muted-foreground">
+                La branche {current || "?"} correspond à la version d’Odoo du projet : elle ne change pas d’ici.
+              </p>
+            ) : (
+              <BranchChooser
+                active={active}
+                choose={choose}
+                current={current}
+                list={list}
+                listId={listId}
+                matches={matches}
+                reload={reload}
+                repository={repository}
+                search={search}
+                setActive={setActive}
+                setSearch={setSearch}
+                visible={visible}
+              />
+            )}
           </div>
         )}
       </Popover.Content>
     </Popover.Root>
+  );
+}
+
+/** Le dépôt de production rangé dans odoo/ suit aussi ces fichiers : il les verra modifiés. */
+function TrackedElsewhere({ list }: { list: BranchList }) {
+  const trackedBy = list.status === "ready" ? list.result.tracked_by : "";
+  if (!trackedBy) return null;
+  return (
+    <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-200">
+      Ces fichiers sont aussi suivis par le dépôt {trackedBy} : après la mise à jour, il les verra modifiés. Ne les
+      enregistre pas (commit) dans ce dépôt sans le vouloir.
+    </p>
+  );
+}
+
+/** Recherche et liste des branches du serveur, pour changer de branche. */
+function BranchChooser({
+  active,
+  choose,
+  current,
+  list,
+  listId,
+  matches,
+  reload,
+  repository,
+  search,
+  setActive,
+  setSearch,
+  visible,
+}: {
+  active: number;
+  choose: (name: string) => void;
+  current: string;
+  list: BranchList;
+  listId: string;
+  matches: RepositoryBranches["branches"];
+  reload: () => void;
+  repository: ModuleRepository;
+  search: string;
+  setActive: (index: number) => void;
+  setSearch: (search: string) => void;
+  visible: RepositoryBranches["branches"];
+}) {
+  return (
+    <>
+      <p className="px-1 pt-1 text-xs font-medium text-muted-foreground">Changer de branche</p>
+      <div className="flex items-center gap-1">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-9"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setActive(0);
+            }}
+            onKeyDown={(event) =>
+              handleListKeys(event, visible.length, active, setActive, (index) => {
+                const branch = visible[index];
+                if (branch) choose(branch.name);
+              })
+            }
+            placeholder="Filtrer les branches"
+            aria-label={`Filtrer les branches de ${repository.name}`}
+            role="combobox"
+            aria-expanded={visible.length > 0}
+            aria-controls={listId}
+            aria-activedescendant={visible.length ? `${listId}-${active}` : undefined}
+            autoFocus
+          />
+        </div>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8 shrink-0"
+          disabled={list.status === "loading" || (list.status === "ready" && list.refreshing)}
+          title="Relire le serveur"
+          aria-label="Relire le serveur"
+          onClick={reload}
+        >
+          <RefreshCcw
+            className={cn(
+              "h-4 w-4",
+              (list.status === "loading" || (list.status === "ready" && list.refreshing)) && "animate-spin",
+            )}
+          />
+        </Button>
+      </div>
+      <div
+        className={cn(
+          "max-h-72 min-h-24 !shrink overflow-y-auto rounded-md border",
+          // Place réservée pendant la lecture : la fenêtre choisit dès l'ouverture le côté où la
+          // liste tiendra, au lieu de s'ouvrir là où tient le seul message d'attente.
+          (list.status === "idle" || list.status === "loading") && "h-72",
+        )}
+        role="listbox"
+        id={listId}
+        aria-label={`Branches de ${repository.name}`}
+      >
+        {list.status === "loading" || list.status === "idle" ? (
+          <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Lecture des branches sur le serveur…
+          </p>
+        ) : list.status === "error" ? (
+          <p className="p-3 text-sm text-destructive">{list.error}</p>
+        ) : visible.length ? (
+          <div className="divide-y">
+            {visible.map((branch, index) => {
+              const isCurrent = branch.name === current;
+              return (
+                <button
+                  key={branch.name}
+                  id={`${listId}-${index}`}
+                  type="button"
+                  role="option"
+                  tabIndex={-1}
+                  aria-selected={isCurrent}
+                  aria-disabled={isCurrent}
+                  className={cn(
+                    "flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left text-sm",
+                    isCurrent ? "cursor-default bg-selected font-medium" : "hover:bg-hover",
+                    index === active && !isCurrent && "bg-hover ring-1 ring-inset ring-primary/40",
+                  )}
+                  onMouseMove={() => setActive(index)}
+                  onClick={() => choose(branch.name)}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    {isCurrent ? (
+                      <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                    ) : (
+                      <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    )}
+                    <span className="truncate font-mono text-[13px]">{branch.name}</span>
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {isCurrent ? "Actuelle" : branch.default ? "Par défaut" : ""}
+                  </span>
+                </button>
+              );
+            })}
+            {matches.length > visible.length && (
+              <p className="px-3 py-2 text-xs text-muted-foreground">
+                {matches.length - visible.length} autre(s) : précise la recherche.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="p-3 text-sm text-muted-foreground">
+            {search.trim() ? "Aucune branche ne correspond à cette recherche." : "Aucune branche sur le serveur."}
+          </p>
+        )}
+      </div>
+    </>
   );
 }

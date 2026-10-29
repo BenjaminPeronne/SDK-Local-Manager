@@ -6790,7 +6790,8 @@ def switchable_repository(project, repository_id):
     - clone Git rangé dans addons-store : changement de branche sur place ;
     - archive SDK rangée dans addons-store : remplacée par un clone de la branche choisie ;
     - copie importée (`import:<url>#<branch>`) : ses modules sont réimportés depuis l'autre branche.
-    Odoo, Enterprise et les dépôts hors d'addons-store ne sont jamais modifiés.
+    Odoo (odoo/odoo) et Enterprise (`core`) suivent la version du projet : leur branche ne change pas,
+    seul son dernier commit est récupéré. Les dépôts hors d'addons-store ne sont jamais modifiés.
     """
     project = validate_project(project)
     repository_id = str(repository_id or "").strip()
@@ -6813,20 +6814,27 @@ def switchable_repository(project, repository_id):
             "branch": branch,
             "commit": commits.pop() if len(commits) == 1 else "",
             "modules": sorted(sources),
+            "core": False,
         }
     root = Path(repository_id)
     if not repository_id or not root.is_absolute():
         raise ValueError("Dépôt invalide.")
     variants = project_layout_variants(project)
     finder = module_checkout_finder(variants)
-    if (
-        git_checkouts.normalized(root.parent) not in variants["storage"]
-        or root.name in ENTERPRISE_REPOSITORY_NAMES
-        or not finder.is_checkout(root)
-    ):
-        raise ValueError("Seuls les dépôts rangés dans addons-store du projet changent de branche.")
-    # Chemin écrit depuis le projet, pas résolu : les liens d'odoo/addons en sont calculés en relatif.
-    root = project_addons_storage_parent(project) / root.name
+    odoo_source = project_odoo_root(project) / "odoo"
+    if not finder.is_checkout(root):
+        core = None
+    elif git_checkouts.normalized(root) in project_path_variants(odoo_source):
+        root, core = odoo_source, True
+    elif git_checkouts.normalized(root.parent) in variants["storage"]:
+        # Chemin écrit depuis le projet, pas résolu : les liens d'odoo/addons en sont calculés en relatif.
+        root, core = project_addons_storage_parent(project) / root.name, root.name in ENTERPRISE_REPOSITORY_NAMES
+    else:
+        core = None
+    if core is None:
+        raise ValueError(
+            "Seuls Odoo, Enterprise et les dépôts rangés dans addons-store du projet se mettent à jour d'ici."
+        )
     info = git_checkouts.read_checkout(root)
     if not info:
         raise RuntimeError(f"Lecture du dépôt {root.name} impossible.")
@@ -6836,7 +6844,7 @@ def switchable_repository(project, repository_id):
         except ValueError:
             raise ValueError(
                 f"L'archive {root.name} ne précise pas d'adresse sur le GitLab Sudokeys : "
-                "impossible de récupérer une autre branche."
+                "impossible de récupérer une autre branche ou une mise à jour."
             ) from None
         return {
             "kind": "sdk",
@@ -6845,6 +6853,7 @@ def switchable_repository(project, repository_id):
             "url": url,
             "branch": info["branch"],
             "commit": info["commit"],
+            "core": core,
         }
     return {
         "kind": "git",
@@ -6853,7 +6862,20 @@ def switchable_repository(project, repository_id):
         "url": "",
         "branch": info["branch"],
         "commit": info["commit"],
+        "core": core,
     }
+
+
+def enclosing_project_repository(project, root):
+    """Dépôt Git du projet qui suit aussi les fichiers de `root` (dépôt de production rangé dans odoo/) ; "" sinon."""
+    project_root = WORKSPACE / project
+    for directory in Path(root).parents:
+        if git_checkouts.git_directory(directory) is not None:
+            info = git_checkouts.read_checkout(directory) or {}
+            return info.get("remote_label") or directory.name
+        if directory == project_root:
+            break
+    return ""
 
 
 def checkout_git(creator, root, *arguments, timeout=60):
@@ -6933,6 +6955,9 @@ def repository_branches(project, repository_id):
         "commit": target["commit"],
         "remote_commit": remote_commit,
         "commit_status": repository_commit_status(creator, target, remote_commit),
+        # Odoo et Enterprise : branche liée à la version du projet, seule sa mise à jour est proposée.
+        "core": target["core"],
+        "tracked_by": enclosing_project_repository(project, target["root"]) if target["core"] else "",
         **details,
     }
 
@@ -7130,21 +7155,95 @@ def replace_archive_with_clone(job, creator, project, root, url, branch):
     """Remplace une archive SDK par un clone de `branch` ; l'archive est mise de côté, rétablie en cas d'échec."""
     staging = project_staging_imports_root(project)
     staging.mkdir(parents=True, exist_ok=True)
-    backup_root = WORKSPACE / ".odoo_manager_backups" / "repositories" / project
-    backup_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="repository-branch-", dir=staging) as temporary:
         checkout = Path(temporary) / root.name
         creator.clone(url, branch, checkout, log=job.add)
-        backup = unique_child(backup_root, root.name)
-        with job_control.protected(f"remplacement du dossier {root.name}"):
-            move_module_entry(root, backup)
-            try:
-                move_module_entry(checkout, root)
-            except BaseException:
-                if not (root.exists() or root.is_symlink()):
-                    move_module_entry(backup, root)
-                raise
-    job.add(f"Ancienne archive mise de côté : {backup}")
+        replace_with_staged_checkout(job, project, root, checkout)
+
+
+def refresh_core_archive(job, creator, project, root, url, branch):
+    """Remplace une archive SDK d'Odoo ou d'Enterprise par le dernier commit de `branch`, en archive.
+
+    Pas de dossier .git ajouté : le dépôt de production rangé dans odoo/ peut suivre ces fichiers,
+    il y verrait sinon un dépôt imbriqué. Le info.sdk garde ses autres champs et reçoit le nouveau commit.
+    """
+    staging = project_staging_imports_root(project)
+    staging.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="core-refresh-", dir=staging) as temporary:
+        checkout = Path(temporary) / root.name
+        creator.clone(url, branch, checkout, log=job.add)
+        code, output = checkout_git(creator, checkout, "rev-parse", "HEAD", timeout=30)
+        commit = output.strip()
+        if code or not git_checkouts.SHA_RE.match(commit):
+            raise RuntimeError(f"Commit récupéré de {root.name} illisible.")
+        remove_module_entry(checkout / ".git")
+        try:
+            info = json.loads((root / git_checkouts.SDK_INFO_FILE).read_text(encoding="utf-8", errors="replace"))
+        except (OSError, ValueError):
+            info = {}
+        if not isinstance(info, dict):
+            info = {}
+        info.update(commit=commit, active_branch=branch)
+        (checkout / git_checkouts.SDK_INFO_FILE).write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+        replace_with_staged_checkout(job, project, root, checkout)
+
+
+def replace_with_staged_checkout(job, project, root, checkout):
+    """Met `checkout` à la place de `root` ; l'ancien dossier est mis de côté, rétabli en cas d'échec."""
+    backup_root = WORKSPACE / ".odoo_manager_backups" / "repositories" / project
+    backup_root.mkdir(parents=True, exist_ok=True)
+    backup = unique_child(backup_root, root.name)
+    with job_control.protected(f"remplacement du dossier {root.name}"):
+        move_module_entry(root, backup)
+        try:
+            move_module_entry(checkout, root)
+        except BaseException:
+            if not (root.exists() or root.is_symlink()):
+                move_module_entry(backup, root)
+            raise
+    job.add(f"Ancien dossier mis de côté : {backup}")
+
+
+def refresh_core_repository_job(job, project, target, branch):
+    """Récupère le dernier commit de la branche d'Odoo ou d'Enterprise, puis relance Odoo s'il tournait."""
+    name, root = target["name"], target["root"]
+    if branch != target["branch"]:
+        raise ValueError(
+            f"{name} suit la version d'Odoo du projet (branche {target['branch'] or '?'}) : "
+            "seule sa mise à jour est possible, pas un changement de branche."
+        )
+    tracked_by = enclosing_project_repository(project, root)
+    creator = ProjectCreator(SETTINGS, WORKSPACE, project_service())
+    try:
+        if target["kind"] == "git":
+            switch_checkout_branch(job, creator, root, branch)
+        else:
+            refresh_core_archive(job, creator, project, root, target["url"], branch)
+        if name in ENTERPRISE_REPOSITORY_NAMES:
+            # Modules Enterprise apparus avec ce commit : reliés comme à la création du projet.
+            creator.link_modules(root, project_addons_link_parent(project), log=job.add, replace=False)
+    finally:
+        clear_project_module_cache(project)
+    commit = (git_checkouts.read_checkout(root) or {}).get("commit", "")
+    previous = target["commit"]
+    if commit and commit == previous:
+        job.add(f"{name} : aucun nouveau commit sur la branche {branch} (commit {commit[:7]}).")
+    else:
+        job.add(f"{name} : branche {branch} mise à jour, commit {previous[:7] or '?'} → {commit[:7] or '?'}.")
+    if tracked_by:
+        job.add(
+            f"Attention : ces fichiers sont aussi suivis par le dépôt {tracked_by}, qui les voit maintenant "
+            "modifiés. Ne les enregistre pas (commit) dans ce dépôt sans le vouloir."
+        )
+    job.result = {"kind": "repository_branch", "repository": name, "branch": branch, "commit": commit, "modules": []}
+    service = project_service()
+    if service.odoo_server_state(f"odoo-{project}") != "running":
+        job.add("Odoo est arrêté : il utilisera ce code à son prochain démarrage.")
+        return
+    job.add("Redémarrage d'Odoo pour charger ce code…")
+    restart_odoo_server(job, service, project)
+    service.wait_project_http(project, log=job.add)
+    job.add("Odoo a redémarré avec ce code.")
 
 
 def switch_repository_branch_job(job, project, repository_id, branch, update_databases=False):
@@ -7156,6 +7255,9 @@ def switch_repository_branch_job(job, project, repository_id, branch, update_dat
     """
     target = switchable_repository(project, repository_id)
     project = validate_project(project)
+    if target["core"]:
+        refresh_core_repository_job(job, project, target, branch)
+        return
     name, previous, previous_commit = target["name"], target["branch"], target["commit"]
     if target["kind"] == "import":
         job.add(
