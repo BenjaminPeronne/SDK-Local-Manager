@@ -128,10 +128,12 @@ class ModuleCommandFailureTests(unittest.TestCase):
             mock.patch.object(service, "database_is_neutralized", return_value=False),
             mock.patch.object(service, "stop_odoo_server"),
             mock.patch.object(service, "stream", return_value=0),
+            mock.patch.object(service, "_postgres_lines", return_value=["dromcom_mrp|installed"]) as module_states,
             mock.patch.object(service, "start_odoo_server") as start,
             mock.patch.object(service, "wait_project_http") as wait_http,
         ):
             service.run_odoo_module_command("DEMO", "demo", "dromcom_mrp", option="-i", log=lambda _line: None)
+        module_states.assert_called_once()
         start.assert_called_once()
         wait_http.assert_called_once()
 
