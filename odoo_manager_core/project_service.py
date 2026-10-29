@@ -470,6 +470,23 @@ def terminate_active_processes(wait_seconds=0.5):
                     pass
 
 
+# Nom de module accepté par Odoo (MODULE_NAME_RE d'odoo/modules/module.py). Depuis Odoo 19, un seul dossier
+# d'addons au nom refusé (« sudokeys-recette ») arrête toute installation ou mise à jour, sur toutes les bases.
+ODOO_MODULE_NAME_RE = re.compile(r"^\w{1,256}$")
+MODULE_MANIFEST_NAMES = ("__manifest__.py", "__openerp__.py")
+
+
+def odoo_module_link_name(name):
+    """Nom sous lequel relier un module dans odoo/addons : le sien, ou corrigé s'il est refusé par Odoo.
+
+    Odoo prend le nom du module dans celui du lien : « sudokeys-recette » devient « sudokeys_recette »,
+    le dossier d'origine n'est pas touché.
+    """
+    if ODOO_MODULE_NAME_RE.match(name):
+        return name
+    return re.sub(r"\W+", "_", name).strip("_")[:256] or "module"
+
+
 # Dernière ligne d'un traceback Python : « ValueError: … », mais aussi « psycopg2.errors.InsufficientPrivilege: … »,
 # dont la classe ne finit pas par Error. Les lignes de log Odoo (« odoo.service.server: … ») portent un préfixe
 # horodaté et sont traitées avant, une exception dotée d'un nom de module commence la ligne.
@@ -3185,6 +3202,7 @@ class ProjectService:
         job_progress.span("Préparation d'Odoo", share=0.12, expected=20)
         self.ensure_odoo_containers_ready(project, log=log)
         self.install_project_pip_requirements(project, log=log)
+        modules = self.repair_invalid_module_links(project, modules, log=log)
 
         action = "installation" if option == "-i" else "mise à jour"
         extra_args = ["--i18n-overwrite"] if overwrite_translations else []
@@ -3303,6 +3321,52 @@ class ProjectService:
         self.wait_project_http(project, log=log)
         self.log(log, "Opération module terminée.")
         self.log(log, f"URL Odoo: {self.project_url(project)}")
+
+    def repair_invalid_module_links(self, project, modules, log=None):
+        """Renomme les liens d'odoo/addons dont Odoo refuse le nom ; renvoie `modules` sous les noms corrigés.
+
+        Depuis Odoo 19, un seul module au nom refusé (« sudokeys-recette ») fait échouer toute installation
+        ou mise à jour, quel que soit le module demandé. Le lien est renommé (« sudokeys_recette »), le
+        dossier qu'il désigne n'est pas touché. Un vrai dossier, ou un nom corrigé déjà pris par un autre
+        module, arrête l'opération avec l'action à faire.
+        """
+        addons = self.project_path(project) / "odoo" / "addons"
+        try:
+            entries = sorted(entry for entry in addons.iterdir() if not ODOO_MODULE_NAME_RE.match(entry.name))
+        except OSError:
+            entries = []
+        blocked = []
+        for entry in entries:
+            # Odoo ne lit que les dossiers qui ont un manifeste : un fichier ou un dossier caché ne le gêne pas.
+            if entry.name.startswith(".") or not any((entry / name).is_file() for name in MODULE_MANIFEST_NAMES):
+                continue
+            target = addons / odoo_module_link_name(entry.name)
+            try:
+                if entry.is_symlink() and not (target.exists() or target.is_symlink()):
+                    entry.rename(target)
+                elif entry.is_symlink() and target.resolve() == entry.resolve():
+                    entry.unlink()
+                else:
+                    blocked.append(entry.name)
+                    continue
+            except OSError:
+                blocked.append(entry.name)
+                continue
+            self.log(log, f"Odoo refuse le nom de module « {entry.name} » : lien renommé en « {target.name} ».")
+        if blocked:
+            names = ", ".join(f"« {name} »" for name in blocked)
+            fixes = ", ".join(f"« {odoo_module_link_name(name)} »" for name in blocked)
+            raise OdooError(
+                f"Odoo refuse le nom du module {names} (dans odoo/addons) : seuls les lettres, les chiffres et « _ » "
+                "sont permis, et Odoo s'arrête dessus à chaque installation ou mise à jour. Renomme ce dossier en "
+                f"{fixes}, puis relance."
+            )
+        requested = [name.strip() for name in str(modules).split(",") if name.strip()]
+        corrected = [odoo_module_link_name(name) for name in requested]
+        for before, after in zip(requested, corrected, strict=True):
+            if before != after:
+                self.log(log, f"Module « {before} » demandé sous le nom accepté par Odoo : « {after} ».")
+        return ",".join(corrected)
 
     @staticmethod
     def odoo_error_detail(lines):

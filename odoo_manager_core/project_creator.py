@@ -24,7 +24,7 @@ from .platform import (
     wsl_command_prefix,
     wsl_execution_path,
 )
-from .project_service import add_postgres_healthcheck_start_period
+from .project_service import add_postgres_healthcheck_start_period, odoo_module_link_name
 from .tls import trusted_ssl_context
 from .windows_links import contains_wsl_symlink, native_symlinks_supported
 
@@ -570,7 +570,7 @@ class ProjectCreator:
         ]
         total = len(modules)
         for index, module in enumerate(modules, start=1):
-            link = f"{addons_wsl}/{module.name}"
+            link = f"{addons_wsl}/{odoo_module_link_name(module.name)}"
             relative = str(Path(os.path.relpath(module, addons_dir))).replace("\\", "/")
             quoted_link = shlex.quote(link)
             quoted_relative = shlex.quote(relative)
@@ -639,7 +639,11 @@ class ProjectCreator:
 
         linked = 0
         for module in modules:
-            link = addons_dir / module.name
+            link = addons_dir / odoo_module_link_name(module.name)
+            if link.name != module.name:
+                self.log(
+                    log, f"Module {module.name} relié sous le nom {link.name} : Odoo refuse les tirets et les espaces."
+                )
             if self.path_entry_exists(link):
                 if not replace:
                     continue

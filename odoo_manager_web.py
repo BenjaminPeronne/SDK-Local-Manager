@@ -5945,8 +5945,11 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
                 log=log,
                 overwrite_translations=overwrite_translations,
             )
+            # Un lien au nom refusé par Odoo a pu être renommé : la liste des modules est relue.
+            clear_project_module_cache(project)
             return
         except RuntimeError as exc:
+            clear_project_module_cache(project)
             message = str(exc)
             command_log = "\n".join(command_lines)
             conflict = data_conflicts.find_data_conflict(command_log)

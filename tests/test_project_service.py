@@ -1213,6 +1213,53 @@ class ProjectServiceTests(unittest.TestCase):
 
         self.assertNotIn("demande le fichier", str(raised.exception))
 
+    def add_module(self, folder, name):
+        module = self.project_path / "odoo/addons-store" / folder / name
+        module.mkdir(parents=True)
+        (module / "__manifest__.py").write_text("{'name': 'Recette'}")
+        return module
+
+    def test_module_link_refused_by_odoo_is_renamed_before_the_command(self):
+        # Odoo 19 s'arrête sur « Invalid module name: sudokeys-recette » quel que soit le module demandé.
+        self.add_module("sudokeys-recette", "")
+        addons = self.project_path / "odoo/addons"
+        addons.mkdir(parents=True)
+        (addons / "sudokeys-recette").symlink_to("../addons-store/sudokeys-recette")
+        (addons / "sale_custom").symlink_to("../addons-store/sudokeys-recette")
+        (addons / "notes-perso.txt").write_text("pas un module")
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        logs = []
+
+        self.service.run_odoo_module_command("DEMO", "demo", "sudokeys-recette", option="-i", log=logs.append)
+
+        self.assertFalse((addons / "sudokeys-recette").is_symlink())
+        self.assertTrue((addons / "sudokeys_recette/__manifest__.py").is_file())
+        self.assertTrue((addons / "notes-perso.txt").is_file())
+        install = [command for command, _cwd in self.runner.streams if "--stop-after-init" in command[-1]]
+        self.assertIn("-d demo -i sudokeys_recette --stop-after-init", install[-1][-1])
+        self.assertIn("Odoo refuse le nom de module « sudokeys-recette » : lien renommé en « sudokeys_recette ».", logs)
+
+    def test_module_link_already_present_under_the_accepted_name_is_dropped(self):
+        self.add_module("sudokeys-recette", "")
+        addons = self.project_path / "odoo/addons"
+        addons.mkdir(parents=True)
+        for name in ("sudokeys-recette", "sudokeys_recette"):
+            (addons / name).symlink_to("../addons-store/sudokeys-recette")
+
+        self.assertEqual("sale", self.service.repair_invalid_module_links("DEMO", "sale"))
+
+        self.assertEqual(["sudokeys_recette"], sorted(entry.name for entry in addons.iterdir()))
+
+    def test_module_folder_refused_by_odoo_stops_with_the_name_to_use(self):
+        addons = self.project_path / "odoo/addons"
+        (addons / "sudokeys-recette").mkdir(parents=True)
+        (addons / "sudokeys-recette/__manifest__.py").write_text("{'name': 'Recette'}")
+
+        with self.assertRaisesRegex(RuntimeError, "Renomme ce dossier en « sudokeys_recette »"):
+            self.service.repair_invalid_module_links("DEMO", "sale")
+        self.assertTrue((addons / "sudokeys-recette").is_dir())
+
     STALE_VIEW_FIELD_OUTPUT = [
         "2026-10-29 13:57:56,406 2588 CRITICAL demo odoo.service.server: Failed to initialize database `demo`.",
         "Traceback (most recent call last):",

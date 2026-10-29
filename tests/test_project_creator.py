@@ -378,6 +378,24 @@ class ProjectCreatorTests(unittest.TestCase):
         self.assertIn("Préparation des liens: 2/2", runner.batch_script)
         self.assertFalse((addons / ".odoo_manager_links.sh").exists())
 
+    @mock.patch("odoo_manager_core.project_creator.platform_id", return_value="linux")
+    def test_module_refused_by_odoo_is_linked_under_the_accepted_name(self, _platform):
+        # Dépôt dont la racine est le module : son dossier porte le nom du dépôt, tiret compris.
+        project = self.workspace / "DEMO"
+        module = project / "odoo" / "addons-store" / "sudokeys-recette"
+        addons = project / "odoo" / "addons"
+        module.mkdir(parents=True)
+        addons.mkdir(parents=True)
+        (module / "__manifest__.py").write_text("{}\n", encoding="utf-8")
+        logs = []
+
+        linked = self.creator(FakeRunner()).link_modules(module, addons, log=logs.append)
+
+        self.assertEqual(1, linked)
+        self.assertEqual(["sudokeys_recette"], [entry.name for entry in addons.iterdir()])
+        self.assertTrue((addons / "sudokeys_recette" / "__manifest__.py").is_file())
+        self.assertTrue(any("relié sous le nom sudokeys_recette" in line for line in logs))
+
     def test_module_directories_ignores_hidden_directories(self):
         source = self.workspace / "repository"
         for relative in ("module_alpha", ".sandcastle/module_alpha", ".venv/lib/module_beta"):
