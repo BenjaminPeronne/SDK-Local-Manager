@@ -1224,8 +1224,10 @@ class ProjectServiceTests(unittest.TestCase):
         self.add_module("sudokeys-recette", "")
         addons = self.project_path / "odoo/addons"
         addons.mkdir(parents=True)
-        (addons / "sudokeys-recette").symlink_to("../addons-store/sudokeys-recette")
-        (addons / "sale_custom").symlink_to("../addons-store/sudokeys-recette")
+        # Lien de dossier, chemin aux séparateurs du système : sous Windows, un lien de fichier ne se parcourt pas.
+        target = Path("..", "addons-store", "sudokeys-recette")
+        (addons / "sudokeys-recette").symlink_to(target, target_is_directory=True)
+        (addons / "sale_custom").symlink_to(target, target_is_directory=True)
         (addons / "notes-perso.txt").write_text("pas un module")
         self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
         self.runner.odoo_server_running = False
@@ -1245,7 +1247,7 @@ class ProjectServiceTests(unittest.TestCase):
         addons = self.project_path / "odoo/addons"
         addons.mkdir(parents=True)
         for name in ("sudokeys-recette", "sudokeys_recette"):
-            (addons / name).symlink_to("../addons-store/sudokeys-recette")
+            (addons / name).symlink_to(Path("..", "addons-store", "sudokeys-recette"), target_is_directory=True)
 
         self.assertEqual("sale", self.service.repair_invalid_module_links("DEMO", "sale"))
 
