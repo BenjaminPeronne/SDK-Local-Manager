@@ -21,6 +21,7 @@ from .command_output import (
     partially_initialized_import,
     python_package_for_import,
 )
+from .manifests import read_manifest_dict
 from .platform import (
     command_uses_wsl,
     executable_search_path,
@@ -476,14 +477,27 @@ ODOO_MODULE_NAME_RE = re.compile(r"^\w{1,256}$")
 MODULE_MANIFEST_NAMES = ("__manifest__.py", "__openerp__.py")
 
 
-def odoo_module_link_name(name):
-    """Nom sous lequel relier un module dans odoo/addons : le sien, ou corrigé s'il est refusé par Odoo.
-
-    Odoo prend le nom du module dans celui du lien : « sudokeys-recette » devient « sudokeys_recette »,
-    le dossier d'origine n'est pas touché.
-    """
+def odoo_module_link_name(name, module_path=None):
+    """Nom de lien accepté par Odoo, avec le nom déclaré par les ressources du module si disponible."""
     if ODOO_MODULE_NAME_RE.match(name):
         return name
+    if module_path is not None:
+        # Un dépôt peut avoir un nom avec tiret alors que son module garde un nom technique
+        # différent. Les chemins des ressources statiques sont qualifiés par ce nom Odoo.
+        assets = read_manifest_dict(module_path).get("assets")
+        if isinstance(assets, dict):
+            namespaces = set()
+            for paths in assets.values():
+                if not isinstance(paths, (list, tuple)):
+                    continue
+                for asset in paths:
+                    if not isinstance(asset, str):
+                        continue
+                    namespace, separator, _relative = asset.partition("/static/")
+                    if separator and ODOO_MODULE_NAME_RE.fullmatch(namespace) and (Path(module_path) / "static").is_dir():
+                        namespaces.add(namespace)
+            if len(namespaces) == 1:
+                return namespaces.pop()
     return re.sub(r"\W+", "_", name).strip("_")[:256] or "module"
 
 
@@ -3309,6 +3323,26 @@ class ProjectService:
                     self.log(log, f"Le champ manquant vient d'un autre module de la base. {stale_code}")
                     reason = stale_code
                 raise OdooError(f"La commande Odoo a échoué avec le code {code}. {reason}")
+            if option == "-i":
+                requested = [name.strip() for name in modules.split(",") if name.strip()]
+                names = ", ".join(data_conflicts.sql_literal(name) for name in requested)
+                states = dict(
+                    line.split("|", 1)
+                    for line in self._postgres_lines(
+                        project,
+                        db_name,
+                        "SELECT name || '|' || state FROM ir_module_module "
+                        f"WHERE name IN ({names});",
+                    )
+                    if "|" in line
+                )
+                missing = [name for name in requested if states.get(name) != "installed"]
+                if missing:
+                    details = ", ".join(f"{name} ({states.get(name, 'absent')})" for name in missing)
+                    raise OdooError(
+                        f"Odoo a terminé sans installer le ou les modules suivants : {details}. "
+                        "Vérifie que leur lien dans odoo/addons pointe vers un dossier contenant __manifest__.py."
+                    )
             if was_neutralized:
                 self.log(log, "La base était neutralisée: nouvelle passe après l'opération module...")
                 self._execute_database_neutralization(project, db_name, log=log)
@@ -3323,29 +3357,47 @@ class ProjectService:
         self.log(log, f"URL Odoo: {self.project_url(project)}")
 
     def repair_invalid_module_links(self, project, modules, log=None):
-        """Renomme les liens d'odoo/addons dont Odoo refuse le nom ; renvoie `modules` sous les noms corrigés.
+        """Corrige les liens d'addons invalides et renvoie les noms techniques des modules demandés.
 
-        Depuis Odoo 19, un seul module au nom refusé (« sudokeys-recette ») fait échouer toute installation
-        ou mise à jour, quel que soit le module demandé. Le lien est renommé (« sudokeys_recette »), le
-        dossier qu'il désigne n'est pas touché. Un vrai dossier, ou un nom corrigé déjà pris par un autre
-        module, arrête l'opération avec l'action à faire.
+        Depuis Odoo 19, un seul module au nom refusé fait échouer toute installation ou mise à jour.
+        Si le même dossier est déjà lié sous un nom valide, le lien invalide est un alias : il est retiré
+        et la demande utilise le nom existant. Sinon, le lien est renommé sous un nom accepté par Odoo.
+        Un vrai dossier ou une collision avec un autre module arrête l'opération.
         """
         addons = self.project_path(project) / "odoo" / "addons"
         try:
-            entries = sorted(entry for entry in addons.iterdir() if not ODOO_MODULE_NAME_RE.match(entry.name))
+            all_entries = list(addons.iterdir())
         except OSError:
-            entries = []
+            all_entries = []
+        entries = sorted(entry for entry in all_entries if not ODOO_MODULE_NAME_RE.match(entry.name))
+        valid_links_by_source = {
+            entry.resolve(): entry.name
+            for entry in sorted(all_entries)
+            if ODOO_MODULE_NAME_RE.match(entry.name)
+            and any((entry / name).is_file() for name in MODULE_MANIFEST_NAMES)
+        }
         blocked = []
+        aliases = {}
         for entry in entries:
             # Odoo ne lit que les dossiers qui ont un manifeste : un fichier ou un dossier caché ne le gêne pas.
             if entry.name.startswith(".") or not any((entry / name).is_file() for name in MODULE_MANIFEST_NAMES):
                 continue
-            target = addons / odoo_module_link_name(entry.name)
+            target = addons / odoo_module_link_name(entry.name, entry)
             try:
+                canonical_name = valid_links_by_source.get(entry.resolve()) if entry.is_symlink() else None
+                if canonical_name:
+                    entry.unlink()
+                    aliases[entry.name] = canonical_name
+                    self.log(
+                        log, f"Lien invalide « {entry.name} » retiré : ce module est déjà relié sous « {canonical_name} »."
+                    )
+                    continue
                 if entry.is_symlink() and not (target.exists() or target.is_symlink()):
                     entry.rename(target)
+                    aliases[entry.name] = target.name
                 elif entry.is_symlink() and target.resolve() == entry.resolve():
                     entry.unlink()
+                    aliases[entry.name] = target.name
                 else:
                     blocked.append(entry.name)
                     continue
@@ -3355,14 +3407,14 @@ class ProjectService:
             self.log(log, f"Odoo refuse le nom de module « {entry.name} » : lien renommé en « {target.name} ».")
         if blocked:
             names = ", ".join(f"« {name} »" for name in blocked)
-            fixes = ", ".join(f"« {odoo_module_link_name(name)} »" for name in blocked)
+            fixes = ", ".join(f"« {odoo_module_link_name(name, addons / name)} »" for name in blocked)
             raise OdooError(
                 f"Odoo refuse le nom du module {names} (dans odoo/addons) : seuls les lettres, les chiffres et « _ » "
                 "sont permis, et Odoo s'arrête dessus à chaque installation ou mise à jour. Renomme ce dossier en "
                 f"{fixes}, puis relance."
             )
         requested = [name.strip() for name in str(modules).split(",") if name.strip()]
-        corrected = [odoo_module_link_name(name) for name in requested]
+        corrected = [aliases.get(name, odoo_module_link_name(name)) for name in requested]
         for before, after in zip(requested, corrected, strict=True):
             if before != after:
                 self.log(log, f"Module « {before} » demandé sous le nom accepté par Odoo : « {after} ».")

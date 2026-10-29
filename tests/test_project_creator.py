@@ -396,6 +396,25 @@ class ProjectCreatorTests(unittest.TestCase):
         self.assertTrue((addons / "sudokeys_recette" / "__manifest__.py").is_file())
         self.assertTrue(any("relié sous le nom sudokeys_recette" in line for line in logs))
 
+    @mock.patch("odoo_manager_core.project_creator.platform_id", return_value="linux")
+    def test_repository_name_does_not_replace_module_namespace(self, _platform):
+        project = self.workspace / "DEMO"
+        module = project / "odoo" / "addons-store" / "sudokeys-recette"
+        addons = project / "odoo" / "addons"
+        (module / "static/src").mkdir(parents=True)
+        addons.mkdir(parents=True)
+        (module / "__manifest__.py").write_text(
+            "{'name': 'Recette', 'assets': {'web.assets_backend': "
+            "['sudokeys_uat/static/src/**/*']}}",
+            encoding="utf-8",
+        )
+
+        linked = self.creator(FakeRunner()).link_modules(module, addons)
+
+        self.assertEqual(1, linked)
+        self.assertTrue((addons / "sudokeys_uat").is_symlink())
+        self.assertFalse((addons / "sudokeys_recette").exists())
+
     def test_module_directories_ignores_hidden_directories(self):
         source = self.workspace / "repository"
         for relative in ("module_alpha", ".sandcastle/module_alpha", ".venv/lib/module_beta"):

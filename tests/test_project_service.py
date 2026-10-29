@@ -134,6 +134,9 @@ class FakeRunner:
             for fragment, result in self.database_query_outputs.items():
                 if fragment in query:
                     return 0, result
+            if "SELECT name || '|' || state FROM ir_module_module WHERE name IN" in query:
+                names = [name.strip().strip("'") for name in query.partition("IN (")[2].partition(")")[0].split(",")]
+                return 0, "\n".join(f"{name}|installed" for name in names)
         if command[-3:] == ["compose", "ps", "-aq"]:
             output = "\n".join(self.compose_container_ids)
             return (0, output) if output else (0, "")
@@ -1227,7 +1230,6 @@ class ProjectServiceTests(unittest.TestCase):
         # Lien de dossier, chemin aux séparateurs du système : sous Windows, un lien de fichier ne se parcourt pas.
         target = Path("..", "addons-store", "sudokeys-recette")
         (addons / "sudokeys-recette").symlink_to(target, target_is_directory=True)
-        (addons / "sale_custom").symlink_to(target, target_is_directory=True)
         (addons / "notes-perso.txt").write_text("pas un module")
         self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
         self.runner.odoo_server_running = False
@@ -1252,6 +1254,59 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertEqual("sale", self.service.repair_invalid_module_links("DEMO", "sale"))
 
         self.assertEqual(["sudokeys_recette"], sorted(entry.name for entry in addons.iterdir()))
+
+    def test_repository_alias_uses_existing_module_name(self):
+        # Le dépôt s'appelle sudokeys-recette, mais le module et ses XML IDs s'appellent sudokeys_uat.
+        self.add_module("sudokeys_uat", "")
+        addons = self.project_path / "odoo/addons"
+        addons.mkdir(parents=True)
+        source = Path("..", "addons-store", "sudokeys_uat")
+        (addons / "sudokeys_uat").symlink_to(source, target_is_directory=True)
+        (addons / "sudokeys-recette").symlink_to(source, target_is_directory=True)
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        logs = []
+
+        self.service.run_odoo_module_command("DEMO", "demo", "sudokeys-recette", option="-i", log=logs.append)
+
+        self.assertFalse((addons / "sudokeys-recette").is_symlink())
+        self.assertFalse((addons / "sudokeys_recette").exists())
+        self.assertTrue((addons / "sudokeys_uat").is_symlink())
+        install = [command for command, _cwd in self.runner.streams if "--stop-after-init" in command[-1]]
+        self.assertIn("-d demo -i sudokeys_uat --stop-after-init", install[-1][-1])
+        self.assertTrue(any("déjà relié sous « sudokeys_uat »" in line for line in logs))
+
+    def test_repository_folder_uses_module_namespace_from_manifest_assets(self):
+        module = self.add_module("sudokeys-recette", "")
+        (module / "static/src").mkdir(parents=True)
+        (module / "__manifest__.py").write_text(
+            "{'name': 'Recette', 'assets': {'web.assets_backend': "
+            "['sudokeys_uat/static/src/**/*']}}"
+        )
+        addons = self.project_path / "odoo/addons"
+        addons.mkdir(parents=True)
+        (addons / "sudokeys-recette").symlink_to(
+            Path("..", "addons-store", "sudokeys-recette"), target_is_directory=True
+        )
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+
+        self.service.run_odoo_module_command("DEMO", "demo", "sudokeys-recette", option="-i")
+
+        self.assertTrue((addons / "sudokeys_uat").is_symlink())
+        self.assertFalse((addons / "sudokeys_recette").exists())
+        install = [command for command, _cwd in self.runner.streams if "--stop-after-init" in command[-1]]
+        self.assertIn("-d demo -i sudokeys_uat --stop-after-init", install[-1][-1])
+
+    def test_install_reports_module_skipped_even_when_odoo_exits_successfully(self):
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        self.runner.database_query_outputs[
+            "SELECT name || '|' || state FROM ir_module_module WHERE name IN"
+        ] = "sudokeys_uat|to install"
+
+        with self.assertRaisesRegex(OdooError, "sudokeys_uat \\(to install\\)"):
+            self.service.run_odoo_module_command("DEMO", "demo", "sudokeys_uat", option="-i")
 
     def test_module_folder_refused_by_odoo_stops_with_the_name_to_use(self):
         addons = self.project_path / "odoo/addons"

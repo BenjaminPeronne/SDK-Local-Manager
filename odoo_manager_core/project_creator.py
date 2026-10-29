@@ -570,7 +570,7 @@ class ProjectCreator:
         ]
         total = len(modules)
         for index, module in enumerate(modules, start=1):
-            link = f"{addons_wsl}/{odoo_module_link_name(module.name)}"
+            link = f"{addons_wsl}/{odoo_module_link_name(module.name, module)}"
             relative = str(Path(os.path.relpath(module, addons_dir))).replace("\\", "/")
             quoted_link = shlex.quote(link)
             quoted_relative = shlex.quote(relative)
@@ -639,7 +639,7 @@ class ProjectCreator:
 
         linked = 0
         for module in modules:
-            link = addons_dir / odoo_module_link_name(module.name)
+            link = addons_dir / odoo_module_link_name(module.name, module)
             if link.name != module.name:
                 self.log(
                     log, f"Module {module.name} relié sous le nom {link.name} : Odoo refuse les tirets et les espaces."
