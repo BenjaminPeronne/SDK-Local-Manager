@@ -84,6 +84,7 @@ def main():
     run([sys.executable, str(ROOT / "scripts/smoke_test_sidecar.py")])
     run(["npm", "run", "typecheck"], cwd=FRONTEND)
     run(["npm", "run", "test:desktop"], cwd=FRONTEND)
+    run(["npm", "run", "test:lib"], cwd=FRONTEND)
     run(["npm", "run", "build:desktop"], cwd=FRONTEND)
     if platform.system() == "Darwin" and shutil.which("xattr"):
         for directory in ("out", "electron"):
