@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CalendarPlus, Loader2, Timer } from "lucide-react";
+import { CalendarPlus, Loader2, Timer, Trash2 } from "lucide-react";
 import { deletionLabel, deletionMoment, type UpcomingDeletion } from "@/lib/retention";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ type RetentionNoticeProps = {
   deletions: UpcomingDeletion[];
   extending: string;
   extendDatabasesRetention: (databases: { project: string; db: string }[]) => Promise<boolean>;
+  deleteDatabases: (databases: { project: string; db: string }[]) => Promise<string[]>;
 };
 
 const RETENTION_RULE =
@@ -33,7 +34,12 @@ function deletionKey(deletion: UpcomingDeletion) {
  * Bandeau d'une ligne : la liste complète, longue dès qu'on restaure souvent des bases, s'ouvre
  * dans une fenêtre où l'on coche celles à garder. Une base seule se garde directement.
  */
-export function RetentionNotice({ deletions, extending, extendDatabasesRetention }: RetentionNoticeProps) {
+export function RetentionNotice({
+  deletions,
+  extending,
+  extendDatabasesRetention,
+  deleteDatabases,
+}: RetentionNoticeProps) {
   const [open, setOpen] = useState(false);
   const soonest = deletions[0];
   if (!soonest) return null;
@@ -48,16 +54,22 @@ export function RetentionNotice({ deletions, extending, extendDatabasesRetention
         title={single ? "Une base sera bientôt supprimée" : `${deletions.length} bases seront bientôt supprimées`}
         actions={
           single ? (
-            <Button
-              className="w-full sm:w-auto"
-              size="sm"
-              variant="outline"
-              disabled={Boolean(extending)}
-              onClick={() => void extendDatabasesRetention([{ project: soonest.project, db: soonest.db }])}
-            >
-              {extending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarPlus className="h-4 w-4" />}
-              Garder 30 jours de plus
-            </Button>
+            <>
+              <Button
+                className="w-full sm:w-auto"
+                size="sm"
+                variant="outline"
+                disabled={Boolean(extending)}
+                onClick={() => void extendDatabasesRetention([{ project: soonest.project, db: soonest.db }])}
+              >
+                {extending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarPlus className="h-4 w-4" />}
+                Garder 30 jours de plus
+              </Button>
+              <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => setOpen(true)}>
+                <Trash2 className="h-4 w-4" />
+                Supprimer
+              </Button>
+            </>
           ) : (
             <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => setOpen(true)}>
               <CalendarPlus className="h-4 w-4" />
@@ -77,15 +89,14 @@ export function RetentionNotice({ deletions, extending, extendDatabasesRetention
           </>
         )}
       </Notice>
-      {!single && (
-        <RetentionDialog
-          open={open}
-          onOpenChange={setOpen}
-          deletions={deletions}
-          extending={extending}
-          extendDatabasesRetention={extendDatabasesRetention}
-        />
-      )}
+      <RetentionDialog
+        open={open}
+        onOpenChange={setOpen}
+        deletions={deletions}
+        extending={extending}
+        extendDatabasesRetention={extendDatabasesRetention}
+        deleteDatabases={deleteDatabases}
+      />
     </>
   );
 }
@@ -96,10 +107,13 @@ function RetentionDialog({
   deletions,
   extending,
   extendDatabasesRetention,
+  deleteDatabases,
 }: RetentionNoticeProps & { open: boolean; onOpenChange: (open: boolean) => void }) {
   // Rien de coché d'office : garder une base de client plus longtemps doit rester un choix.
   const [checked, setChecked] = useState<Set<string>>(new Set());
-  const busy = Boolean(extending);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const busy = Boolean(extending) || deleting;
 
   // Regroupées par projet, dans l'ordre de la première suppression de chacun.
   const groups = useMemo(() => {
@@ -114,6 +128,7 @@ function RetentionDialog({
   const allChecked = selected.length === deletions.length;
 
   function toggle(keys: string[], keep: boolean) {
+    setConfirmDelete(false);
     setChecked((current) => {
       const next = new Set(current);
       for (const key of keys) {
@@ -129,12 +144,25 @@ function RetentionDialog({
     if (done) onOpenChange(false);
   }
 
+  async function deleteSelected() {
+    setDeleting(true);
+    try {
+      const submitted = await deleteDatabases(selected.map(({ project, db }) => ({ project, db })));
+      setChecked((current) => new Set([...current].filter((key) => !submitted.includes(key))));
+      setConfirmDelete(false);
+      if (submitted.length === selected.length) onOpenChange(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
         if (busy) return;
         if (next) setChecked(new Set());
+        setConfirmDelete(false);
         onOpenChange(next);
       }}
     >
@@ -142,7 +170,7 @@ function RetentionDialog({
         <DialogHeader>
           <DialogTitle>Bases bientôt supprimées</DialogTitle>
           <DialogDescription>
-            {RETENTION_RULE} Coche celles dont tu as encore besoin : elles seront gardées 30 jours de plus.
+            {RETENTION_RULE} Sélectionne les bases à garder plus longtemps ou à supprimer maintenant.
           </DialogDescription>
         </DialogHeader>
 
@@ -208,8 +236,22 @@ function RetentionDialog({
         </div>
 
         <DialogFooter>
+          {confirmDelete && (
+            <p className="text-sm text-red-700 dark:text-red-300 sm:mr-auto">
+              Les {selected.length} base{selected.length > 1 ? "s" : ""} sélectionnée{selected.length > 1 ? "s" : ""} et
+              leurs fichiers seront supprimés définitivement.
+            </p>
+          )}
           <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
             Plus tard
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={busy || !selected.length}
+            onClick={() => (confirmDelete ? void deleteSelected() : setConfirmDelete(true))}
+          >
+            {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            {confirmDelete ? "Confirmer la suppression" : "Supprimer la sélection"}
           </Button>
           <Button disabled={busy || !selected.length} onClick={() => void keepSelected()}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarPlus className="h-4 w-4" />}

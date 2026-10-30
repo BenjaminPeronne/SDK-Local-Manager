@@ -1805,6 +1805,14 @@ export default function Home() {
                   deletions={retentionDeletions}
                   extending={extendingRetention}
                   extendDatabasesRetention={extendDatabasesRetention}
+                  deleteDatabases={async (databases) => {
+                    const submitted: string[] = [];
+                    for (const { project, db } of databases) {
+                      const job = await createJob("drop_retention_database", { project, db });
+                      if (job) submitted.push(`${project}/${db}`);
+                    }
+                    return submitted;
+                  }}
                 />
               )}
               {(systemStatus?.abandoned_staging?.count ?? 0) > 0 && (

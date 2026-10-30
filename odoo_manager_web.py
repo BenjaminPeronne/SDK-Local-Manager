@@ -269,6 +269,7 @@ API_ACTIONS = (
     "scan_disk_usage",
     "create_test_user",
     "drop_database",
+    "drop_retention_database",
     "duplicate_database",
     "fix_expired_database",
     "ignore_missing_modules_locally",
@@ -3294,6 +3295,10 @@ JOB_CANCEL_POLICIES = {
         True,
         "Possible tant que la suppression n'a pas commencé dans PostgreSQL ; ensuite elle va à son terme.",
     ),
+    "drop_retention_database_job": (
+        True,
+        "Possible tant que la suppression n'a pas commencé dans PostgreSQL ; ensuite elle va à son terme.",
+    ),
     "delete_project_job": (
         True,
         "Possible pendant l'arrêt des conteneurs : le projet est conservé. Le déplacement du dossier ne peut pas être interrompu.",
@@ -4557,6 +4562,10 @@ RETENTION_FAILURES = {}
 # Les contrôles passent un par un : au premier lancement, chaque projet arrêté démarre ses
 # conteneurs le temps d'être relevé.
 RETENTION_RESOURCE = "database-retention"
+RETENTION_DECISION_LOCK = threading.Lock()
+# Après une suppression échouée, son résultat peut être partiel : ne pas promettre de
+# conserver la base avant une vérification par l'utilisateur, même si sa fiche existe encore.
+RETENTION_DELETION_UNCERTAIN = set()
 RETENTION_LIST_ATTEMPTS = 15
 RETENTION_RULE_MESSAGE = (
     "Pour protéger les données des clients, une base est supprimée 30 jours après son arrivée sur "
@@ -4578,6 +4587,28 @@ def drop_expired_database(job, project, db_name):
     if safe_path_exists(filestore):
         raise RuntimeError(f"La base {db_name} est supprimée, mais pas son filestore : {filestore}")
     DATABASE_RETENTION.forget(str(WORKSPACE), project, db_name)
+
+
+def drop_retention_database_job(job, project, db_name):
+    """Suppression demandée depuis l'avertissement, y compris pour un projet arrêté."""
+    project = validate_project(project)
+    db_name = validate_odoo_db(db_name)
+    service = project_service()
+    containers = (f"postgresql-{project}", f"odoo-{project}")
+    running_before = {name for name in containers if container_status(name) == "running"}
+    try:
+        if f"postgresql-{project}" not in running_before:
+            service.start_traefik(log=job.add)
+            service.compose_up_project(project, WORKSPACE / project, log=job.add)
+            service.wait_for_postgres(project, log=job.add)
+        drop_database_job(job, project, db_name)
+    finally:
+        if not running_before:
+            service.stop_project(project, log=job.add)
+        elif f"postgresql-{project}" not in running_before:
+            code, output = run_capture(docker_command(SETTINGS, "stop", f"postgresql-{project}"), timeout=120)
+            if code:
+                job.add(f"Arrêt de PostgreSQL impossible : {output}")
 
 
 def database_retention_job(job, project):
@@ -4614,14 +4645,35 @@ def database_retention_job(job, project):
             job.add(f"{len(state['databases'])} base(s) relevée(s).")
             if not due:
                 job.add("Aucune base n'est arrivée à échéance.")
+            deleted = []
             for index, db_name in enumerate(due, start=1):
                 job_progress.span(f"Suppression de {db_name}", end=50 + 45 * index / len(due), expected=15)
-                drop_expired_database(job, project, db_name)
-            if due:
+                # La prolongation et la suppression se départagent sous le même verrou : une
+                # prolongation acceptée ne peut jamais être suivie d'une suppression périmée.
+                with RETENTION_DECISION_LOCK:
+                    current = DATABASE_RETENTION.project_state(str(WORKSPACE), project)
+                    record = current["databases"].get(db_name)
+                    if db_name not in expired_databases(current, time.time()) or record.get("oid") != state[
+                        "databases"
+                    ][db_name].get("oid"):
+                        job.add(f"Base {db_name} conservée : son échéance a changé.")
+                        continue
+                    live_now = database_oids_for(project)
+                    if live_now is None:
+                        raise RuntimeError("Impossible de vérifier l'identité de la base avant sa suppression.")
+                    if live_now.get(db_name) != record.get("oid"):
+                        job.add(f"Base {db_name} conservée : elle a changé depuis le relevé.")
+                        continue
+                    key = (str(WORKSPACE), project, db_name)
+                    RETENTION_DELETION_UNCERTAIN.add(key)
+                    drop_expired_database(job, project, db_name)
+                    RETENTION_DELETION_UNCERTAIN.discard(key)
+                    deleted.append(db_name)
+            if deleted:
                 invalidate_overview_databases(project)
                 clear_project_module_cache(project)
-                job.add(f"{len(due)} base(s) supprimée(s) : {', '.join(due)}.")
-            job.result = {"kind": "database_retention", "deleted": due}
+                job.add(f"{len(deleted)} base(s) supprimée(s) : {', '.join(deleted)}.")
+            job.result = {"kind": "database_retention", "deleted": deleted}
         finally:
             # Projet arrêté avant le contrôle : il le redevient, même si le contrôle a échoué.
             if not running_before:
@@ -4707,7 +4759,12 @@ def extend_database_retention_view(request):
     """« Garder 30 jours de plus » : repousse l'échéance d'une base, autant de fois que voulu."""
     project = validate_project(request.param("project"))
     db_name = validate_odoo_db(request.handler.read_json().get("db"))
-    expires_at = DATABASE_RETENTION.extend(str(WORKSPACE), project, db_name)
+    with RETENTION_DECISION_LOCK:
+        if (str(WORKSPACE), project, db_name) in RETENTION_DELETION_UNCERTAIN:
+            raise ValueError(
+                "La suppression de cette base a échoué. Vérifie son état avant de la garder plus longtemps."
+            )
+        expires_at = DATABASE_RETENTION.extend(str(WORKSPACE), project, db_name)
     # L'aperçu des projets porte les échéances : l'interface la voit sans attendre.
     EVENT_WAKE.set()
     return {"database": db_name, "expires_at": expires_at}
@@ -8723,6 +8780,12 @@ def drop_database_action(payload):
     )
 
 
+def drop_retention_database_action(payload):
+    project = payload_project(payload)
+    db_name = payload_database(payload)
+    return Job(f"Supprimer base {db_name}", drop_retention_database_job, (project, db_name), project=project)
+
+
 def validated_name_list(value):
     if not isinstance(value, list) or not value or not all(isinstance(item, str) and item for item in value):
         raise ValueError("Liste d'éléments à traiter invalide.")
@@ -8876,6 +8939,7 @@ JOB_ACTIONS = {
     "create_database": create_database_action,
     "restore_remote_backup": restore_remote_backup_action,
     "drop_database": drop_database_action,
+    "drop_retention_database": drop_retention_database_action,
     "duplicate_database": duplicate_database_action,
     "neutralize_database": database_job("Neutraliser {db}", neutralize_database_job),
     "reset_module_translations": database_modules_job(

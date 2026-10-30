@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -39,6 +40,7 @@ class RetentionTestCase(unittest.TestCase):
             patch.object(web, "DELETED_PROJECTS", self.workspace / ".odoo_manager_deleted"),
             patch.object(web, "DATABASE_RETENTION", self.store),
             patch.dict(web.RETENTION_FAILURES, clear=True),
+            patch.object(web, "RETENTION_DELETION_UNCERTAIN", set()),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -210,11 +212,98 @@ class RetentionJobTests(RetentionTestCase):
 
     @patch("odoo_manager_web.drop_partial_database")
     @patch("odoo_manager_web.job_control.sleep")
-    @patch("odoo_manager_web.database_oids_for", side_effect=[None, None, {"old": 16384}])
+    @patch("odoo_manager_web.database_oids_for", side_effect=[None, None, {"old": 16384}, {"old": 16384}])
     @patch("odoo_manager_web.container_status", return_value="running")
     def test_postgresql_gets_a_few_seconds_to_accept_connections(self, _status, _oids, _sleep, drop):
         web.database_retention_job(LogJob(), "CLIENT")
         drop.assert_called_once()
+
+    @patch("odoo_manager_web.drop_partial_database")
+    @patch("odoo_manager_web.database_oids_for", return_value={"old": 16384, "empty": 16385})
+    @patch("odoo_manager_web.container_status", return_value="running")
+    def test_extension_after_inventory_prevents_deletion(self, _status, _oids, drop):
+        def extend_before_deletion(label, **_kwargs):
+            if label == "Suppression de old":
+                self.store.extend(str(self.workspace), "CLIENT", "old")
+
+        job = LogJob()
+        with patch("odoo_manager_web.job_progress.span", side_effect=extend_before_deletion):
+            web.database_retention_job(job, "CLIENT")
+        drop.assert_not_called()
+        self.assertEqual([], job.result["deleted"])
+        self.assertIn("old", self.state("CLIENT")["databases"])
+
+    @patch("odoo_manager_web.database_oids_for", side_effect=[{"old": 16384}, {"old": 99999}])
+    @patch("odoo_manager_web.container_status", return_value="running")
+    @patch("odoo_manager_web.drop_partial_database")
+    def test_recreated_database_is_not_deleted(self, drop, _status, _oids):
+        job = LogJob()
+        web.database_retention_job(job, "CLIENT")
+        drop.assert_not_called()
+        self.assertEqual([], job.result["deleted"])
+
+    @patch("odoo_manager_web.database_oids_for", return_value={"old": 16384})
+    @patch("odoo_manager_web.container_status", return_value="running")
+    def test_extension_during_deletion_is_not_accepted(self, _status, _oids):
+        started = threading.Event()
+        release = threading.Event()
+        result = []
+
+        def drop(*_args):
+            started.set()
+            self.assertTrue(release.wait(5))
+
+        request = MagicMock()
+        request.param.return_value = "CLIENT"
+        request.handler.read_json.return_value = {"db": "old"}
+
+        def extend():
+            try:
+                web.extend_database_retention_view(request)
+                result.append("accepted")
+            except ValueError:
+                result.append("missing")
+
+        with patch("odoo_manager_web.drop_partial_database", side_effect=drop):
+            worker = threading.Thread(target=web.database_retention_job, args=(LogJob(), "CLIENT"))
+            worker.start()
+            self.assertTrue(started.wait(5))
+            extender = threading.Thread(target=extend)
+            extender.start()
+            release.set()
+            worker.join(5)
+            extender.join(5)
+        self.assertFalse(worker.is_alive() or extender.is_alive())
+        self.assertEqual(["missing"], result)
+
+    @patch("odoo_manager_web.drop_database_job")
+    @patch("odoo_manager_web.container_status", return_value="exited")
+    def test_manual_deletion_starts_and_restores_a_stopped_project(self, _status, drop):
+        job = LogJob()
+        web.drop_retention_database_job(job, "CLIENT", "old")
+        self.service.compose_up_project.assert_called_once()
+        self.service.wait_for_postgres.assert_called_once()
+        drop.assert_called_once_with(job, "CLIENT", "old")
+        self.service.stop_project.assert_called_once()
+
+    @patch("odoo_manager_web.drop_database_job", side_effect=RuntimeError("échec"))
+    @patch("odoo_manager_web.container_status", return_value="exited")
+    def test_manual_deletion_restores_stopped_project_after_failure(self, _status, _drop):
+        with self.assertRaisesRegex(RuntimeError, "échec"):
+            web.drop_retention_database_job(LogJob(), "CLIENT", "old")
+        self.service.stop_project.assert_called_once()
+
+    @patch("odoo_manager_web.database_oids_for", return_value={"old": 16384})
+    @patch("odoo_manager_web.container_status", return_value="running")
+    @patch("odoo_manager_web.drop_partial_database", side_effect=RuntimeError("échec"))
+    def test_extension_is_refused_after_an_uncertain_deletion(self, _drop, _status, _oids):
+        with self.assertRaisesRegex(RuntimeError, "échec"):
+            web.database_retention_job(LogJob(), "CLIENT")
+        request = MagicMock()
+        request.param.return_value = "CLIENT"
+        request.handler.read_json.return_value = {"db": "old"}
+        with self.assertRaisesRegex(ValueError, "suppression.*échoué"):
+            web.extend_database_retention_view(request)
 
 
 class ExtendViewTests(RetentionTestCase):
