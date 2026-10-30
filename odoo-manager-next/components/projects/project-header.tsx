@@ -4,7 +4,7 @@ import { type Dispatch, type ReactNode, type RefObject, type SetStateAction, use
 import { DropdownMenu } from "@radix-ui/themes";
 import { Bug, ChevronDown, ExternalLink, FileCode, Loader2, Mail, Play, RefreshCcw, Square } from "lucide-react";
 import { api, waitForJob } from "@/lib/api";
-import { openExternalUrl } from "@/lib/desktop-runtime";
+import { isDesktopRuntime, openExternalUrl } from "@/lib/desktop-runtime";
 import { isJobActive, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
 import { odooAccessUrl, odooServerStopped, type OdooDebugMode } from "@/lib/projects";
 import type { Job, MailpitStatus, OdooServerState, Project, Toast } from "@/lib/types";
@@ -114,17 +114,28 @@ export function ProjectHeader({
   }
   async function requestOpenOdoo(debug?: OdooDebugMode) {
     if (!selectedProject || openingOdoo) return;
+    // Réserver l'onglet pendant le clic : après l'attente d'Odoo, le navigateur peut bloquer window.open.
+    const desktop = isDesktopRuntime();
+    const popup = desktop ? null : window.open("about:blank", "_blank");
+    if (!desktop && !popup) {
+      pushToast("error", "Autorise les fenêtres surgissantes pour ouvrir Odoo, puis réessaie.");
+      return;
+    }
+    if (popup) popup.opener = null;
     setOpeningOdoo(true);
     try {
       const server = await ensureOdooServer(selectedProject);
-      if (server === "failed") return;
-      const opened = await openExternalUrl(odooAccessUrl(selectedProject, selectedDb, debug));
-      // Hors application de bureau, le navigateur bloque une fenêtre ouverte après une longue attente.
-      if (!opened && server === "restarted") {
-        pushToast("info", "Odoo est relancé : clique de nouveau sur Ouvrir Odoo, ton navigateur a bloqué l'ouverture.");
+      if (server === "failed") {
+        popup?.close();
         return;
       }
-      if (!opened) throw new Error("Lien impossible à ouvrir depuis l'application.");
+      const url = odooAccessUrl(selectedProject, selectedDb, debug);
+      if (popup) {
+        if (popup.closed) throw new Error("L'onglet d'ouverture d'Odoo a été fermé. Réessaie.");
+        popup.location.replace(url);
+      } else if (!(await openExternalUrl(url))) {
+        throw new Error("Lien impossible à ouvrir depuis l'application.");
+      }
       pushToast(
         "success",
         debug
@@ -132,6 +143,7 @@ export function ProjectHeader({
           : "La base Odoo a été ouverte dans le navigateur.",
       );
     } catch (err) {
+      popup?.close();
       pushToast("error", err instanceof Error ? err.message : "Impossible d'ouvrir Odoo.");
     } finally {
       setOpeningOdoo(false);
