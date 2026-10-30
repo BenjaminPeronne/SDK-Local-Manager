@@ -202,52 +202,88 @@ export function ModulesTab({
     });
   }
   // Filtres et sélection des modules : identiques en affichage classique et affiné.
-  const moduleFiltersBlock = (
-    <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_180px_210px_220px]">
-      <div className="relative">
-        <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          className="pl-9"
-          placeholder="Rechercher un module (nom ou titre)"
-          value={moduleFilters.search}
-          onChange={(event) => moduleFilters.setSearch(event.target.value)}
-        />
+  const databaseBlock = (
+    <section
+      aria-labelledby="modules-database-title"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/25 bg-primary/[0.04] px-4 py-3 dark:bg-primary/[0.08]"
+    >
+      <div className="min-w-0">
+        <h4 id="modules-database-title" className="text-sm font-semibold">
+          Base de travail
+        </h4>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {canUseDb
+            ? "Les installations et mises à jour s’appliquent à cette base."
+            : "Choisis une base disponible pour installer ou mettre à jour des modules."}
+        </p>
       </div>
-      <Select value={moduleFilters.status} onValueChange={moduleFilters.setStatus}>
-        <SelectTrigger placeholder="État">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Tous les états</SelectItem>
-          <SelectItem value="installed">Installés</SelectItem>
-          <SelectItem value="uninstalled">Disponibles</SelectItem>
-          <SelectItem value="to upgrade">À mettre à jour</SelectItem>
-        </SelectContent>
-      </Select>
-      <Select value={moduleFilters.origin} onValueChange={moduleFilters.setOrigin}>
-        <SelectTrigger placeholder="Origine">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Toutes les origines</SelectItem>
-          <SelectItem value="odoo">Odoo Community</SelectItem>
-          <SelectItem value="enterprise">Odoo Enterprise</SelectItem>
-          <SelectItem value="other">Autre</SelectItem>
-        </SelectContent>
-      </Select>
-      <Select value={selectedDb} onValueChange={(db) => chooseDatabase(db)}>
-        <SelectTrigger placeholder="Base Odoo">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {odooDatabases.map((db) => (
-            <SelectItem key={db} value={db}>
-              {db}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+      <div className="w-full min-w-0 sm:w-64">
+        <Select value={selectedDb} onValueChange={(db) => chooseDatabase(db)}>
+          <SelectTrigger placeholder="Choisir une base" aria-label="Base de travail">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {odooDatabases.map((db) => (
+              <SelectItem key={db} value={db}>
+                {db}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </section>
+  );
+  const moduleFiltersBlock = (
+    <section aria-labelledby="modules-filters-title" className="space-y-3 rounded-md border bg-card px-4 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <h4 id="modules-filters-title" className="text-sm font-semibold">
+          Rechercher et filtrer
+        </h4>
+        {moduleFilters.active && (
+          <button
+            type="button"
+            className="text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={moduleFilters.reset}
+          >
+            Effacer les filtres
+          </button>
+        )}
+      </div>
+      <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_180px_210px]">
+        <div className="relative">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          <Input
+            className="pl-9"
+            aria-label="Rechercher un module par nom ou titre"
+            placeholder="Rechercher un module (nom ou titre)"
+            value={moduleFilters.search}
+            onChange={(event) => moduleFilters.setSearch(event.target.value)}
+          />
+        </div>
+        <Select value={moduleFilters.status} onValueChange={moduleFilters.setStatus}>
+          <SelectTrigger placeholder="État" aria-label="Filtrer par état">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous les états</SelectItem>
+            <SelectItem value="installed">Installés</SelectItem>
+            <SelectItem value="uninstalled">Disponibles</SelectItem>
+            <SelectItem value="to upgrade">À mettre à jour</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={moduleFilters.origin} onValueChange={moduleFilters.setOrigin}>
+          <SelectTrigger placeholder="Origine" aria-label="Filtrer par origine">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Toutes les origines</SelectItem>
+            <SelectItem value="odoo">Odoo Community</SelectItem>
+            <SelectItem value="enterprise">Odoo Enterprise</SelectItem>
+            <SelectItem value="other">Autre</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </section>
   );
   const moduleViewBlock = (
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -273,8 +309,8 @@ export function ModulesTab({
       {repositoryView && repositoryGroups.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-xs text-muted-foreground">
-            {repositoryGroups.filter((group) => group.repository).length} dépôt(s) · clique sur une branche pour en
-            changer
+            {repositoryGroups.filter((group) => group.repository).length} dépôt(s) · sélectionne un dépôt pour voir ses
+            modules
           </span>
           <div className="flex items-center gap-1">
             <Button
@@ -359,7 +395,7 @@ export function ModulesTab({
         <RefinedSectionHeader
           title="Modules"
           count={moduleFilters.filtered.length}
-          description="Les actions s’appliquent à la base de travail sélectionnée."
+          description="Gère les modules du projet et leur installation dans une base."
           actions={
             <>
               <Button
@@ -377,10 +413,10 @@ export function ModulesTab({
                     Menus non modaux : le verrou de défilement de Radix détache l'en-tête et la barre latérale collés. */}
               <DropdownMenu.Root modal={false}>
                 <DropdownMenu.Trigger>
-                  <Button variant="outline" disabled={!selectedProjectReady}>
+                  <Button disabled={!selectedProjectReady}>
                     <PlusCircle className="h-4 w-4" />
                     Ajouter des modules
-                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    <ChevronDown className="h-4 w-4" />
                   </Button>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content align="end" className="min-w-64">
@@ -390,7 +426,7 @@ export function ModulesTab({
                   </DropdownMenu.Item>
                   <DropdownMenu.Item onSelect={openZipImport}>
                     <FileArchive className="h-4 w-4" />
-                    Depuis un pauvre zip
+                    Depuis une archive ZIP
                   </DropdownMenu.Item>
                 </DropdownMenu.Content>
               </DropdownMenu.Root>
@@ -399,6 +435,7 @@ export function ModulesTab({
                 Installer un socle
               </Button>
               <Button
+                variant="outline"
                 disabled={!selectedProjectReady || loading || checkingUpdatePrerequisites}
                 onClick={requestUpdateAllOdooModules}
               >
@@ -407,69 +444,83 @@ export function ModulesTab({
                 ) : (
                   <RefreshCcw className="h-4 w-4" />
                 )}
-                MAJ complète Odoo
+                Mise à jour complète Odoo
               </Button>
             </>
           }
         />
+        {databaseBlock}
         {moduleFiltersBlock}
-        {moduleViewBlock}
-        {moduleSelectionBlock}
-        {/* overflow-clip arrondit les coins sans créer de conteneur de défilement, contrairement à
+        <section aria-labelledby="modules-results-title" className="space-y-3 pt-1">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <h4 id="modules-results-title" className="text-sm font-semibold">
+              {repositoryView ? "Dépôts et modules" : "Liste des modules"}
+            </h4>
+            <span className="text-xs text-muted-foreground">
+              {moduleFilters.filtered.length} module{moduleFilters.filtered.length > 1 ? "s" : ""}
+              {moduleFilters.active ? " après filtrage" : ""}
+            </span>
+          </div>
+          {moduleViewBlock}
+          {moduleSelectionBlock}
+          {/* overflow-clip arrondit les coins sans créer de conteneur de défilement, contrairement à
               overflow-hidden qui empêcherait l'en-tête de rester collé. L'en-tête reste donc un bandeau droit :
               des coins arrondis collés en haut laisseraient voir les lignes qui défilent derrière. */}
-        <RefinedPanel className="overflow-clip">
-          <div
-            ref={tableHeaderRef}
-            className="z-10 hidden border-b bg-card xl:sticky xl:block"
-            style={{ top: stickyTop }}
-          >
-            <div className={cn("grid items-center gap-3 bg-muted/60 px-3 py-2", REFINED_LABEL, REFINED_MODULE_COLUMNS)}>
-              <div>Module</div>
-              <div>État</div>
-              <div>Version</div>
-              <div>Origine</div>
-              <div className="text-right">Actions</div>
+          <RefinedPanel className="overflow-clip">
+            <div
+              ref={tableHeaderRef}
+              className="z-10 hidden border-b bg-card xl:sticky xl:block"
+              style={{ top: stickyTop }}
+            >
+              <div
+                className={cn("grid items-center gap-3 bg-muted/60 px-3 py-2", REFINED_LABEL, REFINED_MODULE_COLUMNS)}
+              >
+                <div>Module</div>
+                <div>État</div>
+                <div>Version</div>
+                <div>Origine</div>
+                <div className="text-right">Actions</div>
+              </div>
             </div>
-          </div>
-          {repositoryView ? (
-            repositoryGroups.length ? (
-              <ModuleRepositoryGroups
-                createJob={createJob}
-                folding={folding}
-                groups={repositoryGroups}
-                onFold={foldGroup}
-                openUrl={openUrl}
-                projectName={projectName}
-                rowActions={rowActions}
-                searchActive={searchKey !== ""}
-                selectedModules={selectedModules}
-                setSelectedModules={setSelectedModules}
-                showLocations={showModuleLocations}
-                stickyTop={stickyTop + tableHeaderHeight}
-                workspace={overview?.workspace}
-              />
+            {repositoryView ? (
+              repositoryGroups.length ? (
+                <ModuleRepositoryGroups
+                  createJob={createJob}
+                  folding={folding}
+                  groups={repositoryGroups}
+                  onFold={foldGroup}
+                  openUrl={openUrl}
+                  projectName={projectName}
+                  rowActions={rowActions}
+                  searchActive={searchKey !== ""}
+                  selectedModules={selectedModules}
+                  setSelectedModules={setSelectedModules}
+                  showLocations={showModuleLocations}
+                  stickyTop={stickyTop + tableHeaderHeight}
+                  workspace={overview?.workspace}
+                />
+              ) : (
+                moduleEmptyState
+              )
             ) : (
-              moduleEmptyState
-            )
-          ) : (
-            <div className="min-w-0">
-              {moduleFilters.visible.length
-                ? moduleFilters.visible.map((module) => (
-                    <ModuleRow
-                      key={module.name}
-                      actions={rowActions}
-                      module={module}
-                      selected={selectedModules.has(module.name)}
-                      showLocations={showModuleLocations}
-                      workspace={overview?.workspace}
-                    />
-                  ))
-                : moduleEmptyState}
-            </div>
-          )}
-          {modulePaginationBlock}
-        </RefinedPanel>
+              <div className="min-w-0">
+                {moduleFilters.visible.length
+                  ? moduleFilters.visible.map((module) => (
+                      <ModuleRow
+                        key={module.name}
+                        actions={rowActions}
+                        module={module}
+                        selected={selectedModules.has(module.name)}
+                        showLocations={showModuleLocations}
+                        workspace={overview?.workspace}
+                      />
+                    ))
+                  : moduleEmptyState}
+              </div>
+            )}
+            {modulePaginationBlock}
+          </RefinedPanel>
+        </section>
       </div>
     </TabsContent>
   );

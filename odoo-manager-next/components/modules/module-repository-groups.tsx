@@ -30,15 +30,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ModuleRow, type ModuleRowActions } from "@/components/modules/module-row";
 import { RepositoryBranchPicker } from "@/components/modules/repository-branch-picker";
 
-// Au-delà, un dépôt s'ouvre replié : Odoo et Enterprise comptent des centaines de modules.
-const EXPANDED_GROUP_MAX_MODULES = 40;
-
 /** Dépôts ouverts ou fermés à la main ; les autres suivent groupExpanded. */
 export type RepositoryFolding = Record<string, boolean>;
 
-/** Ouvert par défaut : petit dépôt, ou recherche en cours (ses résultats se voient). */
+/** Les dépôts sont repliés par défaut ; une recherche révèle ses résultats. */
 export function groupExpanded(group: ModuleRepositoryGroup, folding: RepositoryFolding, searchActive: boolean) {
-  return folding[group.id] ?? (searchActive || group.modules.length <= EXPANDED_GROUP_MAX_MODULES);
+  return folding[group.id] ?? searchActive;
 }
 // Lignes affichées à l'ouverture d'un dépôt, puis par clic sur « Afficher plus ».
 const GROUP_ROWS_STEP = 50;
