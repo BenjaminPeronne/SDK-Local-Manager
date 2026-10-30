@@ -3,10 +3,11 @@
 import { type Dispatch, type ReactNode, type RefObject, type SetStateAction, useMemo } from "react";
 import { DropdownMenu } from "@radix-ui/themes";
 import { Bug, ChevronDown, ExternalLink, FileCode, Loader2, Mail, Play, RefreshCcw, Square } from "lucide-react";
-import { openExternalUrl } from "@/lib/desktop-runtime";
+import { api, waitForJob } from "@/lib/api";
+import { isDesktopRuntime, openExternalUrl } from "@/lib/desktop-runtime";
 import { isJobActive, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
-import { odooAccessUrl, type OdooDebugMode } from "@/lib/projects";
-import type { Job, MailpitStatus, Project, Toast } from "@/lib/types";
+import { odooAccessUrl, odooServerStopped, type OdooDebugMode } from "@/lib/projects";
+import type { Job, MailpitStatus, OdooServerState, Project, Toast } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,6 +80,7 @@ export function ProjectHeader({
   );
   const selectedProjectStarting = selectedProjectLifecycleJob?.title.startsWith("Démarrer ") ?? false;
   const selectedProjectStopping = selectedProjectLifecycleJob?.title.startsWith("Arrêter ") ?? false;
+  const selectedOdooServerStopped = odooServerStopped(selectedProject);
   async function requestStartProject() {
     if (!selectedProject) return;
     const job = await createJob("start_project", { project: selectedProject.name });
@@ -95,12 +97,45 @@ export function ProjectHeader({
       schedule(refreshSystemStatus, 1600);
     }
   }
+  // Relit l'état du serveur Odoo juste avant d'ouvrir : l'aperçu peut dater de quelques secondes.
+  async function ensureOdooServer(project: Project): Promise<"ready" | "restarted" | "failed"> {
+    const state = await api<{ odoo_server: OdooServerState | null }>(
+      `/api/projects/${encodeURIComponent(project.name)}/odoo-server`,
+    );
+    // Docker trop lent pour répondre : l'ouverture est tentée, comme avant la vérification.
+    if (state.odoo_server === "running" || state.odoo_server === "unknown") return "ready";
+    pushToast("info", "Le serveur Odoo ne tourne pas dans son conteneur : il est relancé avant l'ouverture.");
+    const job = await createJob("start_project", { project: project.name });
+    if (!job) return "failed";
+    schedule(refreshOverview, 1800);
+    await waitForJob(job.id);
+    void refreshOverview();
+    return "restarted";
+  }
   async function requestOpenOdoo(debug?: OdooDebugMode) {
     if (!selectedProject || openingOdoo) return;
+    // Réserver l'onglet pendant le clic : après l'attente d'Odoo, le navigateur peut bloquer window.open.
+    const desktop = isDesktopRuntime();
+    const popup = desktop ? null : window.open("about:blank", "_blank");
+    if (!desktop && !popup) {
+      pushToast("error", "Autorise les fenêtres surgissantes pour ouvrir Odoo, puis réessaie.");
+      return;
+    }
+    if (popup) popup.opener = null;
     setOpeningOdoo(true);
     try {
-      const opened = await openExternalUrl(odooAccessUrl(selectedProject, selectedDb, debug));
-      if (!opened) throw new Error("Lien impossible à ouvrir depuis l'application.");
+      const server = await ensureOdooServer(selectedProject);
+      if (server === "failed") {
+        popup?.close();
+        return;
+      }
+      const url = odooAccessUrl(selectedProject, selectedDb, debug);
+      if (popup) {
+        if (popup.closed) throw new Error("L'onglet d'ouverture d'Odoo a été fermé. Réessaie.");
+        popup.location.replace(url);
+      } else if (!(await openExternalUrl(url))) {
+        throw new Error("Lien impossible à ouvrir depuis l'application.");
+      }
       pushToast(
         "success",
         debug
@@ -108,6 +143,7 @@ export function ProjectHeader({
           : "La base Odoo a été ouverte dans le navigateur.",
       );
     } catch (err) {
+      popup?.close();
       pushToast("error", err instanceof Error ? err.message : "Impossible d'ouvrir Odoo.");
     } finally {
       setOpeningOdoo(false);
@@ -127,9 +163,11 @@ export function ProjectHeader({
     ? { label: "Démarrage…", tone: "busy" }
     : selectedProjectStopping
       ? { label: "Arrêt…", tone: "busy" }
-      : selectedProjectOnline
-        ? { label: "Démarré", tone: "on" }
-        : { label: "Arrêté", tone: "off" };
+      : selectedOdooServerStopped
+        ? { label: "Odoo arrêté", tone: "warn" }
+        : selectedProjectOnline
+          ? { label: "Démarré", tone: "on" }
+          : { label: "Arrêté", tone: "off" };
   const titleBlock = (
     <div className="min-w-0 flex-1">
       <div className="flex min-w-0 flex-wrap items-start gap-2">
@@ -162,6 +200,7 @@ export function ProjectHeader({
                 "h-2 w-2 rounded-full",
                 projectState.tone === "on" && "bg-emerald-500",
                 projectState.tone === "busy" && "animate-pulse bg-amber-500",
+                projectState.tone === "warn" && "bg-amber-500",
                 projectState.tone === "off" && "bg-muted-foreground/45",
               )}
             />
@@ -178,7 +217,9 @@ export function ProjectHeader({
       </p>
     </div>
   );
-  const startStopButton = selectedProjectOnline ? (
+  // Conteneur démarré sans serveur Odoo : « Démarrer » relance le serveur dans le conteneur.
+  const showStopButton = selectedProjectOnline && !selectedOdooServerStopped;
+  const startStopButton = showStopButton ? (
     <Button
       key="stop-project"
       className={actionWidth}
@@ -196,6 +237,11 @@ export function ProjectHeader({
       key="start-project"
       className={actionWidth}
       disabled={!selectedProjectReady || loading || Boolean(selectedProjectLifecycleJob)}
+      title={
+        selectedOdooServerStopped
+          ? "Le conteneur Odoo tourne, mais pas le serveur Odoo : Démarrer le relance."
+          : undefined
+      }
       onClick={requestStartProject}
     >
       {selectedProjectStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
@@ -207,12 +253,20 @@ export function ProjectHeader({
     <div className="col-span-2 flex sm:col-span-1">
       <span
         className="flex min-w-0 flex-1"
-        title={selectedProjectOnline ? undefined : "Démarre le projet pour ouvrir Odoo."}
+        title={
+          !selectedProjectOnline
+            ? "Démarre le projet pour ouvrir Odoo."
+            : selectedOdooServerStopped
+              ? "Le serveur Odoo ne tourne pas : il sera relancé avant l'ouverture."
+              : undefined
+        }
       >
         <Button
           className="w-full whitespace-nowrap rounded-r-none px-3"
           variant="outline"
-          disabled={!selectedProjectReady || !selectedProjectOnline || openingOdoo}
+          disabled={
+            !selectedProjectReady || !selectedProjectOnline || openingOdoo || Boolean(selectedProjectLifecycleJob)
+          }
           onClick={() => requestOpenOdoo()}
         >
           {openingOdoo ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
@@ -233,12 +287,15 @@ export function ProjectHeader({
         </DropdownMenu.Trigger>
         <DropdownMenu.Content align="end" className="min-w-64">
           <DropdownMenu.Label>Ouvrir Odoo</DropdownMenu.Label>
-          <DropdownMenu.Item disabled={!selectedProjectOnline || openingOdoo} onSelect={() => requestOpenOdoo("1")}>
+          <DropdownMenu.Item
+            disabled={!selectedProjectOnline || openingOdoo || Boolean(selectedProjectLifecycleJob)}
+            onSelect={() => requestOpenOdoo("1")}
+          >
             <Bug className="h-4 w-4" />
             En mode debug
           </DropdownMenu.Item>
           <DropdownMenu.Item
-            disabled={!selectedProjectOnline || openingOdoo}
+            disabled={!selectedProjectOnline || openingOdoo || Boolean(selectedProjectLifecycleJob)}
             onSelect={() => requestOpenOdoo("assets")}
           >
             <FileCode className="h-4 w-4" />

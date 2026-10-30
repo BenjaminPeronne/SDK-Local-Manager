@@ -75,6 +75,14 @@ export function formatDiagnostics(payload: ProjectDiagnostics) {
   return lines.join("\n").trim();
 }
 
+/**
+ * Conteneur Odoo démarré mais sans serveur Odoo : redémarré hors du gestionnaire (Docker Desktop
+ * relancé, `docker compose start`), il ne relance pas Odoo, et Traefik répond 502 Bad Gateway.
+ */
+export function odooServerStopped(project?: Pick<Project, "odoo_status" | "odoo_server">) {
+  return project?.odoo_status === "running" && project.odoo_server === "stopped";
+}
+
 export function firstOdooDatabase(project?: Project) {
   return project?.databases?.find((db) => db !== "postgres") || "";
 }

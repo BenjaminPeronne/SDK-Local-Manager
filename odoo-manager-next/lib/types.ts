@@ -1,8 +1,12 @@
 type InterfaceIcon = "manager" | "local";
 
+export type OdooServerState = "running" | "stopped" | "unknown";
+
 export type Project = {
   name: string;
   odoo_status: string;
+  /** Serveur Odoo lancé dans le conteneur ; nul quand le conteneur Odoo ne tourne pas. */
+  odoo_server?: OdooServerState | null;
   postgres_status: string;
   odoo_version?: string;
   url: string;
