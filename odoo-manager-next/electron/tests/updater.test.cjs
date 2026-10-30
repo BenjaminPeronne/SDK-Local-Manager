@@ -91,6 +91,27 @@ test("versions compare as numbers, and only a newer one is an update", () => {
   assert.equal(isNewer("1.0.0", "0.99.0"), true);
 });
 
+test("a manifest without content length is stopped as soon as the streamed limit is exceeded", async (t) => {
+  let cancelled = false;
+  let reads = 0;
+  const stream = new ReadableStream(
+    {
+      pull(controller) {
+        reads += 1;
+        controller.enqueue(new Uint8Array(32 * 1024));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  const update = updater(t, { fetch: async () => new Response(stream) });
+  await assert.rejects(update.fetchText(`${BASE}/${TAG}/update-manifest.json`), /illisible/);
+  assert.equal(reads, 3);
+  assert.equal(cancelled, true);
+});
+
 test("the manifest keeps only well-formed installers of the announced version", () => {
   const good = { name: DMG, sha512: "a".repeat(128), size: 10 };
   const installers = parseManifest(

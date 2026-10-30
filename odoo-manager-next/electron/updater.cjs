@@ -419,9 +419,25 @@ class AppUpdater {
     const response = await this.request(url, AbortSignal.timeout(MANIFEST_TIMEOUT_MS));
     const declared = Number(response.headers.get("content-length") || 0);
     if (declared > MAX_MANIFEST_BYTES) throw new UpdateError("Le descriptif de la nouvelle version est illisible.");
-    const body = Buffer.from(await response.arrayBuffer());
-    if (body.length > MAX_MANIFEST_BYTES) throw new UpdateError("Le descriptif de la nouvelle version est illisible.");
-    return body.toString("utf8");
+    const chunks = [];
+    let size = 0;
+    if (!response.body) throw new UpdateError("Le descriptif de la nouvelle version est illisible.");
+    const reader = response.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > MAX_MANIFEST_BYTES) {
+          await reader.cancel().catch(() => {});
+          throw new UpdateError("Le descriptif de la nouvelle version est illisible.");
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return Buffer.concat(chunks, size).toString("utf8");
   }
 
   async fetchFile(url, destination, expected) {
