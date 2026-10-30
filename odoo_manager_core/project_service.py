@@ -2682,7 +2682,9 @@ class ProjectService:
                     f"sur {database_restore.format_bytes(size)})",
                 )
 
-        tracker = database_restore.DumpProgress(total, on_progress=progress, on_post_data=on_post_data)
+        # Sans séparation, psql traite données et index dans la même session : leur durée
+        # ne peut pas être isolée à partir du simple marqueur lu dans le dump.
+        tracker = database_restore.DumpProgress(total, on_progress=progress)
         command = self.docker(
             "exec",
             "-i",
@@ -2705,6 +2707,8 @@ class ProjectService:
         if code != 0:
             raise RuntimeError(self._dump_load_failure(code, errors))
         if splitter and splitter.post_data:
+            if on_post_data:
+                on_post_data()
             self.run_post_data(
                 project,
                 db_name,
@@ -4109,6 +4113,7 @@ SELECT COALESCE((SELECT value FROM ir_config_parameter WHERE key = 'database.is_
         neutralize_script = """try:
     from odoo.modules.neutralize import neutralize_database
 except ImportError:
+    print("ODOO_MANAGER_NEUTRALIZATION_MODE=partial")
     # Odoo 15 ne fournit pas encore le moteur modulaire de neutralisation.
     autovacuum = env.ref("base.autovacuum_job", raise_if_not_found=False)
     crons = env["ir.cron"].search([])
@@ -4143,6 +4148,7 @@ except ImportError:
             fetchmail_servers.write({"active": False})
     env["ir.config_parameter"].sudo().set_param("database.is_neutralized", "true")
 else:
+    print("ODOO_MANAGER_NEUTRALIZATION_MODE=native")
     neutralize_database(env.cr)
 
 # Le SQL natif insère un SMTP factice à chaque passe, et les passes précédentes en ont
@@ -4181,7 +4187,16 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
             "-lc",
             self._neutralization_shell_command(),
         )
-        code = self.stream(command, log=log)
+        mode = None
+
+        def capture(line):
+            nonlocal mode
+            value = str(line).strip()
+            if value in {"ODOO_MANAGER_NEUTRALIZATION_MODE=partial", "ODOO_MANAGER_NEUTRALIZATION_MODE=native"}:
+                mode = value.rsplit("=", 1)[1]
+            self.log(log, line)
+
+        code = self.stream(command, log=capture)
         if code != 0:
             self.odoo_startup_diagnostics(container, log=log)
             raise RuntimeError(
@@ -4190,6 +4205,7 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
         # Odoo 12 à 15 n'ont pas de script pour la banque, les modules OCA non plus à aucune version.
         self.run_postgres_sql(project, db_name, database_restore.BANK_SYNC_NEUTRALIZATION_SQL)
         self.verify_database_neutralization(project, db_name, log=log)
+        return mode
 
     def run_odoo_neutralize_command(self, project, db_name, log=None):
         container = f"odoo-{project}"
@@ -4206,7 +4222,7 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
 
         self.stop_odoo_server(project, log=log)
         try:
-            self._execute_database_neutralization(project, db_name, log=log)
+            mode = self._execute_database_neutralization(project, db_name, log=log)
         except BaseException:
             self.restart_odoo_server_after_failure(project, log=log)
             raise
@@ -4215,6 +4231,7 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
         self.wait_project_http(project, log=log)
         self.log(log, "Neutralisation terminée et contrôlée.")
         self.log(log, f"URL Odoo: {self.project_url(project)}")
+        return mode
 
     def start_project_containers(self, project, log=None):
         """Démarre les conteneurs du projet, prêts à recevoir le serveur Odoo, sans lancer ce dernier."""

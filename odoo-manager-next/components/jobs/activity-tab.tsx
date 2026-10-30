@@ -1,7 +1,7 @@
 "use client";
 
-import { type Dispatch, type RefObject, type SetStateAction } from "react";
-import { Activity, AlertTriangle, CheckCircle2, Copy, Logs, Square, Trash2 } from "lucide-react";
+import { type Dispatch, type RefObject, type SetStateAction, useEffect, useState } from "react";
+import { Activity, AlertTriangle, CheckCircle2, Copy, Logs, Square, Terminal, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { statusLabel, statusVariant } from "@/lib/format";
 import { isJobActive, isJobUnfinished, jobStopUnavailableReason } from "@/lib/jobs";
@@ -10,6 +10,7 @@ import type { ExternalLogView, Job, Project, ProjectDiagnostics, Toast } from "@
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { TabsContent } from "@/components/ui/tabs";
 import { REFINED_FOCUS_RING, RefinedPanel, RefinedSectionHeader } from "@/components/common/refined-layout";
 import { JobCancelState, JobProgressPanel, JobStopButton } from "@/components/jobs/job-controls";
@@ -18,6 +19,7 @@ import { JobOutputPre, OdooLogsModeBar } from "@/components/jobs/job-output";
 const LOG_DESCRIPTION_MAX_LENGTH = 240;
 
 type ActivityTabProps = {
+  createJob: (action: string, payload?: Record<string, unknown>) => Promise<Job | null>;
   enableLogAutoFollow: () => void;
   logDescriptionExpanded: boolean;
   logOutputRef: RefObject<HTMLPreElement | null>;
@@ -43,6 +45,7 @@ type ActivityTabProps = {
 };
 
 export function ActivityTab({
+  createJob,
   enableLogAutoFollow,
   logDescriptionExpanded,
   logOutputRef,
@@ -66,6 +69,46 @@ export function ActivityTab({
   setSelectedJobId,
   stopLiveLogStream,
 }: ActivityTabProps) {
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [command, setCommand] = useState("");
+  const [launchingCommand, setLaunchingCommand] = useState(false);
+  const [activityElement, setActivityElement] = useState<HTMLDivElement | null>(null);
+  const [availableHeight, setAvailableHeight] = useState<number | null>(null);
+  async function runCommand(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedProject || selectedProject.odoo_status !== "running" || !command.trim() || launchingCommand) return;
+    setLaunchingCommand(true);
+    try {
+      const job = await createJob("container_command", { project: selectedProject.name, command });
+      if (job) {
+        setCommand("");
+        setRawOutputVisible(true);
+      }
+    } finally {
+      setLaunchingCommand(false);
+    }
+  }
+  useEffect(() => {
+    const grid = activityElement;
+    if (!grid) return;
+    const update = () => {
+      const top = grid.getBoundingClientRect().top;
+      const available = Math.floor(window.innerHeight - top - 32);
+      // Si l'espace manque totalement (clavier, zoom ou nombreux bandeaux), laisser la page défiler.
+      const next = available >= 320 ? available : null;
+      setAvailableHeight((current) => (current === next ? current : next));
+    };
+    const observer = new ResizeObserver(update);
+    if (grid.parentElement) observer.observe(grid.parentElement);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    update();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [activityElement]);
   async function copyOutput() {
     try {
       await navigator.clipboard.writeText(outputContent);
@@ -142,8 +185,15 @@ export function ActivityTab({
 
   return (
     <TabsContent value="logs">
-      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
-        <div className="min-w-0 space-y-3">
+      <div
+        ref={setActivityElement}
+        className={cn(
+          "grid min-w-0 gap-4 xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]",
+          availableHeight !== null && "grid-rows-[minmax(0,9rem)_minmax(0,1fr)] xl:grid-rows-1",
+        )}
+        style={availableHeight === null ? undefined : { height: availableHeight }}
+      >
+        <div className={cn("min-w-0 space-y-3", availableHeight !== null && "flex min-h-0 flex-col")}>
           <RefinedSectionHeader
             title="Activité du projet"
             count={projectJobs.length}
@@ -157,7 +207,12 @@ export function ActivityTab({
             }
           />
           {projectJobs.length ? (
-            <div className="max-h-[min(62vh,680px)] min-w-0 space-y-2 overflow-y-auto pr-1">
+            <div
+              className={cn(
+                "max-h-[min(62vh,680px)] min-w-0 space-y-2 overflow-y-auto pr-1",
+                availableHeight !== null && "min-h-0 max-h-none flex-1",
+              )}
+            >
               {projectJobs.map((job) => {
                 const jobSelected = !scopedExternalLogView && selectedJob?.id === job.id;
                 return (
@@ -225,8 +280,13 @@ export function ActivityTab({
           )}
         </div>
 
-        <RefinedPanel>
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
+        <RefinedPanel className={cn(availableHeight !== null && "flex min-h-0 flex-col")}>
+          <div
+            className={cn(
+              "flex flex-wrap items-start justify-between gap-3 border-b p-4",
+              availableHeight !== null && "max-h-[35%] shrink-0 overflow-y-auto",
+            )}
+          >
             <div className="min-w-[min(100%,18rem)] flex-1">
               <h3 className="break-words text-sm font-semibold">{displayedOutputTitle}</h3>
               {outputTitleIsLong && (
@@ -244,6 +304,14 @@ export function ActivityTab({
               )}
             </div>
             <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                aria-expanded={terminalOpen}
+                onClick={() => setTerminalOpen((value) => !value)}
+              >
+                <Terminal className="h-4 w-4" /> Commande Odoo
+              </Button>
               <Button variant="outline" size="sm" onClick={showDiagnostics} disabled={!selectedProjectReady}>
                 <Activity className="h-4 w-4" />
                 Diagnostic
@@ -258,73 +326,134 @@ export function ActivityTab({
               </Button>
             </div>
           </div>
-          <div className="min-w-0 p-4">
-            {!scopedExternalLogView && selectedJob && <JobCancelState job={selectedJob} action={selectedJobStop} />}
-            {!scopedExternalLogView && selectedJob && isJobActive(selectedJob) && (
-              <JobProgressPanel
-                label={outputProgress?.label || "Traitement en cours"}
-                percent={outputProgress?.percent ?? 0}
-                action={selectedJobStop}
-              />
-            )}
-            {finishedJobSummary && (
-              <div
-                className={cn(
-                  "mb-3 rounded-md border p-4",
-                  finishedJobSummary.status === "error"
-                    ? "border-destructive/30 bg-destructive/[0.08]"
-                    : finishedJobSummary.status === "cancelled"
-                      ? "border-amber-500/30 bg-amber-500/[0.08]"
-                      : "border-emerald-500/25 bg-emerald-500/[0.08]",
-                )}
-              >
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  {finishedJobSummary.status === "error" ? (
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-                  ) : finishedJobSummary.status === "cancelled" ? (
-                    <Square className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-                  )}
-                  {finishedJobSummary.status === "error"
-                    ? "Opération en erreur"
-                    : finishedJobSummary.status === "cancelled"
-                      ? "Opération arrêtée"
-                      : "Opération réussie"}
-                </div>
-                <p className="mt-1 break-words text-sm text-muted-foreground">
-                  {finishedJobSummary.error_message || (
-                    <>
-                      Terminée le{" "}
-                      <span className="tabular-nums">
-                        {finishedJobSummary.finished_at || finishedJobSummary.started_at}
-                      </span>
-                      .
-                    </>
-                  )}
-                </p>
+          {terminalOpen && (
+            <form
+              onSubmit={(event) => void runCommand(event)}
+              className={cn(
+                "shrink-0 space-y-2 border-b bg-muted/30 px-4 py-3",
+                availableHeight !== null && "max-h-[40%] overflow-y-auto",
+              )}
+            >
+              <label htmlFor="project-container-command" className="block text-sm font-semibold">
+                Commande dans le conteneur Odoo · {selectedProject?.name}
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Une commande à la fois, sans session interactive ; sa sortie apparaît dans l’activité. Les commandes
+                peuvent modifier le projet.
+              </p>
+              <div className="flex flex-wrap gap-2 sm:flex-nowrap">
+                <Input
+                  id="project-container-command"
+                  className="min-w-0 flex-1 font-mono"
+                  value={command}
+                  onChange={(event) => setCommand(event.target.value)}
+                  placeholder="Ex. : pwd"
+                  disabled={launchingCommand || selectedProject?.odoo_status !== "running"}
+                />
                 <Button
-                  className="mt-3"
-                  variant="outline"
-                  size="sm"
-                  aria-expanded={rawOutputVisible}
-                  onClick={() => setRawOutputVisible((visible) => !visible)}
+                  type="submit"
+                  disabled={launchingCommand || selectedProject?.odoo_status !== "running" || !command.trim()}
                 >
-                  {rawOutputVisible ? "Masquer la sortie brute" : "Afficher la sortie brute"}
+                  Exécuter
                 </Button>
               </div>
-            )}
-            <OdooLogsModeBar
-              view={scopedExternalLogView}
-              onShowFull={() => onShowLogs(true)}
-              onShowSummary={() => onShowLogs()}
-            />
-            {emptyOutputHint}
+              {selectedProject?.odoo_status !== "running" && (
+                <p className="text-xs text-muted-foreground">Démarre le projet pour utiliser les commandes.</p>
+              )}
+            </form>
+          )}
+          <div className={cn("min-w-0 p-4", availableHeight !== null && "flex min-h-0 flex-1 flex-col")}>
+            <div className={cn(availableHeight !== null && "min-h-0 max-h-[50%] shrink-0 overflow-y-auto")}>
+              {!scopedExternalLogView && selectedJob && <JobCancelState job={selectedJob} action={selectedJobStop} />}
+              {!scopedExternalLogView && selectedJob && (isJobActive(selectedJob) || selectedJob.status === "done") && (
+                <>
+                  <JobProgressPanel
+                    label={selectedJob.status === "done" ? "Terminée" : outputProgress?.label || "Traitement en cours"}
+                    percent={selectedJob.status === "done" ? 100 : (outputProgress?.percent ?? 0)}
+                    completed={selectedJob.status === "done"}
+                    action={selectedJobStop}
+                  />
+                  {isJobActive(selectedJob) && (
+                    <p className="mb-3 text-xs text-muted-foreground">
+                      L’avancement est en partie estimé ; chaque étape peut prendre plus ou moins de temps.
+                    </p>
+                  )}
+                </>
+              )}
+              {finishedJobSummary && (
+                <div
+                  className={cn(
+                    "mb-3 rounded-md border p-4",
+                    finishedJobSummary.status === "error"
+                      ? "border-destructive/30 bg-destructive/[0.08]"
+                      : finishedJobSummary.status === "cancelled"
+                        ? "border-amber-500/30 bg-amber-500/[0.08]"
+                        : "border-emerald-500/25 bg-emerald-500/[0.08]",
+                  )}
+                >
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    {finishedJobSummary.status === "error" ? (
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+                    ) : finishedJobSummary.status === "cancelled" ? (
+                      <Square className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                    )}
+                    {finishedJobSummary.status === "error"
+                      ? "Opération en erreur"
+                      : finishedJobSummary.status === "cancelled"
+                        ? "Opération arrêtée"
+                        : "Opération réussie"}
+                  </div>
+                  <p className="mt-1 break-words text-sm text-muted-foreground">
+                    {finishedJobSummary.error_message || (
+                      <>
+                        Terminée le{" "}
+                        <span className="tabular-nums">
+                          {finishedJobSummary.finished_at || finishedJobSummary.started_at}
+                        </span>
+                        .
+                      </>
+                    )}
+                  </p>
+                  {finishedJobSummary.result?.kind === "database_restore" && (
+                    <p className="mt-2 text-sm">
+                      {finishedJobSummary.result.neutralization === "verified" &&
+                        "Neutralisation exécutée et contrôlée. Vérifie les connexions propres à tes modules avant les essais."}
+                      {finishedJobSummary.result.neutralization === "partial" &&
+                        "Neutralisation partielle : les autres connexions externes peuvent rester actives. Vérifie-les avant les essais."}
+                      {finishedJobSummary.result.neutralization === "unknown" &&
+                        "Neutralisation exécutée et contrôlée, mais son mode n’a pas pu être identifié : vérifie les connexions externes avant les essais."}
+                      {finishedJobSummary.result.neutralization === "disabled" &&
+                        "Neutralisation désactivée : vérifie les connexions et automatisations avant d’utiliser la base."}
+                      {finishedJobSummary.result.neutralization === "failed" &&
+                        "La base est restaurée, mais la neutralisation a échoué. Corrige la cause et relance Neutraliser depuis les actions de la base."}
+                    </p>
+                  )}
+                  <Button
+                    className="mt-3"
+                    variant="outline"
+                    size="sm"
+                    aria-expanded={rawOutputVisible}
+                    onClick={() => setRawOutputVisible((visible) => !visible)}
+                  >
+                    {rawOutputVisible ? "Masquer la sortie brute" : "Afficher la sortie brute"}
+                  </Button>
+                </div>
+              )}
+              <OdooLogsModeBar
+                view={scopedExternalLogView}
+                onShowFull={() => onShowLogs(true)}
+                onShowSummary={() => onShowLogs()}
+              />
+              {emptyOutputHint}
+            </div>
             <JobOutputPre
               outputRef={logOutputRef}
               content={outputContent}
               hidden={rawOutputHidden || outputEmpty}
               onScroll={onLogOutputScroll}
+              fillAvailable={availableHeight !== null}
             />
           </div>
         </RefinedPanel>

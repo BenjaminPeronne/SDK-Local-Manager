@@ -809,7 +809,13 @@ export default function Home() {
       void refreshJobs();
       return result.job;
     } catch (err) {
-      pushToast("error", err instanceof Error ? err.message : "Action impossible.");
+      const message = err instanceof Error ? err.message : "Action impossible.";
+      pushToast(
+        "error",
+        action === "container_command" && message === "Action inconnue."
+          ? "Le service local ne connaît pas encore les commandes Odoo. Redémarre le service puis réessaie."
+          : message,
+      );
       return null;
     } finally {
       if (useGlobalLoading) setLoading(false);
@@ -1370,6 +1376,7 @@ export default function Home() {
       setExternalLogView(null);
       enableLogAutoFollow();
       setRestoreDbOpen(false);
+      setActiveTab("logs");
       pushToast("success", `Restauration lancée : ${payload.db}`);
       await refreshJobs();
       schedule(refreshOverview, 2500);
@@ -1386,6 +1393,7 @@ export default function Home() {
     const job = await createJob("restore_remote_backup", payload);
     if (!job) return false;
     setRestoreDbOpen(false);
+    setActiveTab("logs");
     schedule(refreshOverview, 2500);
     return true;
   }
@@ -1965,6 +1973,7 @@ export default function Home() {
                   )}
 
                   <ActivityTab
+                    createJob={createJob}
                     enableLogAutoFollow={enableLogAutoFollow}
                     logDescriptionExpanded={logDescriptionExpanded}
                     logOutputRef={logOutputRef}
@@ -2466,7 +2475,15 @@ export default function Home() {
         </div>
       )}
 
-      <ToastStack toasts={toasts} raised={showFloatingModuleActions} onDismiss={dismissToast} />
+      <ToastStack
+        toasts={toasts}
+        raised={showFloatingModuleActions}
+        onDismiss={dismissToast}
+        onViewErrors={() => {
+          openSettingsDialog();
+          setSettingsSection("diagnostic");
+        }}
+      />
     </main>
   );
 }

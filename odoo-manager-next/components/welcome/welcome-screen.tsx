@@ -91,55 +91,60 @@ export function WelcomeScreen({
           : "Aucun projet pour l’instant. Crée ton premier environnement Odoo local : le gestionnaire prépare le code, la base et l’accès web."}
       </p>
 
-      <div className="mt-8 grid w-full max-w-xl gap-3 sm:grid-cols-2">
-        <WelcomeStatus
-          title="Docker"
-          ready={docker.state === "ready"}
-          busy={docker.state === "starting" || docker.state === "checking"}
-          pendingLabel={DOCKER_LABELS[docker.state]}
-          message={docker.message}
-          detail={docker.detail}
-          action={docker.action}
-          actionBelow
-        />
-        <WelcomeStatus
-          title="Traefik"
-          ready={Boolean(traefik?.ready)}
-          busy={!traefik}
-          waiting={traefik?.waiting}
-          pendingLabel={traefik?.waiting ? "En attente" : traefik ? "À vérifier" : "Vérification"}
-          message={traefik?.message || "Vérification en cours…"}
-          action={traefik?.action}
-          actionBelow
-        />
-        {mailpit && (
+      <section aria-labelledby="welcome-services-title" className="mt-8 w-full max-w-xl text-left">
+        <h3 id="welcome-services-title" className="mb-3 text-sm font-semibold">
+          État de l’environnement
+        </h3>
+        <div className="grid gap-3 sm:grid-cols-2">
           <WelcomeStatus
-            className="sm:col-span-2"
-            title="Mailpit"
-            ready={mailpit.running}
-            optional
-            readyLabel="Démarré"
-            pendingLabel="Facultatif"
-            message={mailpit.message}
-            action={
-              mailpit.running ? (
-                <Button size="sm" variant="outline" onClick={onOpenMailpit}>
-                  <ExternalLink className="h-4 w-4" />
-                  Voir les e-mails
-                </Button>
-              ) : (
-                <Button size="sm" variant="outline" disabled={!mailpit.can_start} onClick={onStartMailpit}>
-                  <Mail className="h-4 w-4" />
-                  {mailpit.installed ? "Démarrer" : "Installer"}
-                </Button>
-              )
-            }
+            title="Docker"
+            ready={docker.state === "ready"}
+            busy={docker.state === "starting" || docker.state === "checking"}
+            pendingLabel={DOCKER_LABELS[docker.state]}
+            message={docker.message}
+            detail={docker.detail}
+            action={docker.action}
+            actionBelow
           />
-        )}
-      </div>
+          <WelcomeStatus
+            title="Traefik"
+            ready={Boolean(traefik?.ready)}
+            busy={!traefik}
+            waiting={traefik?.waiting}
+            pendingLabel={traefik?.waiting ? "En attente" : traefik ? "À vérifier" : "Vérification"}
+            message={traefik?.message || "Vérification en cours…"}
+            action={traefik?.action}
+            actionBelow
+          />
+          {mailpit && (
+            <WelcomeStatus
+              className="sm:col-span-2"
+              title="Mailpit"
+              ready={mailpit.running}
+              optional
+              readyLabel="Démarré"
+              pendingLabel="Facultatif"
+              message={mailpit.message}
+              action={
+                mailpit.running ? (
+                  <Button size="sm" variant="outline" onClick={onOpenMailpit}>
+                    <ExternalLink className="h-4 w-4" />
+                    Voir les e-mails
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" disabled={!mailpit.can_start} onClick={onStartMailpit}>
+                    <Mail className="h-4 w-4" />
+                    {mailpit.installed ? "Démarrer" : "Installer"}
+                  </Button>
+                )
+              }
+            />
+          )}
+        </div>
+      </section>
 
       <div className="mt-8 flex w-full max-w-xl flex-col gap-2 sm:flex-row sm:justify-center">
-        <Button className="w-full sm:w-auto" onClick={onCreateProject}>
+        <Button className="w-full sm:w-auto" variant={hasProjects ? "outline" : "default"} onClick={onCreateProject}>
           <FolderPlus className="h-4 w-4" />
           Nouveau projet
         </Button>

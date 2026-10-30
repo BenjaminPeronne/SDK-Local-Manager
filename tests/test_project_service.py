@@ -1693,6 +1693,19 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertTrue(any("Neutralisation terminée et contrôlée." in line for line in logs))
         self.assertTrue(any("Redémarrage du serveur Odoo" in line for line in logs))
 
+    def test_neutralization_returns_the_mode_reported_by_odoo(self):
+        for mode in ("native", "partial", None):
+            with self.subTest(mode=mode):
+                def stream(_command, log=None):
+                    if mode:
+                        log(f"ODOO_MANAGER_NEUTRALIZATION_MODE={mode}")
+                    return 0
+
+                with patch.object(self.service, "stream", side_effect=stream), patch.object(
+                    self.service, "run_postgres_sql"
+                ), patch.object(self.service, "verify_database_neutralization"):
+                    self.assertEqual(mode, self.service._execute_database_neutralization("DEMO", "client"))
+
     def test_neutralization_check_fails_while_a_bank_link_is_still_live(self):
         self.runner.statuses = {
             "odoo-DEMO": "running",
@@ -2582,7 +2595,7 @@ class OdooStartupRepairTests(unittest.TestCase):
         }
         return sessions
 
-    def load_dump_with_post_data(self, sessions=2):
+    def load_dump_with_post_data(self, sessions=2, on_post_data=None):
         dump = (
             b"SET statement_timeout = 0;\n"
             b"SELECT pg_catalog.set_config('search_path', '', false);\n"
@@ -2607,6 +2620,7 @@ class OdooStartupRepairTests(unittest.TestCase):
                 archive.getinfo("dump.sql"),
                 options="-c maintenance_work_mem=512MB",
                 post_data_sessions=sessions,
+                on_post_data=on_post_data,
                 post_data_options="-c maintenance_work_mem=256MB",
             )
 
@@ -2633,6 +2647,14 @@ class OdooStartupRepairTests(unittest.TestCase):
         self.assertNotIn("unrestrict", everything)
         commands = [command for command, _cwd, _timeout in self.runner.captures if "-Atc" in command]
         self.assertTrue(any("relkind = 'p'" in command[-1] for command in commands))
+
+    def test_post_data_callback_occurs_after_loading_data_and_before_indexes(self):
+        sessions = self.fake_psql_sessions()
+        at_callback = []
+        self.assertEqual(0, self.load_dump_with_post_data(on_post_data=lambda: at_callback.append(list(sessions))))
+        self.assertEqual(1, len(at_callback))
+        self.assertEqual(["data"], [kind for kind, _ in at_callback[0]])
+        self.assertTrue(any(kind == "post-data" for kind, _ in sessions))
 
     def test_a_crashed_post_data_session_fails_the_restoration(self):
         self.fake_psql_sessions(crash_on="VALIDATE CONSTRAINT")

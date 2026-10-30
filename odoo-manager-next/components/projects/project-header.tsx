@@ -276,12 +276,13 @@ export function ProjectHeader({
       <DropdownMenu.Root modal={false}>
         <DropdownMenu.Trigger>
           <Button
-            className="-ml-px w-8 shrink-0 rounded-l-none px-0"
+            className="-ml-px shrink-0 rounded-l-none px-2"
             variant="outline"
-            disabled={!selectedProjectReady}
+            disabled={!selectedProjectReady || !selectedProjectOnline || Boolean(selectedProjectLifecycleJob)}
             title="Mode debug et e-mails"
-            aria-label="Autres façons d’ouvrir Odoo"
+            aria-label="Ouvrir le menu debug et e-mails"
           >
+            <span>Debug et e-mails</span>
             <ChevronDown className="h-4 w-4" />
           </Button>
         </DropdownMenu.Trigger>

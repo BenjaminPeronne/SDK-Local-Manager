@@ -6,14 +6,7 @@ import { deletionLabel, deletionMoment, type UpcomingDeletion } from "@/lib/rete
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Notice } from "@/components/common/notice";
 
 type RetentionNoticeProps = {
@@ -235,31 +228,33 @@ function RetentionDialog({
           })}
         </div>
 
-        <DialogFooter>
+        <div className="shrink-0 space-y-3 border-t pt-4">
           {confirmDelete && (
-            <p className="text-sm text-red-700 dark:text-red-300 sm:mr-auto">
-              Les {selected.length} base{selected.length > 1 ? "s" : ""} sélectionnée{selected.length > 1 ? "s" : ""} et
-              leurs fichiers seront supprimés définitivement.
+            <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+              {selected.length === 1
+                ? "La base sélectionnée et ses fichiers seront supprimés définitivement."
+                : `Les ${selected.length} bases sélectionnées et leurs fichiers seront supprimés définitivement.`}
             </p>
           )}
-          <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <Button
+              className="w-full"
+              variant="destructive"
+              disabled={busy || !selected.length}
+              onClick={() => (confirmDelete ? void deleteSelected() : setConfirmDelete(true))}
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {confirmDelete ? "Confirmer la suppression" : "Supprimer la sélection"}
+            </Button>
+            <Button className="w-full" disabled={busy || !selected.length} onClick={() => void keepSelected()}>
+              {extending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarPlus className="h-4 w-4" />}
+              Garder 30 jours de plus
+            </Button>
+          </div>
+          <Button className="w-full sm:w-auto" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
             Plus tard
           </Button>
-          <Button
-            variant="destructive"
-            disabled={busy || !selected.length}
-            onClick={() => (confirmDelete ? void deleteSelected() : setConfirmDelete(true))}
-          >
-            {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-            {confirmDelete ? "Confirmer la suppression" : "Supprimer la sélection"}
-          </Button>
-          <Button disabled={busy || !selected.length} onClick={() => void keepSelected()}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarPlus className="h-4 w-4" />}
-            {selected.length
-              ? `Garder ${selected.length} base${selected.length > 1 ? "s" : ""} 30 jours de plus`
-              : "Garder 30 jours de plus"}
-          </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

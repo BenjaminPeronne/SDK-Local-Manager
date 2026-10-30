@@ -48,10 +48,12 @@ export function ToastStack({
   toasts,
   raised,
   onDismiss,
+  onViewErrors,
 }: {
   toasts: Toast[];
   raised: boolean;
   onDismiss: (id: number) => void;
+  onViewErrors: () => void;
 }) {
   const mounted = useSyncExternalStore(
     subscribeNothing,
@@ -70,14 +72,22 @@ export function ToastStack({
       )}
     >
       {toasts.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
+        <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} onViewErrors={onViewErrors} />
       ))}
     </div>,
     document.body,
   );
 }
 
-function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
+function ToastItem({
+  toast,
+  onDismiss,
+  onViewErrors,
+}: {
+  toast: Toast;
+  onDismiss: (id: number) => void;
+  onViewErrors: () => void;
+}) {
   const [paused, setPaused] = useState(false);
   const remaining = useRef(toastDuration(toast));
   const startedAt = useRef(0);
@@ -100,36 +110,20 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
 
   const style = KIND_STYLES[toast.kind];
   const Icon = style.icon;
-  return (
-    <div
-      role={toast.kind === "error" ? "alert" : "status"}
-      className={cn(
-        "pointer-events-auto flex w-full items-start gap-2.5 rounded-lg border py-2.5 pl-3 pr-1.5 text-sm shadow-lg",
-        style.container,
-      )}
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      onFocus={() => setPaused(true)}
-      onBlur={() => setPaused(false)}
-    >
+  const action =
+    toast.action ??
+    (toast.kind === "error" ? { label: "Voir le journal des erreurs", onClick: onViewErrors } : undefined);
+  const content = (
+    <>
       <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", style.iconColor)} aria-hidden="true" />
-      <div className="min-w-0 flex-1">
-        <p className="line-clamp-5 whitespace-pre-line break-words" title={toast.message}>
-          {toast.message}
-        </p>
-        {toast.action && (
-          <button
-            type="button"
-            className="mt-1.5 text-xs font-semibold underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
-            onClick={() => {
-              toast.action?.onClick();
-              onDismiss(toast.id);
-            }}
-          >
-            {toast.action.label}
-          </button>
+      <span className="min-w-0 flex-1">
+        <span className="block max-h-40 overflow-y-auto whitespace-pre-line break-words">{toast.message}</span>
+        {action && (
+          <span className="mt-1.5 block text-xs font-semibold underline underline-offset-2">
+            {action.label} <span aria-hidden="true">→</span>
+          </span>
         )}
-      </div>
+      </span>
       {(toast.count ?? 1) > 1 && (
         <span
           className="mt-0.5 shrink-0 rounded-full bg-black/5 px-1.5 text-[11px] font-medium tabular-nums dark:bg-white/10"
@@ -137,6 +131,36 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
         >
           ×{toast.count}
         </span>
+      )}
+    </>
+  );
+  return (
+    <div
+      role={toast.kind === "error" ? "alert" : "status"}
+      className={cn(
+        "pointer-events-auto flex w-full items-start gap-1 rounded-lg border p-1.5 text-sm shadow-lg",
+        style.container,
+      )}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false);
+      }}
+    >
+      {action ? (
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-start gap-2.5 rounded-md px-1.5 py-1 text-left hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-white/10"
+          onClick={() => {
+            action.onClick();
+            onDismiss(toast.id);
+          }}
+        >
+          {content}
+        </button>
+      ) : (
+        <div className="flex min-w-0 flex-1 items-start gap-2.5 px-1.5 py-1">{content}</div>
       )}
       <button
         type="button"

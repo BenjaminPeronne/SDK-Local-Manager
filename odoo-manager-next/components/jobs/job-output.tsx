@@ -3,6 +3,7 @@
 import type { RefObject } from "react";
 import { Logs } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 // Ligne de synthèse produite par odoo_log_display.py quand des traces non bloquantes sont résumées.
 const CONDENSED_ODOO_LOG_RE = /^Info Odoo \(.*\) : \d+ fichier\(s\) déjà absent\(s\) lors du nettoyage du filestore\./m;
@@ -45,17 +46,22 @@ export function JobOutputPre({
   content,
   hidden,
   onScroll,
+  fillAvailable = false,
 }: {
   outputRef: RefObject<HTMLPreElement | null>;
   content: string;
   hidden?: boolean;
   onScroll: () => void;
+  fillAvailable?: boolean;
 }) {
   return (
     <pre
       ref={outputRef}
       hidden={hidden}
-      className="log-terminal min-h-[260px] max-h-[min(58vh,620px)] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 p-3 text-xs leading-relaxed text-emerald-100 sm:p-4"
+      className={cn(
+        "log-terminal min-h-[260px] max-h-[min(58vh,620px)] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 p-3 text-xs leading-relaxed text-emerald-100 sm:p-4",
+        fillAvailable && "min-h-0 max-h-none flex-1",
+      )}
       onScroll={onScroll}
     >
       {content}

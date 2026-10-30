@@ -255,6 +255,7 @@ API_ENDPOINTS = {
 # Actions acceptées par POST /api/jobs. tests/test_web_runtime.py compare cette liste au
 # code de répartition : une action ajoutée sans être publiée fait échouer les tests.
 API_ACTIONS = (
+    "container_command",
     "cleanup_staging",
     "convert_wsl_addon_links",
     "create_database",
@@ -3254,6 +3255,7 @@ MODULE_FILES_CANCEL_HINT = (
 )
 # (arrêt possible, ce que fait l'arrêt ou pourquoi il est impossible), par fonction d'action.
 JOB_CANCEL_POLICIES = {
+    "container_command_job": (True, "La commande est interrompue ; ses modifications déjà effectuées ne sont pas annulées."),
     "module_sources_job": (True, "La recherche s’arrête ; rien n’a été modifié dans le projet."),
     "start_project_job": (
         True,
@@ -3281,7 +3283,7 @@ JOB_CANCEL_POLICIES = {
     "fix_expired_database_job": (True, ODOO_SCRIPT_CANCEL_HINT),
     "restore_database_job": (
         True,
-        "La restauration est interrompue et la base partiellement restaurée est supprimée avec son filestore.",
+        "La restauration est interrompue. Le gestionnaire tente de supprimer la base partielle et son filestore ; consulte le journal pour vérifier le nettoyage.",
     ),
     "create_database_job": (
         True,
@@ -4092,8 +4094,7 @@ def neutralize_restored_database(job, service, project, db_name):
     while True:
         lines.clear()
         try:
-            service.run_odoo_neutralize_command(project, db_name, log=log)
-            return
+            return service.run_odoo_neutralize_command(project, db_name, log=log)
         except RuntimeError as exc:
             import_name = missing_python_import("\n".join(lines[-400:]))
             package = python_package_for_import(import_name) if import_name else ""
@@ -4109,6 +4110,13 @@ def neutralize_restored_database(job, service, project, db_name):
             service.install_python_package(project, package, log=job.add)
 
 
+def restored_neutralization_status(neutralize, mode):
+    """État affichable après contrôles, fondé sur le chemin réellement exécuté."""
+    if not neutralize:
+        return "disabled"
+    return {"native": "verified", "partial": "partial"}.get(mode, "unknown")
+
+
 def restore_database_job(job, project, backup_path, filename, db_name, copy=True, neutralize=True):
     """Restaure une sauvegarde ZIP Odoo en envoyant dump.sql directement à PostgreSQL.
 
@@ -4121,7 +4129,9 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
     service = project_service()
     odoo_stopped = False
     try:
+        validation_started = time.monotonic()
         details = validate_odoo_backup_archive(backup_path)
+        job.add(f"Mesure — validation de l'archive : {time.monotonic() - validation_started:.2f} s.")
         size_mb = backup_path.stat().st_size / (1024 * 1024)
         job.add(f"Restauration de {db_name} dans {project}")
         job.add(f"Sauvegarde: {filename} ({size_mb:.1f} Mo)")
@@ -4172,8 +4182,12 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
             job_progress.span("Chargement des données", end=load_end, expected=60 + dump.file_size / (25 * 1024 * 1024))
             job.add("Chargement des données dans PostgreSQL (sans passer par Odoo)...")
             started = time.monotonic()
+            index_started = None
 
             def post_data():
+                nonlocal index_started
+                index_started = time.monotonic()
+                job.add(f"Mesure — chargement SQL avant index : {index_started - started:.2f} s.")
                 job.add(
                     "Données chargées. Création des index et des contraintes : étape la plus longue pour une grosse base."
                 )
@@ -4192,9 +4206,16 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
                     post_data_options=post_data_options,
                     freeze=True,
                 )
+                loaded_at = time.monotonic()
+                if index_started is not None:
+                    job.add(f"Mesure — index et contraintes : {loaded_at - index_started:.2f} s.")
+                else:
+                    job.add(f"Mesure — chargement SQL et index : {loaded_at - started:.2f} s (phases non séparées).")
                 if filestore:
                     job_progress.span("Copie du filestore", end=85, expected=30 + filestore_bytes / (40 * 1024 * 1024))
+                    filestore_started = time.monotonic()
                     service.restore_filestore(project, db_name, archive, filestore, log=job.add)
+                    job.add(f"Mesure — copie du filestore : {time.monotonic() - filestore_started:.2f} s, {filestore_bytes} octets décompressés.")
             except Exception:
                 job.add(f"Restauration incomplète : suppression de la base {db_name}...")
                 try:
@@ -4249,10 +4270,24 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
         odoo_stopped = False
         if neutralize:
             job.add("Neutralisation complète par Odoo et contrôles de sécurité...")
-            neutralize_restored_database(job, service, project, db_name)
+            job_progress.span("Neutralisation et contrôles", end=99, expected=90)
+            neutralization_started = time.monotonic()
+            try:
+                neutralization_mode = neutralize_restored_database(job, service, project, db_name)
+            except Exception:
+                job.result = {"kind": "database_restore", "database": db_name, "neutralization": "failed"}
+                raise
+            finally:
+                job.add(f"Mesure — neutralisation et contrôles : {time.monotonic() - neutralization_started:.2f} s.")
         else:
+            job_progress.span("Redémarrage et vérifications", end=99, expected=40)
             service.start_odoo_server(project, log=job.add)
             service.wait_project_http(project, log=job.add)
+        job.result = {
+            "kind": "database_restore",
+            "database": db_name,
+            "neutralization": restored_neutralization_status(neutralize, neutralization_mode if neutralize else None),
+        }
         job.add(f"Base restaurée: {db_name}")
     finally:
         try:
@@ -4311,8 +4346,8 @@ def restore_remote_backup_job(job, project, backup, db_name, neutralize=True):
     except BaseException:
         destination.unlink(missing_ok=True)
         raise
-    elapsed = int(time.monotonic() - started)
-    job.add(f"Sauvegarde téléchargée en {elapsed // 60} min {elapsed % 60:02d} s.")
+    elapsed = time.monotonic() - started
+    job.add(f"Mesure — téléchargement : {elapsed:.2f} s, {backup.size} octets annoncés.")
     # La restauration devient propriétaire du fichier et le supprime à la fin, réussie ou non.
     restore_database_job(job, project, destination, filename, db_name, copy=True, neutralize=neutralize)
 
@@ -8870,6 +8905,37 @@ def install_socle_action(payload):
     return Job(f"Installer le socle sur {db_name}", install_socle_job, (project, db_name, presets), project=project)
 
 
+def container_command_job(job, project, command):
+    project = validate_project(project)
+    service = project_service()
+    container = f"odoo-{project}"
+    if not service.is_running(container):
+        raise RuntimeError("Le conteneur Odoo du projet n'est pas démarré.")
+    job.add(f"Commande dans le conteneur Odoo du projet {project}.")
+    # La commande n'est pas réécrite automatiquement dans l'historique des actions.
+    first_line = True
+
+    def output(line):
+        nonlocal first_line
+        if first_line:
+            first_line = False
+            if str(line).startswith("$ "):
+                return
+        job.add(str(line))
+
+    code = service.stream(service.docker("exec", container, "sh", "-lc", "exec </dev/null\n" + command), log=output)
+    if code:
+        raise RuntimeError(f"La commande s'est terminée avec le code {code}.")
+
+
+def container_command_action(payload):
+    project = payload_project(payload)
+    command = payload.get("command")
+    if not isinstance(command, str) or not command.strip() or len(command.encode("utf-8")) > 8192 or "\x00" in command:
+        raise ValueError("Saisis une commande valide de 8 192 octets maximum.")
+    return Job(f"Commande Odoo · {project}", container_command_job, (project, command), project=project)
+
+
 def link_modules_action(payload):
     project = payload_project(payload)
     source = payload.get("source", "")
@@ -8879,6 +8945,7 @@ def link_modules_action(payload):
 
 
 JOB_ACTIONS = {
+    "container_command": container_command_action,
     "repository_modules": repository_modules_action,
     "module_sources": module_sources_action,
     "restore_module_source": restore_module_source_action,

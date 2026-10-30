@@ -267,6 +267,8 @@ export type Job = {
     kind?: string;
     scope?: string;
     mode?: string;
+    database?: string;
+    neutralization?: "disabled" | "partial" | "verified" | "failed" | "unknown";
     modules?: string[];
   };
 };

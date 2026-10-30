@@ -13,13 +13,14 @@ const buttonVariants = ({
   className,
 }: { variant?: ButtonVariant | null; size?: ButtonSize | null; className?: string } = {}) =>
   cn(
-    "box-border min-w-0 select-none justify-center gap-2 whitespace-normal text-center font-medium leading-snug transition-[background-color,border-color,box-shadow,filter,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:!border-border disabled:!bg-muted disabled:!text-muted-foreground disabled:!shadow-none disabled:!filter-none disabled:opacity-60 [&_svg]:shrink-0",
+    "box-border min-w-0 select-none justify-center gap-2 whitespace-normal text-center font-medium leading-snug transition-[background-color,border-color,box-shadow,filter,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:!border-border disabled:!bg-muted disabled:!text-muted-foreground disabled:!shadow-none disabled:!filter-none disabled:!opacity-100 [&_svg]:shrink-0",
     (variant === "default" || variant === "destructive") &&
       "app-solid-button hover:brightness-[0.97] active:brightness-[0.93]",
     variant === "default" && "app-primary-button",
-    variant === "secondary" && "hover:bg-secondary/80 active:bg-secondary/70",
-    variant === "outline" && "hover:border-primary/45 hover:bg-hover active:bg-hover/80",
-    variant === "ghost" && "m-0 hover:bg-hover active:bg-hover/80",
+    variant === "secondary" && "text-secondary-foreground hover:bg-secondary/80 active:bg-secondary/70",
+    variant === "outline" &&
+      "text-foreground shadow-[inset_0_0_0_1px_hsl(var(--button-outline))] hover:bg-hover active:bg-hover/80",
+    variant === "ghost" && "m-0 text-foreground hover:bg-hover active:bg-hover/80",
     (variant === "success" || variant === "accent") &&
       "app-tinted shadow-[inset_0_0_0_1px_var(--accent-a6)] hover:shadow-[inset_0_0_0_1px_var(--accent-a8)]",
     variant === "destructive" && "app-destructive-button",

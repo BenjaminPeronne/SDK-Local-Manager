@@ -77,6 +77,7 @@
   --destructive-foreground: 0 0% 100%;
   --border: 20 10% 81%;
   --input: 20 10% 74%;
+  --button-outline: 20 8% 50%;
   --ring: 22 85% 40%;
   /* Survol : 11 points sous une carte blanche, 6 sous le fond de page. `muted/40` en donnait 3 et 1. */
   --hover: 20 16% 89%;
@@ -100,6 +101,7 @@
   --destructive-foreground: 0 0% 100%;
   --border: 20 6% 23%;
   --input: 20 6% 30%;
+  --button-outline: 20 8% 55%;
   --ring: 25 91% 54%;
   --hover: 20 6% 17%;
   --selected: 24 45% 17%;

@@ -157,7 +157,7 @@ export function DatabasesTab({
             }
           >
             Sa restauration s’est arrêtée avant la fin : il lui manque une partie de sa structure, elle n’est pas fiable
-            même si Odoo l’ouvre. Supprime-la (menu « ⋯ » de la base), puis restaure de nouveau la sauvegarde.
+            même si Odoo l’ouvre. Supprime-la depuis « Actions » sur la base, puis restaure de nouveau la sauvegarde.
           </Notice>
         </div>
       )}
@@ -166,7 +166,7 @@ export function DatabasesTab({
         <RefinedSectionHeader
           title="Bases de données"
           count={odooDatabases.length}
-          description="Sélectionne la base sur laquelle travailler."
+          description="Sélectionne une base pour travailler dessus. Le bouton Actions permet de la gérer."
           actions={
             <>
               {selectedProject && (
@@ -197,18 +197,18 @@ export function DatabasesTab({
               const expiresAt = selectedProject?.database_retention?.[db]?.expires_at ?? null;
               const deletion = expiresAt === null ? null : deletionLabel(expiresAt);
               return (
-                <div key={db} className="group relative min-w-0">
+                <div key={db} className="relative min-w-0">
                   <InteractiveCard
                     aria-pressed={selectedDb === db}
                     className={cn(
-                      "w-full min-w-0 p-4 pr-14",
+                      "w-full min-w-0 p-4",
                       selectedDb === db
                         ? "border-primary bg-selected ring-2 ring-primary/35"
                         : "hover:border-primary/35 hover:bg-hover",
                     )}
                     onClick={() => chooseDatabase(db)}
                   >
-                    <div className="flex min-w-0 items-start gap-2">
+                    <div className="flex min-w-0 items-start gap-2 pr-24">
                       <span className={cn("min-w-0 break-all", REFINED_IDENTIFIER)}>{db}</span>
                       {db === selectedDb && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
                     </div>
@@ -230,7 +230,7 @@ export function DatabasesTab({
                       <Badge
                         variant={DELETION_BADGE_VARIANTS[deletion.tone]}
                         className="mt-2 gap-1"
-                        title={`Suppression automatique le ${deletionMoment(expiresAt)}. Pour la garder plus longtemps : menu « ⋯ », Garder 30 jours de plus.`}
+                        title={`Suppression automatique le ${deletionMoment(expiresAt)}. Pour la garder plus longtemps : Actions, puis Prolonger la conservation de 30 jours.`}
                       >
                         <Timer className="h-3.5 w-3.5 shrink-0" />
                         {deletion.text}
@@ -240,56 +240,74 @@ export function DatabasesTab({
                   <DropdownMenu.Root modal={false}>
                     <DropdownMenu.Trigger>
                       <Button
-                        size="icon"
-                        variant="ghost"
-                        className={cn(
-                          "absolute right-2 top-2 h-9 w-9 transition-opacity focus-visible:opacity-100 data-[state=open]:opacity-100",
-                          db !== selectedDb && "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100",
-                        )}
+                        size="sm"
+                        variant="outline"
+                        className="absolute right-2 top-2"
                         disabled={loading}
                         title={`Actions sur ${db}`}
                         aria-label={`Actions sur ${db}`}
                       >
                         <MoreHorizontal className="h-4 w-4" />
+                        Actions
                       </Button>
                     </DropdownMenu.Trigger>
-                    <DropdownMenu.Content align="end" className="min-w-60">
-                      <DropdownMenu.Label>Maintenance</DropdownMenu.Label>
-                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "regenerate_assets")}>
-                        <Paintbrush className="h-4 w-4" />
-                        Régénérer les assets
+                    <DropdownMenu.Content align="end" className="w-[min(22rem,calc(100vw-2rem))]">
+                      <DropdownMenu.Label className="truncate" title={db}>
+                        Actions sur {db}
+                      </DropdownMenu.Label>
+                      <DropdownMenu.Separator />
+                      <DropdownMenu.Label>Entretenir la base</DropdownMenu.Label>
+                      <DropdownMenu.Item
+                        className="h-auto items-start py-2"
+                        onSelect={() => runDatabaseAction(db, "regenerate_assets")}
+                      >
+                        <Paintbrush className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>
+                          <span className="block">Régénérer les ressources d’affichage</span>
+                          <span className="block text-xs text-muted-foreground">Reconstruit les assets de la base</span>
+                        </span>
                       </DropdownMenu.Item>
                       <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "reset_translations")}>
                         <Languages className="h-4 w-4" />
                         Réinitialiser les traductions
                       </DropdownMenu.Item>
-                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "neutralize")}>
-                        <ShieldCheck className="h-4 w-4" />
-                        Neutraliser et contrôler
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "admin_password")}>
-                        <KeyRound className="h-4 w-4" />
-                        Mot de passe admin
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "test_user")}>
-                        <UserCheck className="h-4 w-4" />
-                        Utilisateur de recette
-                      </DropdownMenu.Item>
                       <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "fix_expiration")}>
                         <CalendarClock className="h-4 w-4" />
                         Corriger une base expirée
                       </DropdownMenu.Item>
+                      <DropdownMenu.Separator />
+                      <DropdownMenu.Label>Sécuriser et préparer</DropdownMenu.Label>
+                      <DropdownMenu.Item
+                        className="h-auto items-start py-2"
+                        onSelect={() => runDatabaseAction(db, "neutralize")}
+                      >
+                        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>
+                          <span className="block">Neutraliser et contrôler</span>
+                          <span className="block text-xs text-muted-foreground">
+                            Réduit les risques d’envois et d’automatisations
+                          </span>
+                        </span>
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "admin_password")}>
+                        <KeyRound className="h-4 w-4" />
+                        Modifier le mot de passe administrateur
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "test_user")}>
+                        <UserCheck className="h-4 w-4" />
+                        Configurer un utilisateur de recette
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Separator />
+                      <DropdownMenu.Label>Gérer la base</DropdownMenu.Label>
                       {deletion && selectedProject && (
                         <DropdownMenu.Item onSelect={() => extendDatabaseRetention(selectedProject.name, db)}>
                           <CalendarPlus className="h-4 w-4" />
-                          Garder 30 jours de plus
+                          Prolonger la conservation de 30 jours
                         </DropdownMenu.Item>
                       )}
-                      <DropdownMenu.Separator />
-                      <DropdownMenu.Label>Outils</DropdownMenu.Label>
                       <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "dependencies")}>
                         <PackageX className="h-4 w-4" />
-                        Modules manquants
+                        Vérifier les modules manquants
                       </DropdownMenu.Item>
                       <DropdownMenu.Item
                         disabled={!selectedProjectReady}
@@ -298,15 +316,19 @@ export function DatabasesTab({
                         <Copy className="h-4 w-4" />
                         Dupliquer la base
                       </DropdownMenu.Item>
-                      <DropdownMenu.Item
-                        disabled={selectedProject?.postgres_status !== "running" || openingPostgresql}
-                        onSelect={() => runDatabaseAction(db, "psql")}
-                      >
-                        <Terminal className="h-4 w-4" />
-                        Ouvrir psql
-                      </DropdownMenu.Item>
                       <DropdownMenu.Separator />
-                      <DropdownMenu.Label>Zone dangereuse</DropdownMenu.Label>
+                      <DropdownMenu.Sub>
+                        <DropdownMenu.SubTrigger>Actions avancées</DropdownMenu.SubTrigger>
+                        <DropdownMenu.SubContent>
+                          <DropdownMenu.Item
+                            disabled={selectedProject?.postgres_status !== "running" || openingPostgresql}
+                            onSelect={() => runDatabaseAction(db, "psql")}
+                          >
+                            <Terminal className="h-4 w-4" />
+                            Ouvrir PostgreSQL (psql)
+                          </DropdownMenu.Item>
+                        </DropdownMenu.SubContent>
+                      </DropdownMenu.Sub>
                       <DropdownMenu.Item color="red" onSelect={() => runDatabaseAction(db, "drop")}>
                         <Trash2 className="h-4 w-4" />
                         Supprimer la base
@@ -363,7 +385,7 @@ export function DatabasesTab({
                 </div>
               </div>
               <p className="text-xs text-muted-foreground sm:col-span-2">
-                La console psql s’ouvre depuis le menu « ⋯ » d’une base, dans le terminal du système.
+                La console psql s’ouvre depuis le bouton « Actions » d’une base, dans le terminal du système.
               </p>
             </div>
           )}

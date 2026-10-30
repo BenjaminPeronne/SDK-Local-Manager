@@ -153,18 +153,19 @@ export function AppSidebar({
             />
           </div>
         </div>
-        <div className="min-h-0 max-h-[260px] flex-1 overflow-auto px-2 py-1 sm:max-h-[340px] lg:max-h-none">
+        <div className="min-h-0 max-h-[260px] flex-1 space-y-1 overflow-auto px-2 py-2 sm:max-h-[340px] lg:max-h-none">
           {pendingProjectArrivals.map((job) => (
             <div
               key={`creating-${job.id}`}
               className={cn(
-                "border-b border-primary/30 bg-primary/[0.08] transition-colors dark:bg-primary/[0.14]",
-                selectedProjectName === job.project && "ring-1 ring-inset ring-primary/35",
+                "rounded-lg border border-transparent bg-primary/[0.06] transition-colors dark:bg-primary/[0.1]",
+                selectedProjectName === job.project && "border-primary/40 bg-selected",
               )}
             >
               <button
                 type="button"
-                className="flex min-h-16 w-full min-w-0 items-center gap-2 px-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                className="flex min-h-16 w-full min-w-0 items-center gap-2 rounded-lg px-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                aria-current={selectedProjectName === job.project ? "page" : undefined}
                 onClick={() => {
                   setSelectedProjectName(job.project || "");
                   setSelectedDb("");
@@ -197,19 +198,21 @@ export function AppSidebar({
             const displayedRunning = (running && !serverStopped) || switchingOn;
             const displayedServerStopped = serverStopped && !switchingOn;
             const busyJob = lifecycleJob || projectBusyJobs.get(project.name);
+            const selected = selectedProject?.name === project.name;
 
             return (
               <div
                 key={project.name}
                 className={cn(
-                  "border-b border-border/70 transition-[background-color,border-color] duration-150 hover:border-primary/35 hover:bg-hover last:border-b-0",
-                  selectedProject?.name === project.name && "bg-selected",
+                  "rounded-lg border border-transparent transition-colors duration-150 hover:bg-hover",
                   absent && "bg-muted/35 text-muted-foreground",
+                  selected && "border-primary/40 bg-selected hover:bg-selected",
                 )}
               >
-                <div className="flex min-h-16 items-center gap-2 px-2">
+                <div className="flex min-h-16 items-center gap-2 px-3">
                   <button
                     type="button"
+                    aria-current={selected ? "page" : undefined}
                     className="-mx-1 min-w-0 flex-1 rounded-md px-1 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                     onClick={() => {
                       setSelectedProjectName(project.name);
@@ -220,7 +223,7 @@ export function AppSidebar({
                     <span
                       className={cn(
                         "block truncate text-sm font-semibold uppercase",
-                        absent ? "text-muted-foreground" : "text-foreground",
+                        absent && !selected ? "text-muted-foreground" : "text-foreground",
                       )}
                     >
                       {project.name}
@@ -270,7 +273,7 @@ export function AppSidebar({
                   </div>
                 </div>
                 {settings?.show_technical_details && (
-                  <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 text-xs">
                     <Badge variant={statusVariant(project.odoo_status)}>Odoo {project.odoo_status}</Badge>
                     {serverStopped && <Badge variant="warning">serveur Odoo arrêté</Badge>}
                     <Badge variant={statusVariant(project.postgres_status)}>PostgreSQL {project.postgres_status}</Badge>

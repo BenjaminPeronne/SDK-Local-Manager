@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Loader2, Square, X } from "lucide-react";
+import { CheckCircle2, Loader2, Square, X } from "lucide-react";
 import { jobStopUnavailableReason } from "@/lib/jobs";
 import type { Job } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -10,13 +10,27 @@ import { Button } from "@/components/ui/button";
 // Une seule barre, de 0 à 100 %, calculée par le serveur pour toute l'action : elle ne recule
 // jamais et avance même quand l'action n'écrit rien. Le serveur la relit chaque seconde, d'où la
 // transition linéaire d'une seconde : la barre glisse au lieu d'avancer par à-coups.
-export function JobProgressPanel({ label, percent, action }: { label: string; percent: number; action?: ReactNode }) {
+export function JobProgressPanel({
+  label,
+  percent,
+  action,
+  completed = false,
+}: {
+  label: string;
+  percent: number;
+  action?: ReactNode;
+  completed?: boolean;
+}) {
   const value = Math.max(0, Math.min(100, Math.round(percent)));
   return (
     <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
       <div className="min-w-0 flex-1 rounded-md border border-emerald-400/20 bg-slate-950 px-3 py-2.5 text-emerald-100">
         <div className="flex min-w-0 items-center gap-2 text-xs">
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-emerald-400" />
+          {completed ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+          ) : (
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-emerald-400" />
+          )}
           <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
           <span className="shrink-0 tabular-nums text-emerald-300">{value} %</span>
         </div>
@@ -29,7 +43,7 @@ export function JobProgressPanel({ label, percent, action }: { label: string; pe
           aria-valuenow={value}
         >
           <div
-            className="h-full rounded-full bg-emerald-400 transition-[width] duration-1000 ease-linear"
+            className="h-full rounded-full bg-emerald-400 transition-[width] duration-1000 ease-out motion-reduce:transition-none"
             style={{ width: `${value}%` }}
           />
         </div>
