@@ -246,7 +246,7 @@ export function RemoteBackupPicker({
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <div className="max-h-72 overflow-y-auto rounded-md border" role="listbox" aria-label="Sauvegardes Sudokeys">
+      <div className="max-h-72 overflow-y-auto rounded-md border" role="group" aria-label="Sauvegardes Sudokeys">
         {groups.length === 0 && (
           <p className="p-3 text-sm text-muted-foreground">
             {state.backups.length
@@ -263,8 +263,7 @@ export function RemoteBackupPicker({
                 <button
                   key={backup.id}
                   type="button"
-                  role="option"
-                  aria-selected={active}
+                  aria-pressed={active}
                   disabled={disabled}
                   onClick={() => onSelect(backup)}
                   className={cn(

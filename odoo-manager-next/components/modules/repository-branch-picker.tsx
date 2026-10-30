@@ -398,10 +398,12 @@ export function RepositoryBranchPicker({
           aria-label={`Branche ${current || "inconnue"}${repository.commit ? `, commit ${shortCommit(repository.commit)}` : ""} de ${repository.name} : vérifier les mises à jour${locked ? "" : " ou changer de branche"}`}
         >
           <GitBranch className="h-3 w-3 shrink-0" aria-hidden="true" />
+          <span className="font-sans font-normal text-muted-foreground">Branche</span>
           <span className="truncate">{current || "branche ?"}</span>
           {repository.commit && (
             <span className="shrink-0 font-normal text-muted-foreground">· {shortCommit(repository.commit)}</span>
           )}
+          <span className="shrink-0 font-sans text-primary">{locked ? "Vérifier" : "Gérer"}</span>
           <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
         </button>
       </Popover.Trigger>
