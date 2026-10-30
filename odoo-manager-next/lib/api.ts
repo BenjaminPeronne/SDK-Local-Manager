@@ -2,6 +2,7 @@ import { API_TOKEN_HEADER, apiTokenHeaders, browserApiToken } from "@/lib/browse
 import { invokeDesktop, isDesktopRuntime } from "@/lib/desktop-runtime";
 import type { Job, RestoreDatabasePayload } from "@/lib/types";
 import { delay } from "@/lib/utils";
+import { waitForJobStatus } from "@/lib/job-wait";
 
 export let API_BASE = process.env.NEXT_PUBLIC_ODOO_MANAGER_API?.replace(/\/$/, "") || "";
 
@@ -177,18 +178,14 @@ export async function waitForJob(
   jobId: number,
   { onJobs, timeoutMilliseconds = 960000 }: { onJobs?: (jobs: Job[]) => void; timeoutMilliseconds?: number } = {},
 ) {
-  const deadline = Date.now() + timeoutMilliseconds;
-  while (Date.now() < deadline) {
-    const payload = await api<{ jobs: Job[] }>("/api/jobs");
-    onJobs?.(payload.jobs);
-    const current = payload.jobs.find((job) => job.id === jobId);
-    if (!current) throw new Error("L'action de démarrage est introuvable dans l'historique.");
-    if (current.status === "done") return current;
-    if (current.status === "error") {
-      const detail = current.lines.filter(Boolean).at(-1) || "Le projet n'a pas pu démarrer.";
-      throw new Error(detail);
-    }
-    await delay(800);
-  }
-  throw new Error("Le démarrage d'Odoo prend trop de temps. Consulte les logs de l'action.");
+  return waitForJobStatus(
+    jobId,
+    async () => {
+      const payload = await api<{ jobs: Job[] }>("/api/jobs");
+      onJobs?.(payload.jobs);
+      return payload.jobs;
+    },
+    delay,
+    timeoutMilliseconds,
+  );
 }
