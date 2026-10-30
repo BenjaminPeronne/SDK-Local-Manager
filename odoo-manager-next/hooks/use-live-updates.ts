@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { API_BASE } from "@/lib/api";
 import { withApiToken } from "@/lib/browser-token";
+import { jobsRefreshInterval, overviewRefreshInterval, systemRefreshInterval } from "@/lib/live-update-intervals";
 import type { Overview, SystemStatus } from "@/lib/types";
 
 type UseLiveUpdatesOptions = {
@@ -40,7 +41,7 @@ export function useLiveUpdates({
       if (document.visibilityState === "visible") void refreshJobs();
     };
     // Flux connecté, le signal jobs_changed suffit : la lecture périodique ne sert que de filet.
-    const interval = jobsStreamConnected ? 10000 : hasRunningJobs ? 1200 : 10000;
+    const interval = jobsRefreshInterval(jobsStreamConnected, hasRunningJobs);
     const timer = window.setInterval(refreshWhenVisible, interval);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
@@ -55,14 +56,14 @@ export function useLiveUpdates({
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void refreshOverview();
     };
-    const timer = window.setInterval(refreshWhenVisible, hasRunningJobs ? 15000 : 45000);
+    const timer = window.setInterval(refreshWhenVisible, overviewRefreshInterval(hasRunningJobs));
     return () => window.clearInterval(timer);
   }, [hasRunningJobs, initializing, refreshOverview]);
 
   useEffect(() => {
     if (initializing) return;
     // Safety-net fallback only: /api/stream (below) pushes system status changes live.
-    const interval = Math.max(3, dockerPollInterval || 10) * 1000 * 3;
+    const interval = systemRefreshInterval(dockerPollInterval);
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void refreshSystemStatus();
     };
