@@ -1448,7 +1448,7 @@ export default function Home() {
   const docker = dockerSummary(systemStatus?.docker, dockerStartRequestedAt > 0);
 
   useEffect(() => {
-    if (showWelcome || !selectedProject || selectedProjectOnline) return;
+    if (showWelcome || !selectedProject) return;
     function backToWelcomeOnEscape(event: KeyboardEvent) {
       // Une fenêtre ou un menu Radix consomme déjà Échap ; un champ de saisie le garde pour lui.
       if (event.key !== "Escape" || event.defaultPrevented) return;
@@ -1456,7 +1456,7 @@ export default function Home() {
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable=true]")) return;
       // Échap sert d'abord à vider la sélection de modules.
-      if (selectedModules.size > 0) return;
+      if (activeTab === "modules" && selectedModules.size > 0) return;
       setSelectedProjectName("");
       setSelectedDb("");
       // Le bouton du projet garderait sinon son anneau de focus, sans être sélectionné.
@@ -1464,7 +1464,7 @@ export default function Home() {
     }
     window.addEventListener("keydown", backToWelcomeOnEscape);
     return () => window.removeEventListener("keydown", backToWelcomeOnEscape);
-  }, [selectedModules, selectedProject, selectedProjectOnline, showWelcome]);
+  }, [activeTab, selectedModules, selectedProject, showWelcome]);
   const canUseDb = Boolean(selectedDb && odooDatabases.includes(selectedDb));
   const moduleSourcesJob = useMemo(
     () => latestModuleSourcesJob(jobs, selectedProject?.name),
