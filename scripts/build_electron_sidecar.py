@@ -46,7 +46,6 @@ def main():
         "--contents-directory",
         RUNTIME_NAME,
         "--noconfirm",
-        "--clean",
         "--name",
         base_name,
         "--distpath",
@@ -58,6 +57,8 @@ def main():
         "--specpath",
         str(build_root),
     ]
+    if args.clean:
+        pyinstaller_args.append("--clean")
     if is_windows:
         pyinstaller_args.append("--noconsole")
 

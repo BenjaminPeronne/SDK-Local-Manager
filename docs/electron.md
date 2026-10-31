@@ -121,6 +121,15 @@ sh scripts/build_local_desktop.sh
 python3 scripts/smoke_test_electron.py --bundle-directory odoo-manager-next/release
 ```
 
+Pour reconstruire localement après une première compilation, utiliser
+`sh scripts/build_local_desktop.sh --no-clean` : PyInstaller réutilise ses fichiers
+intermédiaires et reconstruit les éléments modifiés. Sans cette option, le build
+repart de zéro ; c'est aussi le comportement conservé en CI. En cas de doute sur
+le cache ou après un changement d'environnement Python, relancer sans `--no-clean`.
+
+Dans GitHub Actions, les builds macOS et Linux démarrent indépendamment de l'image
+WSL. Le build Windows attend celle-ci, car elle est embarquée dans son installateur.
+
 Ne pas lancer `typecheck` en même temps que `build:desktop` : Next régénère les
 types `.next/types` lus par TypeScript. Le script de construction les enchaîne.
 
