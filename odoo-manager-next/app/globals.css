@@ -74,6 +74,7 @@
   --muted: 20 12% 92%;
   --muted-foreground: 20 5% 37%;
   --destructive: 355 72% 49%;
+  --destructive-button: 355 72% 49%;
   --destructive-foreground: 0 0% 100%;
   --border: 20 10% 81%;
   --input: 20 10% 74%;
@@ -89,22 +90,23 @@
 .dark {
   --background: 0 0% 4%;
   --foreground: 0 8% 95%;
-  --card: 0 0% 7%;
+  --card: 20 5% 10%;
   --card-foreground: 0 8% 95%;
-  --primary: 25 91% 54%;
+  --primary: 25 91% 62%;
   --primary-foreground: 20 60% 5%;
-  --secondary: 20 8% 15%;
+  --secondary: 20 8% 19%;
   --secondary-foreground: 0 8% 95%;
-  --muted: 20 4% 13%;
-  --muted-foreground: 20 5% 68%;
-  --destructive: 355 74% 60%;
+  --muted: 20 5% 17%;
+  --muted-foreground: 20 6% 76%;
+  --destructive: 355 74% 74%;
+  --destructive-button: 355 72% 42%;
   --destructive-foreground: 0 0% 100%;
-  --border: 20 6% 23%;
-  --input: 20 6% 30%;
-  --button-outline: 20 8% 55%;
+  --border: 20 6% 32%;
+  --input: 20 6% 43%;
+  --button-outline: 20 8% 60%;
   --ring: 25 91% 54%;
-  --hover: 20 6% 17%;
-  --selected: 24 45% 17%;
+  --hover: 20 7% 22%;
+  --selected: 24 45% 22%;
 }
 
 /* Sudokeys Glow: warm surfaces, restrained orange light, crisp controls. */
@@ -368,7 +370,7 @@ textarea {
 }
 
 .app-destructive-button.rt-Button {
-  background-color: hsl(var(--destructive));
+  background-color: hsl(var(--destructive-button));
   color: hsl(var(--destructive-foreground));
 }
 

@@ -249,7 +249,7 @@ export function AppSidebar({
                             ? "text-emerald-500"
                             : displayedServerStopped
                               ? "text-amber-500"
-                              : "text-muted-foreground/45",
+                              : "text-muted-foreground/70 dark:text-muted-foreground",
                         )}
                         role="img"
                         aria-label={`${project.name} : ${displayedRunning ? "allumé" : displayedServerStopped ? "conteneur démarré, Odoo arrêté" : "éteint"}`}
