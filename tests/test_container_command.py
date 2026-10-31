@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import odoo_manager_web as web
+from odoo_manager_core import job_queue
 
 
 class ContainerCommandTests(unittest.TestCase):
@@ -20,7 +21,17 @@ class ContainerCommandTests(unittest.TestCase):
         with patch.object(web, "validate_project", return_value="DEMO"), patch.object(web, "project_service", return_value=service):
             web.container_command_job(job, "DEMO", "pwd")
         service.docker.assert_called_once_with("exec", "odoo-DEMO", "sh", "-lc", "exec </dev/null\npwd")
-        self.assertEqual(["Commande dans le conteneur Odoo du projet DEMO.", "/home/odoo\n"], [call.args[0] for call in job.add.call_args_list])
+        job.add.assert_called_once_with("Commande dans le conteneur Odoo du projet DEMO.")
+        job.add_raw.assert_called_once_with("/home/odoo\n")
+
+    def test_raw_command_output_is_preserved_even_when_it_looks_like_git_progress(self):
+        job = object.__new__(job_queue.Job)
+        job.lines, job.output, job.output_total = [], "", 0
+        job.progress, job.control = None, Mock()
+        with patch.object(job_queue, "notify_jobs_changed"):
+            job.add_raw("Receiving objects: 100% (10/10)\n")
+        self.assertEqual(["Receiving objects: 100% (10/10)"], job.lines)
+        self.assertIn("Receiving objects: 100% (10/10)", job.output)
 
     def test_stopped_container_and_failed_command_report_errors(self):
         service = Mock()

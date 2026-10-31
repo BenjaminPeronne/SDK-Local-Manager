@@ -8921,7 +8921,7 @@ def container_command_job(job, project, command):
             first_line = False
             if str(line).startswith("$ "):
                 return
-        job.add(str(line))
+        job.add_raw(str(line))
 
     code = service.stream(service.docker("exec", container, "sh", "-lc", "exec </dev/null\n" + command), log=output)
     if code:

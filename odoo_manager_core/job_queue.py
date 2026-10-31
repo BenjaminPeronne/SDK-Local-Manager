@@ -253,9 +253,9 @@ class Job:
             "output": self.output[-JOB_HISTORY_OUTPUT_LIMIT:],
         }
 
-    def add(self, line):
+    def add(self, line, *, raw=False):
         text = line.rstrip("\n")
-        progress = parse_output_progress(text)
+        progress = None if raw else parse_output_progress(text)
         if progress is not None and self.progress is not None:
             if "index" in progress:
                 self.progress.measure_position(progress["index"], progress["total"])
@@ -271,6 +271,10 @@ class Job:
         # Chaque ligne écrite par l'action est un point d'arrêt : les longues sorties Odoo s'interrompent vite.
         if job_control.current_control() is self.control:
             self.control.checkpoint()
+
+    def add_raw(self, line):
+        """Conserve la sortie d'une commande utilisateur sans l'interpréter comme une progression."""
+        self.add(line, raw=True)
 
     def _trim_lines(self):
         # Troncature amortie : recopier 700 lignes et 120 Ko à chaque ligne coûtait
