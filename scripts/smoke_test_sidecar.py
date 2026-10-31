@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import socket
 import subprocess
 import tempfile
@@ -28,9 +29,9 @@ def sidecar_path() -> Path:
     return BINARIES / f"odoo-manager-backend{extension}"
 
 
-def request(url: str, *, method: str = "GET", timeout: float = 2.0) -> bytes:
+def request(url: str, *, token: str, method: str = "GET", timeout: float = 2.0) -> bytes:
     return urllib.request.urlopen(  # noqa: S310 - loopback smoke test only
-        urllib.request.Request(url, method=method),
+        urllib.request.Request(url, method=method, headers={"X-SDK-Manager-Token": token}),
         timeout=timeout,
     ).read()
 
@@ -59,11 +60,13 @@ def main() -> None:
         config_dir = root / "config"
         workspace.mkdir()
         port = available_port()
+        token = secrets.token_urlsafe(32)
         env = os.environ.copy()
         env.update(
             {
                 "ODOO_GUI_HOST": "127.0.0.1",
                 "ODOO_GUI_PORT": str(port),
+                "ODOO_MANAGER_API_TOKEN": token,
                 "ODOO_WORKSPACE": str(workspace),
                 "ODOO_MANAGER_CONFIG_DIR": str(config_dir),
                 "ODOO_MANAGER_LOG_DIR": str(log_dir),
@@ -86,7 +89,7 @@ def main() -> None:
                     failure = f"Le sidecar s'est arrêté prématurément (code {exit_code})."
                     break
                 try:
-                    payload = json.loads(request(health_url))
+                    payload = json.loads(request(health_url, token=token))
                     if payload.get("ok") is True:
                         print(f"Sidecar opérationnel: {health_url}")
                         return
@@ -95,7 +98,7 @@ def main() -> None:
                     time.sleep(0.2)
         finally:
             try:
-                request(f"http://127.0.0.1:{port}/api/system/shutdown", method="POST")
+                request(f"http://127.0.0.1:{port}/api/system/shutdown", token=token, method="POST")
             except (OSError, urllib.error.URLError):
                 pass
             try:

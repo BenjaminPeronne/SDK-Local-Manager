@@ -80,6 +80,9 @@ class PathIsRelativeToTests(unittest.TestCase):
 
 class LocalApiRequestGuardTests(unittest.TestCase):
     def setUp(self):
+        self.token_patch = patch.object(web, "API_TOKEN", "s3cret-token")
+        self.token_patch.start()
+        self.addCleanup(self.token_patch.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.error_log = Path(self.temporary.name) / "errors.jsonl"
         self.error_patch = patch.object(web, "ERROR_LOG_PATH", self.error_log)
@@ -120,12 +123,20 @@ class LocalApiRequestGuardTests(unittest.TestCase):
                 self.assertFalse(self.logged(message))
 
     def test_trusted_clients_and_json_content_type_are_required(self):
-        self.assertEqual(201, self.post_report("electron", {"Origin": "app://sdk", "Content-Type": "application/json"}))
+        token = {"X-SDK-Manager-Token": "s3cret-token"}
         self.assertEqual(
-            201, self.post_report("next-dev", {"Origin": "http://localhost:3000", "Content-Type": "application/json"})
+            201, self.post_report("electron", {**token, "Origin": "app://sdk", "Content-Type": "application/json"})
         )
-        self.assertEqual(201, self.post_report("local-client", {"Content-Type": "application/json"}))
-        self.assertEqual(400, self.post_report("no-json", {"Origin": "app://sdk", "Content-Type": "text/plain"}))
+        self.assertEqual(
+            201,
+            self.post_report(
+                "next-dev", {**token, "Origin": "http://localhost:3000", "Content-Type": "application/json"}
+            ),
+        )
+        self.assertEqual(201, self.post_report("local-client", {**token, "Content-Type": "application/json"}))
+        self.assertEqual(
+            400, self.post_report("no-json", {**token, "Origin": "app://sdk", "Content-Type": "text/plain"})
+        )
         self.assertTrue(self.logged("electron") and self.logged("next-dev") and self.logged("local-client"))
         self.assertFalse(self.logged("no-json"))
 
@@ -136,9 +147,10 @@ class LocalApiRequestGuardTests(unittest.TestCase):
         connection.close()
         return status
 
-    def test_without_an_application_token_local_clients_stay_allowed(self):
+    def test_without_an_application_token_requests_are_denied(self):
         with patch.object(web, "API_TOKEN", ""):
-            self.assertEqual(200, self.get_status("/api/version"))
+            self.assertEqual(401, self.get_status("/api/version"))
+            self.assertEqual(401, self.get_status("/api/version", {"X-SDK-Manager-Token": "anything"}))
 
     def test_the_application_token_is_required_on_every_route(self):
         with patch.object(web, "API_TOKEN", "s3cret-token"):
@@ -148,6 +160,36 @@ class LocalApiRequestGuardTests(unittest.TestCase):
             self.assertFalse(self.logged("forged"))
             self.assertEqual(200, self.get_status("/api/version", {"X-SDK-Manager-Token": "s3cret-token"}))
             self.assertEqual(200, self.get_status("/api/version", {"Authorization": "Bearer s3cret-token"}))
+
+    def test_sensitive_routes_and_streams_reject_a_forged_local_client(self):
+        for method, path in (
+            ("POST", "/api/jobs"),
+            ("POST", "/api/system/shutdown"),
+            ("POST", "/api/projects/demo/database-restore"),
+            ("DELETE", "/api/jobs"),
+            ("GET", "/api/stream"),
+            ("GET", "/api/projects/demo/logs/stream"),
+        ):
+            with self.subTest(method=method, path=path):
+                self.assertEqual(401, self.get_status(path, {"Origin": "app://sdk"}, method=method))
+
+    def test_authenticated_sse_sends_events(self):
+        with (
+            patch.object(web, "docker_status", return_value={}),
+            patch.object(web, "overview", return_value={"projects": []}),
+            patch.object(web, "system_status_snapshot", return_value={}),
+        ):
+            connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            try:
+                connection.request("GET", "/api/stream", headers={"X-SDK-Manager-Token": "s3cret-token"})
+                response = connection.getresponse()
+                self.assertEqual(200, response.status)
+                self.assertEqual("text/event-stream; charset=utf-8", response.getheader("Content-Type"))
+                self.assertEqual(b"retry: 2000\n", response.readline())
+                self.assertEqual(b"\n", response.readline())
+                self.assertEqual(b"event: overview\n", response.readline())
+            finally:
+                connection.close()
 
     def test_a_token_in_the_address_is_accepted_only_outside_the_packaged_app(self):
         with patch.object(web, "API_TOKEN", "s3cret-token"):
@@ -205,6 +247,9 @@ class ApiContractTests(unittest.TestCase):
     """L'API publie sa version et ses capacités, et le contrat suit le code."""
 
     def setUp(self):
+        self.token_patch = patch.object(web, "API_TOKEN", "contract-test-token")
+        self.token_patch.start()
+        self.addCleanup(self.token_patch.stop)
         self.server = web.ManagerHTTPServer(("127.0.0.1", 0), web.Handler)
         self.port = self.server.server_address[1]
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -216,7 +261,9 @@ class ApiContractTests(unittest.TestCase):
 
     def get(self, path):
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
-        connection.request("GET", path, headers={"Host": f"127.0.0.1:{self.port}"})
+        connection.request(
+            "GET", path, headers={"Host": f"127.0.0.1:{self.port}", "X-SDK-Manager-Token": "contract-test-token"}
+        )
         response = connection.getresponse()
         status, body = response.status, response.read().decode("utf-8")
         connection.close()
@@ -283,6 +330,19 @@ class ApiContractTests(unittest.TestCase):
         )
 
         self.assertEqual(package["version"], web.APP_VERSION)
+
+
+class BackendStartupSecurityTests(unittest.TestCase):
+    def test_missing_or_blank_token_stops_before_opening_a_socket(self):
+        for token in ("", "   "):
+            with (
+                self.subTest(token=repr(token)),
+                patch.object(web, "API_TOKEN", token),
+                patch.object(web, "ManagerHTTPServer") as server,
+            ):
+                with self.assertRaisesRegex(SystemExit, "Jeton API absent"):
+                    web.main()
+                server.assert_not_called()
 
 
 class OutputProgressTests(unittest.TestCase):

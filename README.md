@@ -249,13 +249,16 @@ Lancer l'API Python et Next.js ensemble ; le script ouvre l'interface sur `http:
 
 Variantes : `./odoo_next_gui.sh --background` (via tmux si disponible) et `./odoo_next_gui.sh --stop`.
 
-Le script protège l'API par un jeton, conservé dans `.odoo_manager_dev_token` (non suivi par Git) : sans lui, n'importe quel programme du poste, y compris un module Odoo dans un conteneur, pourrait piloter le gestionnaire. Il ouvre l'interface avec le jeton à la fin de l'adresse (`#sdk_token=…`, jamais envoyé au serveur) ; la page le garde pour cette adresse et l'envoie elle-même. Next.js ne l'ajoute pas aux requêtes qu'il relaie : tout ce qui joint le port 3000, un conteneur par `host.docker.internal` par exemple, l'obtiendrait. Une page ouverte sans ce lien est refusée : rouvrir l'adresse affichée par le script. Pour une autre adresse (route Traefik), le lien d'ouverture est dans Paramètres › Avancé. Un backend lancé à la main sans `ODOO_MANAGER_API_TOKEN` reste ouvert, comme avant.
+Le script protège l'API par un jeton, conservé dans `.odoo_manager_dev_token` (non suivi par Git) : sans lui, n'importe quel programme du poste, y compris un module Odoo dans un conteneur, pourrait piloter le gestionnaire. Il ouvre l'interface avec le jeton à la fin de l'adresse (`#sdk_token=…`, jamais envoyé au serveur) ; la page le garde pour cette adresse et l'envoie elle-même. Next.js ne l'ajoute pas aux requêtes qu'il relaie : tout ce qui joint le port 3000, un conteneur par `host.docker.internal` par exemple, l'obtiendrait. Une page ouverte sans ce lien est refusée : rouvrir l'adresse affichée par le script. Pour une autre adresse (route Traefik), le lien d'ouverture est dans Paramètres › Avancé. Le backend refuse de démarrer sans `ODOO_MANAGER_API_TOKEN`.
 
 Lancer seulement le backend :
 
 ```bash
-python3 odoo_manager_web.py
+ODOO_MANAGER_API_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+ODOO_MANAGER_API_TOKEN="$ODOO_MANAGER_API_TOKEN" python3 odoo_manager_web.py
 ```
+
+Transmettre ce même jeton dans l'en-tête `X-SDK-Manager-Token` des requêtes. Par défaut, le backend écoute sur `127.0.0.1` ; modifier explicitement `ODOO_GUI_HOST` peut l'exposer sur d'autres interfaces et ne doit être fait qu'en connaissance du risque.
 
 Lancer seulement le frontend, en pointant vers une API déjà démarrée :
 
@@ -284,6 +287,7 @@ Variables d'environnement utiles :
 | `ODOO_MANAGER_CONFIG` / `ODOO_MANAGER_CONFIG_DIR` | Fichier ou dossier de configuration à utiliser. |
 | `ODOO_MANAGER_LOG_DIR` | Dossier des journaux du backend. |
 | `ODOO_GUI_HOST` / `ODOO_GUI_PORT` | Adresse et port d'écoute de l'API. |
+| `ODOO_MANAGER_API_TOKEN` | Jeton obligatoire pour le backend ; à garder secret et à transmettre aux clients autorisés. Les lanceurs le définissent automatiquement. |
 | `ODOO_MANAGER_API` | URL de l'API utilisée par Next.js en développement. |
 | `ODOO_WORKSPACE` | Dossier des projets proposé par défaut, tant qu'aucun n'est enregistré dans les paramètres. |
 

@@ -329,7 +329,7 @@ DELETED_MODULES = WORKSPACE / ".odoo_manager_deleted_modules"
 HOST = os.environ.get("ODOO_GUI_HOST", "127.0.0.1")
 # Jeton tiré par l'application à chaque lancement. Retiré de l'environnement dès sa lecture :
 # git, docker et les scripts lancés par le backend n'en héritent pas. Vide quand le backend
-# tourne seul (développement) : l'API reste alors ouverte aux clients locaux.
+# tourne seul : le démarrage est refusé si aucun jeton n'a été fourni.
 API_TOKEN = os.environ.pop("ODOO_MANAGER_API_TOKEN", "")
 API_TOKEN_HEADER = "X-SDK-Manager-Token"
 PORT = int(os.environ.get("ODOO_GUI_PORT", str(SETTINGS.api_port)))
@@ -713,7 +713,7 @@ def api_token_error(headers, token=None, query_token=""):
     """
     expected = API_TOKEN if token is None else token
     if not expected:
-        return ""
+        return "Jeton de l'API locale non configuré."
     provided = headers.get(API_TOKEN_HEADER) or ""
     authorization = headers.get("Authorization") or ""
     if not provided and authorization[:7].lower() == "bearer ":
@@ -9136,6 +9136,8 @@ def stop_when_parent_exits(server):
 
 
 def main():
+    if not API_TOKEN or not API_TOKEN.strip():
+        raise SystemExit("Jeton API absent : définis ODOO_MANAGER_API_TOKEN ou utilise le lanceur de l'application.")
     url = f"http://{HOST}:{PORT}/"
     try:
         server = ManagerHTTPServer((HOST, PORT), Handler)
