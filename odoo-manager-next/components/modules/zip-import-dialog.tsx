@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FilePicker } from "@/components/ui/file-picker";
+import { Input } from "@/components/ui/input";
 
 type ZipImportDialogProps = {
   loading: boolean;
@@ -39,6 +40,7 @@ export function ZipImportDialog({
   const [replaceZipModules, setReplaceZipModules] = useState(true);
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [zipModuleCandidates, setZipModuleCandidates] = useState<string[]>([]);
+  const [zipModuleSearch, setZipModuleSearch] = useState("");
   const [selectedZipModules, setSelectedZipModules] = useState<Set<string>>(new Set());
   const [incompatibleZipModules, setIncompatibleZipModules] = useState<Record<string, string>>({});
   const [projectOdooVersion, setProjectOdooVersion] = useState("");
@@ -84,6 +86,7 @@ export function ZipImportDialog({
     zipInspectionGeneration.current += 1;
     setZipFile(null);
     setZipModuleCandidates([]);
+    setZipModuleSearch("");
     setSelectedZipModules(new Set());
     setIncompatibleZipModules({});
     setProjectOdooVersion("");
@@ -94,6 +97,7 @@ export function ZipImportDialog({
     const generation = ++zipInspectionGeneration.current;
     setZipFile(file || null);
     setZipModuleCandidates([]);
+    setZipModuleSearch("");
     setSelectedZipModules(new Set());
     setIncompatibleZipModules({});
     if (!file || !selectedProject) {
@@ -137,6 +141,10 @@ export function ZipImportDialog({
     }
   }
   const importableZipModules = zipModuleCandidates.filter((name) => !(name in incompatibleZipModules));
+  const search = zipModuleSearch.trim().toLocaleLowerCase();
+  const visibleZipModules = zipModuleCandidates.filter((name) => name.toLocaleLowerCase().includes(search));
+  const visibleImportableModules = visibleZipModules.filter((name) => !(name in incompatibleZipModules));
+  const selectedVisibleCount = visibleImportableModules.filter((name) => selectedZipModules.has(name)).length;
   function toggleZipModule(moduleName: string, checked: boolean) {
     setSelectedZipModules((current) => {
       const next = new Set(current);
@@ -146,7 +154,14 @@ export function ZipImportDialog({
     });
   }
   function toggleAllZipModules(checked: boolean) {
-    setSelectedZipModules(checked ? new Set(importableZipModules) : new Set());
+    setSelectedZipModules((current) => {
+      const next = new Set(current);
+      for (const name of visibleImportableModules) {
+        if (checked) next.add(name);
+        else next.delete(name);
+      }
+      return next;
+    });
   }
 
   return (
@@ -187,26 +202,39 @@ export function ZipImportDialog({
           )}
           {!inspectingZip && zipModuleCandidates.length > 0 && (
             <div className="min-w-0 rounded-md border">
+              <div className="border-b p-3">
+                <Input
+                  aria-label="Rechercher un module dans l’archive"
+                  placeholder="Rechercher un module"
+                  value={zipModuleSearch}
+                  onChange={(event) => setZipModuleSearch(event.target.value)}
+                />
+              </div>
               <label className="flex cursor-pointer items-start gap-3 border-b bg-muted/40 p-3 text-sm">
                 <Checkbox
                   className="mt-0.5"
-                  disabled={!importableZipModules.length}
+                  disabled={!visibleImportableModules.length}
                   checked={
-                    selectedZipModules.size > 0 && selectedZipModules.size < importableZipModules.length
+                    selectedVisibleCount > 0 && selectedVisibleCount < visibleImportableModules.length
                       ? "indeterminate"
-                      : importableZipModules.length > 0 && selectedZipModules.size === importableZipModules.length
+                      : visibleImportableModules.length > 0 && selectedVisibleCount === visibleImportableModules.length
                   }
                   onCheckedChange={(checked) => toggleAllZipModules(checked === true)}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block font-medium">Sélectionner tous les modules détectés</span>
+                  <span className="block font-medium">
+                    {search ? "Sélectionner les modules affichés" : "Sélectionner tous les modules détectés"}
+                  </span>
                   <span className="block text-xs text-muted-foreground">
                     {selectedZipModules.size}/{importableZipModules.length} module(s) sélectionné(s)
                   </span>
                 </span>
               </label>
               <div className="max-h-64 overflow-y-auto p-2">
-                {zipModuleCandidates.map((moduleName) => {
+                {visibleZipModules.length === 0 && (
+                  <p className="p-2 text-sm text-muted-foreground">Aucun module ne correspond à la recherche.</p>
+                )}
+                {visibleZipModules.map((moduleName) => {
                   const otherVersion = incompatibleZipModules[moduleName];
                   return (
                     <label
