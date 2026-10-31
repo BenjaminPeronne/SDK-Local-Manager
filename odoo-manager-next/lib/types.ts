@@ -269,6 +269,7 @@ export type Job = {
     mode?: string;
     database?: string;
     neutralization?: "disabled" | "partial" | "verified" | "failed" | "unknown";
+    restart?: "failed";
     modules?: string[];
   };
 };

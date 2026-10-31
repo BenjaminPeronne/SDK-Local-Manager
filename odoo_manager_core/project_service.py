@@ -580,6 +580,14 @@ class OdooError(RuntimeError):
     """
 
 
+class NeutralizationRestartError(RuntimeError):
+    """La neutralisation est contrôlée, mais le redémarrage ou l'accès Odoo a échoué."""
+
+    def __init__(self, mode, reason):
+        self.mode = mode
+        super().__init__(f"La neutralisation est terminée, mais le redémarrage ou l'accès à Odoo a échoué : {reason}")
+
+
 class MissingPythonDependency(OdooError):
     """Odoo ne charge pas une base faute d'un paquet Python dans son conteneur."""
 
@@ -4227,8 +4235,11 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
             self.restart_odoo_server_after_failure(project, log=log)
             raise
         self.log(log, "Redémarrage du serveur Odoo...")
-        self.start_odoo_server(project, log=log)
-        self.wait_project_http(project, log=log)
+        try:
+            self.start_odoo_server(project, log=log)
+            self.wait_project_http(project, log=log)
+        except Exception as exc:
+            raise NeutralizationRestartError(mode, str(exc)) from exc
         self.log(log, "Neutralisation terminée et contrôlée.")
         self.log(log, f"URL Odoo: {self.project_url(project)}")
         return mode

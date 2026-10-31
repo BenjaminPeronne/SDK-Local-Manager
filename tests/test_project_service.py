@@ -15,6 +15,7 @@ from odoo_manager_core.project_service import (
     ODOO_STATE_MARKER,
     PGVECTOR_IMAGE_REQUIRED_MESSAGE,
     MissingPythonDependency,
+    NeutralizationRestartError,
     OdooError,
     ProjectService,
     add_postgres_healthcheck_start_period,
@@ -1705,6 +1706,21 @@ class ProjectServiceTests(unittest.TestCase):
                     self.service, "run_postgres_sql"
                 ), patch.object(self.service, "verify_database_neutralization"):
                     self.assertEqual(mode, self.service._execute_database_neutralization("DEMO", "client"))
+
+    def test_neutralization_restart_error_preserves_successful_mode(self):
+        for failed_step in ("start_odoo_server", "wait_project_http"):
+            with self.subTest(failed_step=failed_step), patch.object(self.service, "is_running", return_value=True), patch.object(
+                self.service, "wait_for_odoo_container_initialization"
+            ), patch.object(self.service, "stop_odoo_server"), patch.object(
+                self.service, "_execute_database_neutralization", return_value="partial"
+            ), patch.object(self.service, "start_odoo_server") as start, patch.object(
+                self.service, "wait_project_http"
+            ) as wait:
+                (start if failed_step == "start_odoo_server" else wait).side_effect = RuntimeError("indisponible")
+                with self.assertRaises(NeutralizationRestartError) as raised:
+                    self.service.run_odoo_neutralize_command("DEMO", "client")
+                self.assertEqual("partial", raised.exception.mode)
+                self.assertIn("redémarrage", str(raised.exception))
 
     def test_neutralization_check_fails_while_a_bank_link_is_still_live(self):
         self.runner.statuses = {

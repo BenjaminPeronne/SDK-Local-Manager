@@ -155,7 +155,7 @@ from odoo_manager_core.project_creator import (
     validate_new_project_name,
     validate_odoo_version,
 )
-from odoo_manager_core.project_service import ODOO_DATA_DIR, POSTGRES_DATA_DIR, OdooError
+from odoo_manager_core.project_service import ODOO_DATA_DIR, POSTGRES_DATA_DIR, NeutralizationRestartError, OdooError
 from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
 from odoo_manager_core.releases import RELEASES_PAGE, RELEASES_REPOSITORY, release_check_error, release_update
 from odoo_manager_core.repositories import (
@@ -4095,6 +4095,8 @@ def neutralize_restored_database(job, service, project, db_name):
         lines.clear()
         try:
             return service.run_odoo_neutralize_command(project, db_name, log=log)
+        except NeutralizationRestartError:
+            raise
         except RuntimeError as exc:
             import_name = missing_python_import("\n".join(lines[-400:]))
             package = python_package_for_import(import_name) if import_name else ""
@@ -4274,6 +4276,14 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
             neutralization_started = time.monotonic()
             try:
                 neutralization_mode = neutralize_restored_database(job, service, project, db_name)
+            except NeutralizationRestartError as exc:
+                job.result = {
+                    "kind": "database_restore",
+                    "database": db_name,
+                    "neutralization": restored_neutralization_status(True, exc.mode),
+                    "restart": "failed",
+                }
+                raise
             except Exception:
                 job.result = {"kind": "database_restore", "database": db_name, "neutralization": "failed"}
                 raise

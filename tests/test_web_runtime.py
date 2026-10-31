@@ -615,6 +615,16 @@ class DatabaseRestoreTests(unittest.TestCase):
                 backup_left = path.exists()
         return job, error, backup_left, arrival, drop
 
+    def test_restart_failure_keeps_the_neutralization_result(self):
+        for mode, expected in (("native", "verified"), ("partial", "partial"), (None, "unknown")):
+            with self.subTest(mode=mode):
+                service = self.restore_service()
+                service.run_odoo_neutralize_command.side_effect = web.NeutralizationRestartError(mode, "HTTP indisponible")
+                job, error, _backup_left, _arrival, _drop = self.run_restore(service)
+                self.assertIsInstance(error, web.NeutralizationRestartError)
+                self.assertEqual({"kind": "database_restore", "database": "demo_restore", "neutralization": expected, "restart": "failed"}, job.result)
+                service.install_python_package.assert_not_called()
+
     def test_restore_loads_the_dump_in_postgres_without_going_through_odoo(self):
         service = self.restore_service()
 

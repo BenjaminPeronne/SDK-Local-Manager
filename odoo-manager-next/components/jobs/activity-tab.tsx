@@ -417,18 +417,26 @@ export function ActivityTab({
                     )}
                   </p>
                   {finishedJobSummary.result?.kind === "database_restore" && (
-                    <p className="mt-2 text-sm">
-                      {finishedJobSummary.result.neutralization === "verified" &&
-                        "Neutralisation exécutée et contrôlée. Vérifie les connexions propres à tes modules avant les essais."}
-                      {finishedJobSummary.result.neutralization === "partial" &&
-                        "Neutralisation partielle : les autres connexions externes peuvent rester actives. Vérifie-les avant les essais."}
-                      {finishedJobSummary.result.neutralization === "unknown" &&
-                        "Neutralisation exécutée et contrôlée, mais son mode n’a pas pu être identifié : vérifie les connexions externes avant les essais."}
-                      {finishedJobSummary.result.neutralization === "disabled" &&
-                        "Neutralisation désactivée : vérifie les connexions et automatisations avant d’utiliser la base."}
-                      {finishedJobSummary.result.neutralization === "failed" &&
-                        "La base est restaurée, mais la neutralisation a échoué. Corrige la cause et relance Neutraliser depuis les actions de la base."}
-                    </p>
+                    <div className="mt-2 space-y-1 text-sm">
+                      <p>
+                        {finishedJobSummary.result.neutralization === "verified" &&
+                          "Neutralisation exécutée et contrôlée. Vérifie les connexions propres à tes modules avant les essais."}
+                        {finishedJobSummary.result.neutralization === "partial" &&
+                          "Neutralisation partielle : les autres connexions externes peuvent rester actives. Vérifie-les avant les essais."}
+                        {finishedJobSummary.result.neutralization === "unknown" &&
+                          "Neutralisation exécutée et contrôlée, mais son mode n’a pas pu être identifié : vérifie les connexions externes avant les essais."}
+                        {finishedJobSummary.result.neutralization === "disabled" &&
+                          "Neutralisation désactivée : vérifie les connexions et automatisations avant d’utiliser la base."}
+                        {finishedJobSummary.result.neutralization === "failed" &&
+                          "La base est restaurée, mais la neutralisation a échoué. Corrige la cause et relance Neutraliser depuis les actions de la base."}
+                      </p>
+                      {finishedJobSummary.result.restart === "failed" && (
+                        <p>
+                          Le redémarrage ou l’accès à Odoo a échoué. Consulte le journal, puis redémarre le projet après
+                          avoir corrigé la cause.
+                        </p>
+                      )}
+                    </div>
                   )}
                   <Button
                     className="mt-3"
