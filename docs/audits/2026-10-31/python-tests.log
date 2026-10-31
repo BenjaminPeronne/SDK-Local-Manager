@@ -1,0 +1,39 @@
+................................................................................................................................................................s...............................................................................FFF...........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................Traceback (most recent call last):
+  File "/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo_manager_core/job_queue.py", line 486, in persist_job_history
+    os.replace(temporary, path)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/var/folders/t7/jgtmhnkx6476m_vf6gshfr700000gn/T/odoo-manager-jobs-72m9j7fh/jobs.tmp' -> '/var/folders/t7/jgtmhnkx6476m_vf6gshfr700000gn/T/odoo-manager-jobs-72m9j7fh/jobs.json'
+....................................................................................................s..................../opt/homebrew/Cellar/python@3.14/3.14.8/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 404: 'File not found'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+..................................
+======================================================================
+FAIL: test_a_refused_form_removes_the_received_file (test_multipart_upload.ModuleZipUploadEndpointTests.test_a_refused_form_removes_the_received_file)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/tests/test_multipart_upload.py", line 175, in test_a_refused_form_removes_the_received_file
+    self.assertEqual(400, status)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+AssertionError: 400 != 401
+
+======================================================================
+FAIL: test_import_hands_the_received_file_to_the_action_instead_of_its_bytes (test_multipart_upload.ModuleZipUploadEndpointTests.test_import_hands_the_received_file_to_the_action_instead_of_its_bytes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/tests/test_multipart_upload.py", line 166, in test_import_hands_the_received_file_to_the_action_instead_of_its_bytes
+    self.assertEqual(201, status, payload)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 201 != 401 : {'error': "Jeton de l'API locale non configuré."}
+
+======================================================================
+FAIL: test_inspection_reads_the_zip_from_disk_and_leaves_nothing_behind (test_multipart_upload.ModuleZipUploadEndpointTests.test_inspection_reads_the_zip_from_disk_and_leaves_nothing_behind)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/tests/test_multipart_upload.py", line 149, in test_inspection_reads_the_zip_from_disk_and_leaves_nothing_behind
+    self.assertEqual(200, status, payload)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 200 != 401 : {'error': "Jeton de l'API locale non configuré."}
+
+----------------------------------------------------------------------
+Ran 953 tests in 23.606s
+
+FAILED (failures=3, skipped=2)

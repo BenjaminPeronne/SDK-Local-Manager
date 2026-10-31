@@ -1,0 +1,92 @@
+[
+  {
+    "projects": 1,
+    "running": false,
+    "iterations": 200,
+    "wall_ms_p50": 0.032,
+    "wall_ms_p95": 0.074,
+    "cpu_ms_p50": 0.032,
+    "cpu_ms_p95": 0.061,
+    "json_bytes": 438,
+    "simulated_probe_requests_per_overview": {
+      "containers": 1.0,
+      "databases": 0.0,
+      "odoo": 0.0
+    }
+  },
+  {
+    "projects": 1,
+    "running": true,
+    "iterations": 200,
+    "wall_ms_p50": 0.034,
+    "wall_ms_p95": 0.042,
+    "cpu_ms_p50": 0.034,
+    "cpu_ms_p95": 0.043,
+    "json_bytes": 543,
+    "simulated_probe_requests_per_overview": {
+      "containers": 1.0,
+      "databases": 1.0,
+      "odoo": 1.0
+    }
+  },
+  {
+    "projects": 10,
+    "running": false,
+    "iterations": 200,
+    "wall_ms_p50": 0.149,
+    "wall_ms_p95": 0.214,
+    "cpu_ms_p50": 0.149,
+    "cpu_ms_p95": 0.214,
+    "json_bytes": 3183,
+    "simulated_probe_requests_per_overview": {
+      "containers": 1.0,
+      "databases": 0.0,
+      "odoo": 0.0
+    }
+  },
+  {
+    "projects": 10,
+    "running": true,
+    "iterations": 200,
+    "wall_ms_p50": 0.162,
+    "wall_ms_p95": 0.221,
+    "cpu_ms_p50": 0.162,
+    "cpu_ms_p95": 0.217,
+    "json_bytes": 4233,
+    "simulated_probe_requests_per_overview": {
+      "containers": 1.0,
+      "databases": 10.0,
+      "odoo": 10.0
+    }
+  },
+  {
+    "projects": 50,
+    "running": false,
+    "iterations": 200,
+    "wall_ms_p50": 0.707,
+    "wall_ms_p95": 1.07,
+    "cpu_ms_p50": 0.705,
+    "cpu_ms_p95": 1.009,
+    "json_bytes": 15503,
+    "simulated_probe_requests_per_overview": {
+      "containers": 1.0,
+      "databases": 0.0,
+      "odoo": 0.0
+    }
+  },
+  {
+    "projects": 50,
+    "running": true,
+    "iterations": 200,
+    "wall_ms_p50": 0.812,
+    "wall_ms_p95": 1.779,
+    "cpu_ms_p50": 0.804,
+    "cpu_ms_p95": 1.366,
+    "json_bytes": 20753,
+    "simulated_probe_requests_per_overview": {
+      "containers": 1.0,
+      "databases": 50.0,
+      "odoo": 50.0
+    }
+  }
+]

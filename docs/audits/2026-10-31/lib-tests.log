@@ -1,0 +1,205 @@
+
+> odoo-manager-next@0.43.0 test:lib
+> node --test lib/*.test.ts
+
+(node:61729) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/app-update.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ the about window says plainly where the update check stands (1.138209ms)
+✔ the time of the last check reads naturally (17.888917ms)
+(node:61730) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/browser-token.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ the token opened by odoo_next_gui.sh is kept for the page and removed from the address bar (0.856041ms)
+✔ a page opened without the link has no token, and a refused storage leaves it in the address (0.11725ms)
+✔ requests carry the token in a header, streams and links in the address (0.097791ms)
+(node:61731) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/database-name.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ validates names using the backend byte and path rules and known databases (0.4805ms)
+(node:61732) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/database-selection.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ the chosen database survives every refresh that still lists it (2.222708ms)
+✔ an empty list while PostgreSQL is slow keeps the choice instead of dropping it (0.167ms)
+✔ coming back to a project restores the database chosen earlier in the session (0.12ms)
+✔ a deleted database falls back to the first one, never to a name that no longer exists (0.053584ms)
+✔ the PostgreSQL maintenance database is never kept as a working database (0.059708ms)
+(node:61733) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/dropdown-menus.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ every dropdown menu is non-modal to keep sticky layout in place (85.335167ms)
+(node:61734) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/gitlab-token.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ dates come from GitLab as UTC days, whatever the computer's time zone (74.807875ms)
+✔ a token expiring within the week is announced, not before (1.728667ms)
+✔ an expired token says when it expired, or that GitLab refused it (0.161666ms)
+✔ no account, no message (0.060875ms)
+(node:61735) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/job-output.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ appends incremental output to the followed job (5.191ms)
+✔ a delta that does not match the cache forces a full reload next time (0.3195ms)
+✔ jobs without detail keep their compact payload and the cache follows the detailed job (0.277667ms)
+✔ merged output stays bounded (10.409875ms)
+(node:61747) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/job-wait.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ a cancelled action stops the wait immediately (0.662041ms)
+✔ a running action is followed until completion (1.044834ms)
+✔ a failed action reports its error (0.153375ms)
+(node:61748) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/list-navigation.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ arrows move the active row without leaving the list (0.917833ms)
+✔ Enter chooses the active row and never submits the dialog (0.481125ms)
+✔ typing keys stay with the search field (0.141292ms)
+✔ an empty list ignores every key (0.104958ms)
+(node:61749) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/live-update-intervals.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ fallback intervals preserve the existing connected and disconnected behavior (1.285125ms)
+(node:61750) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/module-repositories.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ modules are grouped by repository, project repositories before standard Odoo (2.397333ms)
+✔ the loaded revision is the branch, then the tag, then the short commit (0.189875ms)
+✔ commit pages follow the GitLab or GitHub address of the repository (0.1115ms)
+✔ only a branch behind the server, or with an unknown commit, can be updated (0.070042ms)
+✔ the commit date is written in full, empty when unreadable (19.651791ms)
+✔ the replaced repository is shown once when every replacing copy shares it (3.451208ms)
+✔ project repositories, imported copies, Odoo and Enterprise are updated from the list; Odoo keeps its branch (0.148417ms)
+✔ branch search ignores case and keeps the server order (0.104875ms)
+✔ matchWantedModules sépare les modules manquants importables, bloqués et absents du dépôt (0.138292ms)
+✔ matchWantedModules retient un nom présent deux fois dès qu'une copie est importable (0.105667ms)
+✔ only branch repositories without a recent check are compared with the server (0.135125ms)
+✔ an update is announced only when the server has a newer commit on the branch (0.069458ms)
+(node:61752) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/module-search.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ the application comes first, before its complementary modules (2.302083ms)
+✔ an application whose technical name starts with the search beats a complementary exact match (0.464375ms)
+✔ a complementary module typed in full still comes first (0.269291ms)
+✔ accents and case are ignored (0.915417ms)
+✔ without a search the list keeps its order (0.194291ms)
+(node:61753) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/module-sources.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ planModuleSources groupe les modules dans le moins de dépôts possible (2.23225ms)
+✔ planModuleSources préfère un dépôt du projet à égalité (0.126333ms)
+✔ planModuleSources sépare non importables, introuvables et modules non cherchés (0.327417ms)
+✔ planModuleSources ne propose que les modules encore manquants (0.1595ms)
+✔ latestModuleSourcesJob retient la dernière recherche du projet (2.2225ms)
+✔ shortRepositoryLabel retire le serveur de l'adresse (0.2845ms)
+(node:61756) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/modules.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ module origins separate standard Odoo, Enterprise and other code (1.4585ms)
+(node:61757) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/notice-snooze.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ a banner hidden for 30 days comes back afterwards (0.433792ms)
+✔ a banner never hidden, or with an unreadable date, is shown (0.060917ms)
+✔ a date in the future does not hide the banner (0.055417ms)
+(node:61758) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/project-name.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ project names typed in capitals become valid lowercase addresses (0.563167ms)
+✔ separators stay typeable at the end and never start a name (0.287833ms)
+✔ an existing project with another case is the same address (0.087125ms)
+(node:61760) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/projects.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ a Windows drive mounted in the Linux environment is shown as Windows writes it (0.57375ms)
+✔ other paths are shown unchanged (0.06375ms)
+✔ Odoo opens on the selected database (0.109083ms)
+✔ debug modes are added to the Odoo URL, with or without a database (0.070166ms)
+✔ a started container without its Odoo server is told apart from a running project (0.059542ms)
+(node:61761) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/retention.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ days are counted on the calendar, not in blocks of 24 hours (0.488167ms)
+✔ each database card says when it will be deleted (50.218542ms)
+✔ only deletions within a week are announced, the closest first (0.209959ms)
+✔ a notification is sent once per step and per deadline (0.093542ms)
+✔ the tooltip gives the exact moment of the deletion (0.44275ms)
+(node:61762) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/scroll-lock.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ dialog scroll lock is moved to the root to keep the sticky sidebar in place (2.185ms)
+(node:61763) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/seasonal.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ easter sunday moves every year (2.906958ms)
+✔ easter decorations run from Palm Sunday to Easter Monday (0.207292ms)
+✔ halloween decorations run from the twenty-fifth to the thirty-first of October (0.804334ms)
+✔ christmas decorations run from the first to the thirtieth of December (0.078166ms)
+✔ new year decorations run from the thirty-first of December to the second of January (0.057584ms)
+✔ no decoration outside the season (0.046041ms)
+✔ the address can force or turn off a season (0.336459ms)
+✔ the new year greeting names the coming year on New Year's Eve (0.225042ms)
+✔ the local day key is padded and follows local time (0.172583ms)
+✔ the address can ask for a confetti preview (0.11ms)
+(node:61764) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/system-notices.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ a stopped Docker is described simply, its technical message kept aside (0.41075ms)
+✔ Docker asked to open is shown as starting until it answers (0.071042ms)
+✔ Traefik only needs attention once Docker runs (0.072ms)
+(node:61775) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/wsl-setup-reboot.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ a WSL waiting for the restart asks for the restart, not for a new activation (0.620042ms)
+✔ a component never activated is offered the activation (0.073125ms)
+✔ disabled virtualization is still announced first (0.055959ms)
+✔ the Windows component error asks for the restart instead of more attempts (0.325459ms)
+(node:61777) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/lib/wsl-setup.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ a prepared machine asks for nothing (0.521166ms)
+✔ WSL is installed first, with a single elevation (0.060625ms)
+✔ a WSL too old to import a file is called out instead of failing later (0.085833ms)
+✔ the environment is installed in one click once WSL is there (0.047208ms)
+✔ an application update reprovisions the environment, never the projects (0.051541ms)
+✔ a machine without the bridge is reported as unsupported, not broken (0.0445ms)
+✔ a system without a Linux environment is never asked to install WSL (0.055042ms)
+✔ failures are explained in terms the user can act on (0.382917ms)
+✔ Electron's technical wrapper is removed from native errors (0.088125ms)
+✔ the preparation bar is one continuous percentage that never goes back (0.181458ms)
+✔ an update without import spreads the bar over the remaining steps (0.057875ms)
+✔ disabled virtualization is announced before anything is installed (0.068708ms)
+✔ the English virtualization error is explained too (0.043ms)
+✔ a step that failed after retries tells the user what to do (0.064958ms)
+✔ low memory is announced before installing, never after (0.080584ms)
+ℹ tests 101
+ℹ suites 0
+ℹ pass 101
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1457.67325

@@ -1,0 +1,529 @@
+
+> odoo-manager-next@0.43.0 lint
+> eslint .
+
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/app/page.tsx
+   484:6   warning  React Hook useCallback has missing dependencies: 'loadManagerErrors' and 'loadSshKeys'. Either include them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         react-hooks/exhaustive-deps
+   535:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/app/page.tsx:535:5
+  533 |
+  534 |   useEffect(() => {
+> 535 |     setAddonLinks(null);
+      |     ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  536 |     void refreshAddonLinks();
+  537 |   }, [refreshAddonLinks]);
+  538 |                                                                                                                                                                                                                                                    react-hooks/set-state-in-effect
+   586:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/app/page.tsx:586:5
+  584 |
+  585 |   useEffect(() => {
+> 586 |     setDesktopRuntime(isDesktopRuntime());
+      |     ^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  587 |     void applicationVersion().then(setAppVersion);
+  588 |   }, []);
+  589 |                                                                                                                                                                                                                          react-hooks/set-state-in-effect
+   735:7   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/app/page.tsx:735:7
+  733 |     if (created) {
+  734 |       pendingProjectNames.current.delete(pendingCreatedProjectName);
+> 735 |       setSelectedProjectName(created.name);
+      |       ^^^^^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  736 |       setSelectedDb(firstOdooDatabase(created));
+  737 |       setPendingCreatedProjectName("");
+  738 |       return;                                                                                                    react-hooks/set-state-in-effect
+   753:36  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/app/page.tsx:753:36
+  751 |     const job = jobs.find((item) => item.id === pendingCreatedDatabase.jobId);
+  752 |     if (!job || job.status === "error") {
+> 753 |       if (job?.status === "error") setPendingCreatedDatabase(null);
+      |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  754 |       return;
+  755 |     }
+  756 |     if (job.status !== "done") return;                                                      react-hooks/set-state-in-effect
+   765:6   warning  React Hook useEffect has a missing dependency: 'chooseDatabase'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  react-hooks/exhaustive-deps
+   784:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/app/page.tsx:784:5
+  782 |
+  783 |   useEffect(() => {
+> 784 |     refreshModules();
+      |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  785 |   }, [refreshModules]);
+  786 |
+  787 |   async function createJob(action: string, payload: Record<string, unknown> = {}) {                                                                                                                                                                                                   react-hooks/set-state-in-effect
+   982:29  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/app/page.tsx:982:29
+  980 |
+  981 |   useEffect(() => {
+> 982 |     if (!initializing) void refreshMigration();
+      |                             ^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  983 |   }, [initializing, refreshMigration]);
+  984 |
+  985 |   async function requestProjectMigration(project: string, force = false) {                                                                                                                                       react-hooks/set-state-in-effect
+  1442:7   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/app/page.tsx:1442:7
+  1440 |   useEffect(() => {
+  1441 |     if (awaitingFirstDatabase && (activeTab === "modules" || (activeTab === "logs" && !selectedProjectHasJobs))) {
+> 1442 |       setActiveTab("bases");
+       |       ^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  1443 |     }
+  1444 |   }, [activeTab, awaitingFirstDatabase, selectedProjectHasJobs]);
+  1445 |   // Sans projet ouvert, les onglets n'offrent que des panneaux vides : l'accueil prend la place    react-hooks/set-state-in-effect
+  1498:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/app/page.tsx:1498:5
+  1496 |   useEffect(() => {
+  1497 |     if (!pendingDatabaseAction || pendingDatabaseAction.db !== selectedDb) return;
+> 1498 |     setPendingDatabaseAction(null);
+       |     ^^^^^^^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  1499 |     executeDatabaseAction(pendingDatabaseAction.action);
+  1500 |     // executeDatabaseAction est recréée à chaque rendu et lit la sélection courante.
+  1501 |   }, [pendingDatabaseAction, selectedDb]);  react-hooks/set-state-in-effect
+  1501:6   warning  React Hook useEffect has a missing dependency: 'executeDatabaseAction'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           react-hooks/exhaustive-deps
+  1515:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/app/page.tsx:1515:5
+  1513 |
+  1514 |   useEffect(() => {
+> 1515 |     setLogDescriptionExpanded(false);
+       |     ^^^^^^^^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  1516 |   }, [outputSource]);
+  1517 |
+  1518 |   useEffect(() => {                                                                                                                                                                                                                                  react-hooks/set-state-in-effect
+  1549:7   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/app/page.tsx:1549:7
+  1547 |   useEffect(() => {
+  1548 |     if (!selectedProjectOnline && (activeTab === "bases" || activeTab === "modules")) {
+> 1549 |       setActiveTab("logs");
+       |       ^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  1550 |     }
+  1551 |   }, [activeTab, selectedProjectOnline]);
+  1552 |                                                                                                                                                         react-hooks/set-state-in-effect
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/databases/drop-database-dialog.tsx
+  28:16  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/databases/drop-database-dialog.tsx:28:16
+  26 |
+  27 |   useEffect(() => {
+> 28 |     if (!open) setConfirm("");
+     |                ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  29 |   }, [open]);
+  30 |
+  31 |   return (  react-hooks/set-state-in-effect
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/databases/restore-database-dialog.tsx
+  40:5  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/databases/restore-database-dialog.tsx:40:5
+  38 |
+  39 |   useEffect(() => {
+> 40 |     setDb("");
+     |     ^^^^^ Avoid calling setState() directly within an effect
+  41 |     setFile(null);
+  42 |     setRemoteBackup(null);
+  43 |     setProgress(0);  react-hooks/set-state-in-effect
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/gitlab-repository-picker.tsx
+  134:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/gitlab-repository-picker.tsx:134:5
+  132 |     if (!connected || project || !bridge) return;
+  133 |     let cancelled = false;
+> 134 |     setProjects(null);
+      |     ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  135 |     const timer = window.setTimeout(() => {
+  136 |       bridge
+  137 |         .gitlabProjects(search)                                                                                                                                                               react-hooks/set-state-in-effect
+  164:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/gitlab-repository-picker.tsx:164:5
+  162 |     if (!connected || !project || !bridge) return;
+  163 |     let cancelled = false;
+> 164 |     setRefs(null);
+      |     ^^^^^^^ Avoid calling setState() directly within an effect
+  165 |     const timer = window.setTimeout(() => {
+  166 |       bridge
+  167 |         .gitlabRefs(project.id, refSearch)                                                                                                                                                           react-hooks/set-state-in-effect
+  205:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/gitlab-repository-picker.tsx:205:5
+  203 |   // Une nouvelle recherche repart aussi sur les 3 premiers résultats, « Voir plus » ne survit pas au filtre.
+  204 |   useEffect(() => {
+> 205 |     setActiveIndex(0);
+      |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  206 |     setVisibleProjectCount(VISIBLE_RESULTS_DEFAULT);
+  207 |   }, [projects]);
+  208 |   useEffect(() => {                                                                                                     react-hooks/set-state-in-effect
+  210:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/gitlab-repository-picker.tsx:210:5
+  208 |   useEffect(() => {
+  209 |     const selected = refOptions.findIndex((ref) => ref.name === branch);
+> 210 |     setRefActiveIndex(selected >= 0 && selected < VISIBLE_RESULTS_DEFAULT ? selected : 0);
+      |     ^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  211 |     setVisibleRefCount(VISIBLE_RESULTS_DEFAULT);
+  212 |   }, [refOptions, branch]);
+  213 |   // Une branche vient d'être choisie : replier la liste sur le résumé compact  react-hooks/set-state-in-effect
+  215:17  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/gitlab-repository-picker.tsx:215:17
+  213 |   // Une branche vient d'être choisie : replier la liste sur le résumé compact.
+  214 |   useEffect(() => {
+> 215 |     if (branch) setChangingBranch(false);
+      |                 ^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  216 |   }, [branch]);
+  217 |   // La ligne active reste visible quand on la déplace au clavier dans une liste qui défile.
+  218 |   useEffect(() => {                                                          react-hooks/set-state-in-effect
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/modules/modules-tab.tsx
+  124:6  warning  React Hook useCallback has a missing dependency: 'setSelectedModules'. Either include it or remove the dependency array. If 'setSelectedModules' changes too often, find the parent component that defines it and wrap that definition in useCallback  react-hooks/exhaustive-deps
+  137:6  warning  React Hook useCallback has a missing dependency: 'setSelectedModules'. Either include it or remove the dependency array. If 'setSelectedModules' changes too often, find the parent component that defines it and wrap that definition in useCallback  react-hooks/exhaustive-deps
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/modules/repository-import-dialog.tsx
+  199:5  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/modules/repository-import-dialog.tsx:199:5
+  197 |   useEffect(() => {
+  198 |     if (!open) return;
+> 199 |     setRepositorySource("ssh");
+      |     ^^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  200 |     setOnlyWanted(true);
+  201 |     // Proposition par défaut : la branche qui porte le nom de la version Odoo du projet.
+  202 |     setRepositoryBranch((current) => current || selectedProject?.odoo_version || "");  react-hooks/set-state-in-effect
+  211:6  warning  React Hook useEffect has missing dependencies: 'selectedProject?.odoo_version', 'setGitlabStatus', and 'setRepositoryBranch'. Either include them or remove the dependency array. If 'setRepositoryBranch' changes too often, find the parent component that defines it and wrap that definition in useCallback                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         react-hooks/exhaustive-deps
+  214:7  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/modules/repository-import-dialog.tsx:214:7
+  212 |   useEffect(() => {
+  213 |     if (!open) {
+> 214 |       setRepositoryInspection({ status: "idle" });
+      |       ^^^^^^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  215 |       setRepositoryFilter("");
+  216 |       return;
+  217 |     }                                                                                                                                     react-hooks/set-state-in-effect
+  263:6  warning  React Hook useEffect has missing dependencies: 'canUseDb', 'repositoryBranch', 'repositoryUrl', 'selectedDb', 'selectedProject', and 'wantedModules'. Either include them or remove the dependency array. If 'setRepositorySelection' needs the current value of 'wantedModules', you can also switch to useReducer instead of useState and read 'wantedModules' in the reducer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         react-hooks/exhaustive-deps
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/modules/socle-dialog.tsx
+  101:7  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/modules/socle-dialog.tsx:101:7
+   99 |     if (!soclePlanKey || !selectedProject) {
+  100 |       setSoclePlan(null);
+> 101 |       setSoclePlanError("");
+      |       ^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  102 |       setLoadingSoclePlan(false);
+  103 |       return;
+  104 |     }  react-hooks/set-state-in-effect
+  128:6  warning  React Hook useEffect has a missing dependency: 'setSoclePlan'. Either include it or remove the dependency array. If 'setSoclePlan' changes too often, find the parent component that defines it and wrap that definition in useCallback                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           react-hooks/exhaustive-deps
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/projects/create-project-dialog.tsx
+  112:7  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/projects/create-project-dialog.tsx:112:7
+  110 |   useEffect(() => {
+  111 |     if (!open) {
+> 112 |       setRikaPassword("");
+      |       ^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  113 |       setCredentialStore(null);
+  114 |       return;
+  115 |     }                                                                                                                                                            react-hooks/set-state-in-effect
+  139:5  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/projects/create-project-dialog.tsx:139:5
+  137 |   useEffect(() => {
+  138 |     if (!open) return;
+> 139 |     setStartAfterCreation(dockerReady);
+      |     ^^^^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  140 |     if (prerequisites?.supported_versions?.length && !prerequisites.supported_versions.includes(version)) {
+  141 |       setVersion(prerequisites.supported_versions.at(-1) || "19.0");
+  142 |     }  react-hooks/set-state-in-effect
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/settings/settings-dialog.tsx
+  135:6  warning  React Hook useCallback has missing dependencies: 'onOpenChange' and 'setOnboardingOpen'. Either include them or remove the dependency array. If 'onOpenChange' changes too often, find the parent component that defines it and wrap that definition in useCallback  react-hooks/exhaustive-deps
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/theme-provider.tsx
+  11:19  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/theme-provider.tsx:11:19
+   9 |   const { resolvedTheme } = useTheme();
+  10 |
+> 11 |   useEffect(() => setMounted(true), []);
+     |                   ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  12 |
+  13 |   return (
+  14 |     <Theme  react-hooks/set-state-in-effect
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/theme-toggle.tsx
+  12:19  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/theme-toggle.tsx:12:19
+  10 |   const { resolvedTheme, setTheme } = useTheme();
+  11 |
+> 12 |   useEffect(() => setMounted(true), []);
+     |                   ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  13 |
+  14 |   const dark = mounted && resolvedTheme === "dark";
+  15 |   const label = dark ? "Activer le thème clair" : "Activer le thème sombre";  react-hooks/set-state-in-effect
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/wsl-setup.tsx
+  58:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/wsl-setup.tsx:58:5
+  56 |     const started = Date.now();
+  57 |     elapsedRef.current = 0;
+> 58 |     setElapsed(0);
+     |     ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  59 |     const timer = setInterval(() => {
+  60 |       elapsedRef.current = Math.round((Date.now() - started) / 1000);
+  61 |       setElapsed(elapsedRef.current);  react-hooks/set-state-in-effect
+  77:20  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/components/wsl-setup.tsx:77:20
+  75 |
+  76 |   useEffect(() => {
+> 77 |     if (open) void refresh();
+     |                    ^^^^^^^ Avoid calling setState() directly within an effect
+  78 |     else joinedRef.current = false;
+  79 |   }, [open, refresh]);
+  80 |                                                                                                         react-hooks/set-state-in-effect
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/hooks/use-hidden-below-sticky-header.ts
+  20:7  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/hooks/use-hidden-below-sticky-header.ts:20:7
+  18 |   useEffect(() => {
+  19 |     if (!element) {
+> 20 |       setVisible(true);
+     |       ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  21 |       return;
+  22 |     }
+  23 |     // Dans le panneau qui défile, les onglets font partie de l'en-tête : sa hauteur suffit  react-hooks/set-state-in-effect
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/hooks/use-manager-state.ts
+  300:6  warning  React Hook useEffect has a missing dependency: 'initializeApplication'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/hooks/use-module-filters.ts
+  62:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/hooks/use-module-filters.ts:62:5
+  60 |
+  61 |   useEffect(() => {
+> 62 |     setPage(1);
+     |     ^^^^^^^ Avoid calling setState() directly within an effect
+  63 |   }, [deferredSearch, status, origin, database, projectName]);
+  64 |
+  65 |   useEffect(() => {                                                                     react-hooks/set-state-in-effect
+  66:27  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/hooks/use-module-filters.ts:66:27
+  64 |
+  65 |   useEffect(() => {
+> 66 |     if (page > pageCount) setPage(pageCount);
+     |                           ^^^^^^^ Avoid calling setState() directly within an effect
+  67 |   }, [page, pageCount]);
+  68 |
+  69 |   const active = search !== "" || status !== "all" || origin !== "all";  react-hooks/set-state-in-effect
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/hooks/use-sticky-project-header.ts
+  26:7  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/benjaminperonne/Documents/Developer/Project/SDK-Local-Manager/odoo-manager-next/hooks/use-sticky-project-header.ts:26:7
+  24 |   useEffect(() => {
+  25 |     if (!stickyHeader) {
+> 26 |       setProjectHeaderCompact(false);
+     |       ^^^^^^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  27 |       return;
+  28 |     }
+  29 |     const target = scrollRoot ?? window;  react-hooks/set-state-in-effect
+
+✖ 40 problems (0 errors, 40 warnings)
+
