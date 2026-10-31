@@ -391,7 +391,10 @@ def job_output_payload(job, compact, detail_job_id, output_from):
 
 def jobs_snapshot(detail_job_id=None, compact=False, output_from=None):
     with JOBS_LOCK:
-        values = list(JOBS.values())[-30:]
+        all_values = list(JOBS.values())
+        recent_finished = [job for job in all_values if job.status not in JOB_UNFINISHED_STATUSES][-30:]
+        included = {job.id for job in recent_finished}
+        values = [job for job in all_values if job.id in included or job.status in JOB_UNFINISHED_STATUSES or job.id == detail_job_id]
         if compact and detail_job_id is None and values:
             detail_job_id = values[-1].id
         return [

@@ -251,6 +251,11 @@ def _error_from_http(exc):
     return S3Error(text, exc.code, code, region)
 
 
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class S3Client:
     """Lecture d'un stockage S3 : liste des buckets et des objets, téléchargement par morceaux.
 
@@ -262,10 +267,12 @@ class S3Client:
         self.access = access
         self.region = DEFAULT_REGION
         self.timeout = timeout
-        self._open = opener or (lambda request, timeout: urllib.request.urlopen(request, timeout=timeout))
+        self._open = opener or urllib.request.build_opener(_RejectRedirects()).open
         self._virtual_hosted = False
         endpoint = access.endpoint if "://" in access.endpoint else f"https://{access.endpoint}"
         parts = urllib.parse.urlsplit(endpoint)
+        if parts.scheme.lower() != "https" or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
+            raise ValueError("L'adresse du stockage S3 doit être une URL HTTPS valide.")
         self._scheme, self._host, self._base_path = parts.scheme, parts.netloc, parts.path.rstrip("/")
 
     def _url(self, bucket="", key="", params=None, virtual_hosted=False):

@@ -166,6 +166,18 @@ class RetentionJobTests(RetentionTestCase):
         self.store._payload["workspaces"][str(self.workspace)]["CLIENT"]["databases"]["old"]["expires_at"] = 0
 
     @patch("odoo_manager_web.drop_partial_database")
+    @patch("odoo_manager_web.run_capture", return_value=(0, ""))
+    @patch("odoo_manager_web.database_oids_for", return_value={"old": 16384, "empty": 16385})
+    def test_partially_running_project_restores_each_stopped_container_on_failure(self, _oids, run, _drop):
+        for running in ("postgresql-CLIENT", "odoo-CLIENT"):
+            with self.subTest(running=running), patch("odoo_manager_web.container_status", side_effect=lambda name: "running" if name == running else "exited"), patch.object(self.service, "wait_for_postgres", side_effect=RuntimeError("failure")):
+                run.reset_mock()
+                with self.assertRaisesRegex(RuntimeError, "failure"):
+                    web.database_retention_job(LogJob(), "CLIENT")
+                stopped = "odoo-CLIENT" if running.startswith("postgresql") else "postgresql-CLIENT"
+                self.assertIn(stopped, run.call_args.args[0])
+
+    @patch("odoo_manager_web.drop_partial_database")
     @patch("odoo_manager_web.database_oids_for", return_value={"old": 16384, "empty": 16385})
     @patch("odoo_manager_web.container_status", return_value="exited")
     def test_a_stopped_project_is_started_cleaned_then_stopped_again(self, status, _oids, drop):

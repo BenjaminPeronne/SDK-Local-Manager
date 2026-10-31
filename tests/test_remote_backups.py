@@ -55,6 +55,13 @@ class ParseBackupKeyTests(unittest.TestCase):
 
 
 class SignRequestTests(unittest.TestCase):
+    def test_s3_rejects_http_and_redirects(self):
+        with self.assertRaisesRegex(ValueError, "HTTPS"):
+            S3Client(S3Access("http://s3.example.test", "key", "secret"))
+        handler = remote_backups._RejectRedirects()
+        request = urllib.request.Request("https://s3.example.test", headers={"Authorization": "secret"})
+        self.assertIsNone(handler.redirect_request(request, None, 302, "Found", {}, "https://other.example.test"))
+
     def test_matches_aws_documented_list_objects_example(self):
         # Exemple « GET Bucket (List Objects) » de la documentation Signature Version 4 d'Amazon S3.
         headers = remote_backups.sign_request(

@@ -548,6 +548,12 @@ class DatabaseNameValidationTests(unittest.TestCase):
 class DatabaseRestoreTests(unittest.TestCase):
     platform = "linux"
 
+    def test_json_reader_rejects_invalid_content_lengths(self):
+        from types import SimpleNamespace
+        for value in ("-1", "+1", "1.0", "１２"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "Content-Length"):
+                web.Handler.read_json(SimpleNamespace(headers={"Content-Length": value}))
+
     def make_backup(self, root, include_dump=True, manifest="{}"):
         path = Path(root) / "backup.zip"
         with zipfile.ZipFile(path, "w") as archive:
@@ -564,6 +570,13 @@ class DatabaseRestoreTests(unittest.TestCase):
         self.assertTrue(details["has_filestore"])
         self.assertTrue(details["has_manifest"])
         self.assertEqual(details["entries"], 3)
+
+    def test_rejects_an_oversized_compressed_manifest(self):
+        from odoo_manager_core.archives import MAX_BACKUP_MANIFEST_BYTES
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.make_backup(temporary, manifest=" " * (MAX_BACKUP_MANIFEST_BYTES + 1))
+            with self.assertRaisesRegex(ValueError, "Manifeste.*volumineux"):
+                web.validate_odoo_backup_archive(path)
 
     def test_reads_the_odoo_version_from_the_backup_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -927,6 +940,25 @@ class JobResourceTests(unittest.TestCase):
         self.assertEqual(by_id[second.id]["project"], "DEMO")
         self.assertEqual(by_id[second.id]["lines"], ["second output"])
         self.assertIn("second output", by_id[second.id]["output"])
+
+    def test_snapshot_keeps_old_active_and_requested_jobs(self):
+        with patch.object(job_queue, "schedule_jobs"):
+            active = job_queue.Job("Active", lambda _job: None)
+            requested = job_queue.Job("Requested", lambda _job: None)
+            with job_queue.JOBS_LOCK:
+                active.status = "running"
+                requested.status = "done"
+            for index in range(35):
+                job = job_queue.Job(str(index), lambda _job: None)
+                with job_queue.JOBS_LOCK:
+                    job.status = "done"
+            snapshot = job_queue.jobs_snapshot(detail_job_id=requested.id, compact=True)
+            ids = {item["id"] for item in snapshot}
+            self.assertIn(active.id, ids)
+            self.assertIn(requested.id, ids)
+            self.assertEqual(32, len(snapshot))
+            with job_queue.JOBS_LOCK:
+                active.status = "done"
 
     def test_detail_job_output_can_be_fetched_incrementally(self):
         job = job_queue.Job("Stream", lambda current: [current.add(f"ligne {index}") for index in range(3)])

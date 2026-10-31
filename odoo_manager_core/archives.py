@@ -15,6 +15,7 @@ SAFE_IMPORT_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 MAX_ZIP_ENTRIES = 100_000
 MAX_ZIP_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_DATABASE_BACKUP_ENTRIES = 2_000_000
+MAX_BACKUP_MANIFEST_BYTES = 4 * 1024 * 1024
 
 
 MAX_MULTIPART_HEADER_BYTES = 16 * 1024
@@ -110,8 +111,18 @@ def save_multipart_upload(stream, content_length, content_type, destination, fil
                 sink = _LimitedField(MAX_MULTIPART_FIELD_BYTES)
             try:
                 # Un délimiteur peut chevaucher deux morceaux : sa longueur moins un octet reste en attente.
-                keep = len(delimiter) - 1
-                while (index := buffer.find(delimiter)) < 0:
+                keep = len(delimiter) + 1
+                while True:
+                    index = buffer.find(delimiter)
+                    if index >= 0:
+                        while len(buffer) < index + len(delimiter) + 2 and fill():
+                            pass
+                        suffix = buffer[index + len(delimiter):index + len(delimiter) + 2]
+                        if suffix in (b"\r\n", b"--"):
+                            break
+                        sink.write(buffer[:index + 1])
+                        buffer = buffer[index + 1:]
+                        continue
                     if len(buffer) > keep:
                         sink.write(buffer[:-keep])
                         buffer = buffer[-keep:]
@@ -183,8 +194,15 @@ def validate_odoo_backup_archive(backup_path):
 def backup_odoo_version(archive):
     """Version majeure d'Odoo qui a produit la sauvegarde (« 15.0 »), lue dans manifest.json."""
     try:
-        manifest = json.loads(archive.read("manifest.json").decode("utf-8", errors="replace"))
-    except (KeyError, ValueError, OSError, zipfile.BadZipFile):
+        info = archive.getinfo("manifest.json")
+        if info.file_size > MAX_BACKUP_MANIFEST_BYTES:
+            raise ValueError("Manifeste de sauvegarde trop volumineux.")
+        with archive.open(info) as source:
+            data = source.read(MAX_BACKUP_MANIFEST_BYTES + 1)
+        if len(data) > MAX_BACKUP_MANIFEST_BYTES:
+            raise ValueError("Manifeste de sauvegarde trop volumineux.")
+        manifest = json.loads(data.decode("utf-8", errors="replace"))
+    except (KeyError, json.JSONDecodeError, OSError, zipfile.BadZipFile):
         return ""
     if not isinstance(manifest, dict):
         return ""

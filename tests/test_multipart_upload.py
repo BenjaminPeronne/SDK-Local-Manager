@@ -77,6 +77,14 @@ class SaveMultipartUploadTests(unittest.TestCase):
         self.assertEqual({"note": "x"}, fields)
         self.assertFalse(self.destination.exists())
 
+    def test_complete_boundary_prefix_with_invalid_suffix_is_preserved(self):
+        content = b"before\r\n--" + BOUNDARY.encode() + b"NOT_A_DELIMITER\r\n\r\nafter"
+        body = form(("zip", "m.zip", content))
+        for chunk_size in (1, 7, 64, 1024):
+            with self.subTest(chunk_size=chunk_size):
+                self.save(body, chunk_size=chunk_size)
+                self.assertEqual(content, self.destination.read_bytes())
+
     def test_the_epilogue_is_read_so_the_connection_stays_usable(self):
         body = form(("zip", "m.zip", b"data"), epilogue=b"trailing bytes after the form")
         (_fields, filename), stream = self.save(body, chunk_size=5)
@@ -111,7 +119,7 @@ class ModuleZipUploadEndpointTests(unittest.TestCase):
         (self.root / self.project / "compose.yml").write_text("services: {}\n", encoding="utf-8")
         self.patches = [
             patch.object(web, "WORKSPACE", self.root),
-            patch.object(web, "API_TOKEN", ""),
+            patch.object(web, "API_TOKEN", "multipart-test-token"),
             patch.object(web, "ERROR_LOG_PATH", self.root / "errors.jsonl"),
         ]
         for active in self.patches:
@@ -133,7 +141,7 @@ class ModuleZipUploadEndpointTests(unittest.TestCase):
             "POST",
             path,
             body=body,
-            headers={"Host": f"127.0.0.1:{self.port}", "Content-Type": CONTENT_TYPE},
+            headers={"Host": f"127.0.0.1:{self.port}", "Content-Type": CONTENT_TYPE, "X-SDK-Manager-Token": "multipart-test-token"},
         )
         response = connection.getresponse()
         payload = json.loads(response.read() or b"{}")

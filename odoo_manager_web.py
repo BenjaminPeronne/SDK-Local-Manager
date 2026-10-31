@@ -4727,6 +4727,15 @@ def database_retention_job(job, project):
                     service.stop_project(project, log=job.add)
                 except RuntimeError as exc:
                     job.add(f"Arrêt des conteneurs impossible : {exc}")
+            elif len(running_before) < len(containers):
+                for name in containers:
+                    if name not in running_before:
+                        try:
+                            code, output = run_capture(docker_command(SETTINGS, "stop", name), timeout=120)
+                            if code:
+                                job.add(f"Arrêt de {name} impossible : {output}")
+                        except (OSError, RuntimeError) as exc:
+                            job.add(f"Arrêt de {name} impossible : {exc}")
     except Exception:
         RETENTION_FAILURES[project] = time.monotonic()
         raise
@@ -7896,7 +7905,16 @@ class Handler(BaseHTTPRequestHandler):
             return False
         body = json.dumps({"error": reason}, ensure_ascii=False).encode("utf-8")
         try:
-            self.discard_request_body()
+            # Laisser un court délai aux corps déjà envoyés, sans attendre indéfiniment
+            # un client non authentifié qui annonce un corps sans le transmettre.
+            previous_timeout = self.connection.gettimeout()
+            self.connection.settimeout(1)
+            try:
+                self.discard_request_body()
+            except TimeoutError:
+                pass
+            finally:
+                self.connection.settimeout(previous_timeout)
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -7909,7 +7927,10 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def read_json(self):
-        length = int(self.headers.get("Content-Length", "0"))
+        raw_length = self.headers.get("Content-Length", "0")
+        if not raw_length.isascii() or not raw_length.isdecimal():
+            raise ValueError("Content-Length invalide.")
+        length = int(raw_length)
         if not length:
             return {}
         if length > MAX_JSON_BODY_BYTES:
@@ -9115,6 +9136,31 @@ class ManagerHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 64
     allow_reuse_address = True
+
+    def __init__(self, *args, **kwargs):
+        self._connection_slots = threading.BoundedSemaphore(64)
+        super().__init__(*args, **kwargs)
+
+    def get_request(self):
+        request, address = super().get_request()
+        request.settimeout(30)
+        return request, address
+
+    def process_request(self, request, client_address):
+        if not self._connection_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._connection_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._connection_slots.release()
 
 
 def address_is_already_in_use(error):
