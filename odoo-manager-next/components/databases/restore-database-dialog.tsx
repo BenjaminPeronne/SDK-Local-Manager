@@ -183,8 +183,9 @@ export function RestoreDatabaseDialog({
               <span>
                 <span className="block font-medium">Neutraliser la base pour les tests</span>
                 <span className="mt-0.5 block text-xs text-muted-foreground">
-                  Recommandé en local : désactive notamment les envois d’e-mails et les actions externes. La
-                  restauration est toujours déclarée comme une copie.
+                  Recommandé en local : contrôle notamment les tâches planifiées, les serveurs de messagerie et la
+                  synchronisation bancaire. Certaines connexions propres aux modules peuvent rester actives :
+                  vérifie-les avant d’utiliser la base. La restauration est toujours déclarée comme une copie.
                 </span>
               </span>
             </label>
