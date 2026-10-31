@@ -66,7 +66,7 @@ linux-backend:
   stage: runtime
   image: python:3.12-bookworm
   script:
-    - python -m pip install pyinstaller
+    - python -m pip install pyinstaller==6.21.0
     - python scripts/build_electron_sidecar.py --clean
     - |
       set -eu
@@ -90,7 +90,7 @@ build-linux:
     - apt-get update
     - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libfuse2 libnss3 libgtk-3-0 libasound2 libgbm1 xvfb xauth
     - cd odoo-manager-next && npm ci && cd ..
-    - python -m pip install pyinstaller
+    - python -m pip install pyinstaller==6.21.0
     - python -m unittest discover -s tests -v
     - CI=true python scripts/build_desktop.py --bundles deb,appimage
     - xvfb-run -a python scripts/smoke_test_electron.py --bundle-directory odoo-manager-next/release
@@ -110,7 +110,7 @@ build-macos:
     # Python isolé du système : celui de Homebrew refuse les installations globales (PEP 668).
     - python3.12 -m venv .ci-venv && . .ci-venv/bin/activate
     - cd odoo-manager-next && npm ci && cd ..
-    - python -m pip install pyinstaller
+    - python -m pip install pyinstaller==6.21.0
     - python -m unittest discover -s tests -v
     - CI=true python scripts/build_desktop.py --bundles app,dmg
     - python scripts/smoke_test_electron.py --bundle-directory odoo-manager-next/release
@@ -133,7 +133,7 @@ build-windows:
     - Copy-Item -Recurse -Force runtime\* odoo-manager-next\electron\binaries\
     - cd odoo-manager-next; npm ci; if ($LASTEXITCODE) { exit $LASTEXITCODE }; cd ..
     - py -3.12 -m venv .ci-venv; .\.ci-venv\Scripts\Activate.ps1
-    - python -m pip install pyinstaller
+    - python -m pip install pyinstaller==6.21.0
     - python -m unittest discover -s tests -v; if ($LASTEXITCODE) { exit $LASTEXITCODE }
     - $env:CI = "true"; python scripts/build_desktop.py --bundles nsis; if ($LASTEXITCODE) { exit $LASTEXITCODE }
   artifacts:

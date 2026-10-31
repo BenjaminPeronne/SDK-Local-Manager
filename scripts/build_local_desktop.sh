@@ -11,5 +11,5 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 
 "$VENV/bin/python" -m pip install --upgrade pip
-"$VENV/bin/python" -m pip install pyinstaller
+"$VENV/bin/python" -m pip install pyinstaller==6.21.0
 "$VENV/bin/python" "$ROOT/scripts/build_desktop.py" "$@"
