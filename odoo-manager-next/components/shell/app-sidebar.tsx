@@ -3,7 +3,7 @@
 import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
 import { Circle, FolderPlus, Info, Loader2, Search, Settings, Star } from "lucide-react";
 import type { StaticImageData } from "next/image";
-import { statusVariant } from "@/lib/format";
+import { statusVariant, workspaceLabel } from "@/lib/format";
 import { isJobActive, isJobUnfinished, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
 import { odooServerStopped } from "@/lib/projects";
 import type { Season } from "@/lib/seasonal";
@@ -166,7 +166,7 @@ export function AppSidebar({
               className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
               title={overview?.workspace || "Workspace local"}
             >
-              {overview?.workspace || "Workspace local"}
+              {overview?.workspace ? workspaceLabel(overview.workspace) : "Workspace local"}
             </p>
             <Badge
               className="shrink-0"
@@ -196,7 +196,7 @@ export function AppSidebar({
             >
               <button
                 type="button"
-                className="flex min-h-16 w-full min-w-0 items-center gap-2 rounded-lg px-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                className="flex min-h-12 w-full min-w-0 items-center gap-2 rounded-lg px-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 aria-current={selectedProjectName === job.project ? "page" : undefined}
                 onClick={() => {
                   setSelectedProjectName(job.project || "");
@@ -206,7 +206,7 @@ export function AppSidebar({
                   setActiveTab("logs");
                 }}
               >
-                <span className="min-w-0 flex-1 py-2">
+                <span className="min-w-0 flex-1 py-1.5">
                   <span className="block truncate text-sm font-semibold uppercase">{job.project}</span>
                   <span className="mt-0.5 flex items-center gap-1.5 text-xs text-primary">
                     <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
@@ -241,16 +241,16 @@ export function AppSidebar({
               <div
                 key={project.name}
                 className={cn(
-                  "rounded-lg border border-transparent transition-colors duration-150 hover:bg-hover",
+                  "group rounded-lg border border-transparent transition-colors duration-150 hover:bg-hover",
                   absent && "bg-muted/35 text-muted-foreground",
                   selected && "border-primary/40 bg-selected hover:bg-selected",
                 )}
               >
-                <div className="flex min-h-16 items-center gap-2 px-3">
+                <div className="flex min-h-12 items-center gap-2 px-3">
                   <button
                     type="button"
                     aria-current={selected ? "page" : undefined}
-                    className="-mx-1 min-w-0 flex-1 rounded-md px-1 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    className="-mx-1 min-w-0 flex-1 rounded-md px-1 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                     onClick={() => {
                       setSelectedProjectName(project.name);
                       setExternalLogView(null);
@@ -271,7 +271,12 @@ export function AppSidebar({
                   </button>
                   <button
                     type="button"
-                    className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className={cn(
+                      "shrink-0 rounded p-1.5 text-muted-foreground hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      // Étoile vide seulement au survol ou au clavier : les favoris restent seuls visibles.
+                      !favorites.includes(project.name) &&
+                        "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
+                    )}
                     aria-label={`${favorites.includes(project.name) ? "Retirer" : "Ajouter"} ${project.name} ${favorites.includes(project.name) ? "des" : "aux"} favoris`}
                     aria-pressed={favorites.includes(project.name)}
                     onClick={() => toggleFavorite(project.name)}
@@ -280,14 +285,12 @@ export function AppSidebar({
                       className={cn("h-3.5 w-3.5", favorites.includes(project.name) && "fill-primary text-primary")}
                     />
                   </button>
-                  <div className="flex w-[74px] shrink-0 items-center justify-end gap-2">
+                  <span title={busyJob?.title} className="inline-flex h-6 w-6 shrink-0 items-center justify-center">
                     {busyJob ? (
-                      <span title={busyJob.title} className="inline-flex h-6 w-6 items-center justify-center">
-                        <Loader2
-                          className="h-4 w-4 animate-spin text-primary"
-                          aria-label={`En cours : ${busyJob.title}`}
-                        />
-                      </span>
+                      <Loader2
+                        className="h-4 w-4 animate-spin text-primary"
+                        aria-label={`En cours : ${busyJob.title}`}
+                      />
                     ) : (
                       <span
                         className={cn(
@@ -310,15 +313,7 @@ export function AppSidebar({
                         <Circle className="h-5 w-5 fill-current" aria-hidden="true" />
                       </span>
                     )}
-                    <span
-                      className={cn(
-                        "w-7 text-xs font-semibold",
-                        displayedRunning ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
-                      )}
-                    >
-                      {displayedRunning ? "ON" : "OFF"}
-                    </span>
-                  </div>
+                  </span>
                 </div>
                 {settings?.show_technical_details && (
                   <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 text-xs">
@@ -334,8 +329,8 @@ export function AppSidebar({
             );
           })}
         </div>
-        <div className="grid grid-cols-2 gap-2 border-t p-3 lg:grid-cols-1">
-          <GeneralActivity jobs={generalJobs} className="col-span-2 lg:col-span-1" />
+        <div className="grid grid-cols-2 gap-2 border-t p-3">
+          <GeneralActivity jobs={generalJobs} className="col-span-2" />
           {availableUpdate && (
             <UpdateBanner
               update={availableUpdate}
@@ -345,15 +340,15 @@ export function AppSidebar({
               openUrl={openUrl}
             />
           )}
-          <Button className="col-span-2 w-full lg:col-span-1" onClick={openCreateProjectDialog}>
+          <Button className="col-span-2 w-full" onClick={openCreateProjectDialog}>
             <FolderPlus className="h-4 w-4" />
             Nouveau projet
           </Button>
-          <Button className="w-full" variant="outline" onClick={openSettingsDialog}>
+          <Button className="w-full" size="sm" variant="ghost" onClick={openSettingsDialog}>
             <Settings className="h-4 w-4" />
             Paramètres
           </Button>
-          <Button className="w-full" variant="secondary" onClick={() => setAboutOpen(true)}>
+          <Button className="w-full" size="sm" variant="ghost" onClick={() => setAboutOpen(true)}>
             <Info className="h-4 w-4" />À propos
           </Button>
         </div>

@@ -16,7 +16,7 @@ type UpdateBannerProps = {
 /** Annonce d'une nouvelle version dans la barre latérale ; masquable jusqu'à la suivante. */
 export function UpdateBanner({ update, installer, hasRunningJobs, onDismiss, openUrl }: UpdateBannerProps) {
   return (
-    <div className="col-span-2 flex items-start gap-2 rounded-md border border-primary/40 bg-primary/10 p-2.5 text-sm lg:col-span-1">
+    <div className="col-span-2 flex items-start gap-2 rounded-md border border-primary/40 bg-primary/10 p-2.5 text-sm">
       <Download className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
       <div className="min-w-0 flex-1">
         <div className="font-medium">Version {update.latest} disponible</div>

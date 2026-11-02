@@ -48,3 +48,10 @@ export function formatBytes(bytes: number) {
   const digits = unit >= 3 && value < 100 ? 1 : 0;
   return `${value.toLocaleString("fr-FR", { maximumFractionDigits: digits })} ${BYTE_UNITS[unit]}`;
 }
+
+/** Dossier des projets en court : « ~/…/Projets » plutôt qu'un début de chemin tronqué. */
+export function workspaceLabel(path: string) {
+  const short = path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
+  const parts = short.split("/");
+  return parts.length > 3 ? `${parts[0]}/…/${parts.at(-1)}` : short;
+}
