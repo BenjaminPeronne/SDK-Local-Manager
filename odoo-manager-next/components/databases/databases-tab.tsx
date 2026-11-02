@@ -108,7 +108,11 @@ export function DatabasesTab({
   const [postgresDetailsOpen, setPostgresDetailsOpen] = useState(false);
   // Bases dont la restauration s'est arrêtée avant la fin : relu à l'ouverture du projet et quand
   // la liste des bases change (suppression, nouvelle restauration).
-  const [incompleteDatabases, setIncompleteDatabases] = useState<string[]>([]);
+  const [databaseVersions, setDatabaseVersions] = useState<{
+    project: string;
+    versions: Record<string, string>;
+    incomplete: string[];
+  } | null>(null);
   const [viewPreferences, setViewPreferences] = useState(storedDatabaseViews);
   const preferenceKey = JSON.stringify([workspace, selectedProject?.name || ""]);
   const listView = (viewPreferences[preferenceKey] || (odooDatabases.length > 4 ? "list" : "cards")) === "list";
@@ -130,12 +134,17 @@ export function DatabasesTab({
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
-        const payload = await api<{ incomplete?: string[] }>(
+        const payload = await api<{ versions?: Record<string, string>; incomplete?: string[] }>(
           `/api/projects/${encodeURIComponent(projectName)}/database-versions`,
         );
-        if (!cancelled) setIncompleteDatabases(payload.incomplete ?? []);
+        if (!cancelled)
+          setDatabaseVersions({
+            project: projectName,
+            versions: payload.versions ?? {},
+            incomplete: payload.incomplete ?? [],
+          });
       } catch {
-        if (!cancelled) setIncompleteDatabases([]);
+        if (!cancelled) setDatabaseVersions(null);
       }
     }, 0);
     return () => {
@@ -143,7 +152,10 @@ export function DatabasesTab({
       window.clearTimeout(timer);
     };
   }, [projectName, postgresRunning, databasesKey]);
-  const incomplete = incompleteDatabases.filter((db) => odooDatabases.includes(db));
+  const versions = databaseVersions && databaseVersions.project === projectName ? databaseVersions.versions : {};
+  const incomplete = (
+    databaseVersions && databaseVersions.project === projectName ? databaseVersions.incomplete : []
+  ).filter((db) => odooDatabases.includes(db));
 
   function runDatabaseAction(db: string, action: DatabaseMenuAction) {
     if (db !== selectedDb) {
@@ -289,7 +301,7 @@ export function DatabasesTab({
                     {listView && (
                       <div className="text-xs text-muted-foreground">
                         <span className="md:hidden">Version : </span>
-                        {selectedProject?.database_versions?.[db] || "—"}
+                        {versions[db] || "—"}
                       </div>
                     )}
                     <div className={cn(listView && "sdk-database-list-meta")}>
@@ -300,9 +312,7 @@ export function DatabasesTab({
                             db === selectedDb ? "font-medium text-primary" : "text-muted-foreground",
                           )}
                         >
-                          {db === selectedDb
-                            ? "Base de travail"
-                            : selectedProject?.database_versions?.[db] || "Base Odoo"}
+                          {db === selectedDb ? "Base de travail" : versions[db] || "Base Odoo"}
                         </div>
                       )}
                       {listView && !deletion && <span className="text-xs text-muted-foreground">Sans échéance</span>}
