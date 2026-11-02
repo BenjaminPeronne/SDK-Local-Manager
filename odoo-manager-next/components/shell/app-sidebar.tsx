@@ -285,12 +285,14 @@ export function AppSidebar({
                       className={cn("h-3.5 w-3.5", favorites.includes(project.name) && "fill-primary text-primary")}
                     />
                   </button>
-                  <span title={busyJob?.title} className="inline-flex h-6 w-6 shrink-0 items-center justify-center">
+                  <div className="flex w-[74px] shrink-0 items-center justify-end gap-2">
                     {busyJob ? (
-                      <Loader2
-                        className="h-4 w-4 animate-spin text-primary"
-                        aria-label={`En cours : ${busyJob.title}`}
-                      />
+                      <span title={busyJob.title} className="inline-flex h-6 w-6 items-center justify-center">
+                        <Loader2
+                          className="h-4 w-4 animate-spin text-primary"
+                          aria-label={`En cours : ${busyJob.title}`}
+                        />
+                      </span>
                     ) : (
                       <span
                         className={cn(
@@ -313,7 +315,15 @@ export function AppSidebar({
                         <Circle className="h-5 w-5 fill-current" aria-hidden="true" />
                       </span>
                     )}
-                  </span>
+                    <span
+                      className={cn(
+                        "w-7 text-xs font-semibold",
+                        displayedRunning ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
+                      )}
+                    >
+                      {displayedRunning ? "ON" : "OFF"}
+                    </span>
+                  </div>
                 </div>
                 {settings?.show_technical_details && (
                   <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 text-xs">
