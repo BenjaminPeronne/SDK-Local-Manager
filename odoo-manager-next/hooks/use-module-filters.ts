@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { type SetStateAction, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { moduleAuthors, moduleHasAuthor, searchModules } from "@/lib/module-search";
 import { normalizeSearchText } from "@/lib/format";
 import { normalizedModuleOrigin } from "@/lib/modules";
@@ -12,6 +12,7 @@ export const MODULES_PER_PAGE = 50;
 export type ModuleView = "list" | "repository";
 const MODULE_VIEW_STORAGE_KEY = "sdk-local-manager.modules-view";
 const MODULE_FILTERS_STORAGE_KEY = "sdk-local-manager.module-filters";
+const MODULE_PAGES_STORAGE_KEY = "sdk-local-manager.module-pages";
 type Filters = { search: string; status: string; origin: string; author: string };
 const DEFAULT_FILTERS: Filters = { search: "", status: "all", origin: "all", author: "all" };
 
@@ -49,10 +50,37 @@ export function useModuleFilters(
   projectName: string | undefined,
   database: string,
   workspace: string,
+  modulesReady: boolean,
 ) {
   const [filtersByProject, setFiltersByProject] = useState(storedFilters);
   const projectKey = JSON.stringify([workspace, projectName || ""]);
   const { search, status, origin, author } = filtersByProject[projectKey] || DEFAULT_FILTERS;
+  const pageKey = JSON.stringify([workspace, projectName || "", database]);
+  const [pages, setPages] = useState<Record<string, number>>(() => {
+    try {
+      const value: unknown = JSON.parse(window.sessionStorage.getItem(MODULE_PAGES_STORAGE_KEY) || "{}");
+      if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+      return Object.fromEntries(
+        Object.entries(value).filter(([, page]) => Number.isSafeInteger(page) && (page as number) > 0),
+      );
+    } catch {
+      return {};
+    }
+  });
+  const page = pages[pageKey] || 1;
+  function setPage(update: SetStateAction<number>) {
+    setPages((current) => {
+      const previous = current[pageKey] || 1;
+      const nextPage = typeof update === "function" ? update(previous) : update;
+      const next = { ...current, [pageKey]: nextPage };
+      try {
+        window.sessionStorage.setItem(MODULE_PAGES_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        /* Mémoire de la fenêtre. */
+      }
+      return next;
+    });
+  }
   function updateFilters(changes: Partial<Filters>) {
     setFiltersByProject((current) => {
       const next = { ...current, [projectKey]: { ...(current[projectKey] || DEFAULT_FILTERS), ...changes } };
@@ -63,12 +91,12 @@ export function useModuleFilters(
       }
       return next;
     });
+    setPage(1);
   }
   const setSearch = (search: string) => updateFilters({ search });
   const setStatus = (status: string) => updateFilters({ status });
   const setOrigin = (origin: string) => updateFilters({ origin });
   const setAuthor = (author: string) => updateFilters({ author });
-  const [page, setPage] = useState(1);
   const [view, setViewState] = useState<ModuleView>(storedModuleView);
 
   function setView(next: ModuleView) {
@@ -83,8 +111,8 @@ export function useModuleFilters(
   const deferredSearch = useDeferredValue(search);
   const authors = useMemo(() => {
     const names = new Map<string, string>();
-    for (const module of modules) {
-      for (const name of moduleAuthors(module.author)) {
+    for (const item of modules) {
+      for (const name of moduleAuthors(item.author)) {
         const key = normalizeSearchText(name);
         if (key && !names.has(key)) names.set(key, name);
       }
@@ -115,12 +143,8 @@ export function useModuleFilters(
   }, [filtered, page]);
 
   useEffect(() => {
-    setPage(1);
-  }, [deferredSearch, status, origin, author, database, projectName]);
-
-  useEffect(() => {
-    if (page > pageCount) setPage(pageCount);
-  }, [page, pageCount]);
+    if (modulesReady && deferredSearch === search && page > pageCount) setPage(pageCount);
+  }, [modulesReady, deferredSearch, search, page, pageCount, pageKey]);
 
   const active = search !== "" || status !== "all" || origin !== "all" || author !== "all";
   function reset() {

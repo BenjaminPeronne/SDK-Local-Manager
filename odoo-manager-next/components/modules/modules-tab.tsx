@@ -5,12 +5,14 @@ import {
   type MouseEvent as ReactMouseEvent,
   type SetStateAction,
   useCallback,
+  useEffect,
   useMemo,
   useState,
 } from "react";
 import { DropdownMenu, SegmentedControl } from "@radix-ui/themes";
 import {
   Boxes,
+  ArrowUp,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -66,6 +68,7 @@ type ModulesTabProps = {
   createJob: (action: string, payload?: Record<string, unknown>) => Promise<Job | null>;
   loading: boolean;
   loadingModules: boolean;
+  modulesReady: boolean;
   modules: ModuleInfo[];
   moduleRepositories: ModuleRepository[];
   moduleSelectionBarProps: Omit<
@@ -91,6 +94,7 @@ type ModulesTabProps = {
   selectedModules: Set<string>;
   selectedProject: Project | undefined;
   selectedProjectReady: boolean;
+  scrollRoot: HTMLElement | null;
   setSelectedModules: Dispatch<SetStateAction<Set<string>>>;
   settings: ManagerSettings | null;
   stickyHeader: boolean;
@@ -103,6 +107,7 @@ export function ModulesTab({
   createJob,
   loading,
   loadingModules,
+  modulesReady,
   modules,
   moduleRepositories,
   moduleSelectionBarProps,
@@ -125,11 +130,30 @@ export function ModulesTab({
   selectedModules,
   selectedProject,
   selectedProjectReady,
+  scrollRoot,
   setSelectedModules,
   settings,
   stickyHeader,
 }: ModulesTabProps) {
-  const moduleFilters = useModuleFilters(modules, selectedProject?.name, selectedDb, overview?.workspace || "");
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  function scrollToTop() {
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
+    (scrollRoot || window).scrollTo({ top: 0, behavior });
+  }
+  useEffect(() => {
+    const target = scrollRoot || window;
+    const update = () => setShowScrollTop((scrollRoot ? scrollRoot.scrollTop : window.scrollY) > 480);
+    update();
+    target.addEventListener("scroll", update, { passive: true });
+    return () => target.removeEventListener("scroll", update);
+  }, [scrollRoot]);
+  const moduleFilters = useModuleFilters(
+    modules,
+    selectedProject?.name,
+    selectedDb,
+    overview?.workspace || "",
+    modulesReady,
+  );
   const [authorDialogOpen, setAuthorDialogOpen] = useState(false);
   const [authorSearch, setAuthorSearch] = useState("");
   const selectedAuthor = moduleFilters.authors.find((author) => author.value === moduleFilters.author);
@@ -145,27 +169,33 @@ export function ModulesTab({
     onSelectAllFiltered: () => setSelectedModules((current) => new Set([...current, ...filteredNames])),
   };
   const showModuleLocations = settings?.show_technical_details ?? false;
-  const toggleModuleSelection = useCallback((name: string, checked: boolean) => {
-    setSelectedModules((current) => {
-      const next = new Set(current);
-      if (checked) next.add(name);
-      else next.delete(name);
-      return next;
-    });
-  }, []);
-  const toggleModuleFromRow = useCallback((event: ReactMouseEvent<HTMLElement>, name: string) => {
-    const target = event.target as HTMLElement;
-    // Les contrôles gardent leur action, y compris les menus rendus en portail dont les clics remontent jusqu'ici.
-    if (target.closest("button, a, input, select, textarea, label, [role=menu], [role=menuitem], [role=dialog]"))
-      return;
-    // Sélectionner un nom ou un chemin pour le copier ne coche pas la ligne.
-    if (window.getSelection()?.toString()) return;
-    setSelectedModules((current) => {
-      const next = new Set(current);
-      if (!next.delete(name)) next.add(name);
-      return next;
-    });
-  }, []);
+  const toggleModuleSelection = useCallback(
+    (name: string, checked: boolean) => {
+      setSelectedModules((current) => {
+        const next = new Set(current);
+        if (checked) next.add(name);
+        else next.delete(name);
+        return next;
+      });
+    },
+    [setSelectedModules],
+  );
+  const toggleModuleFromRow = useCallback(
+    (event: ReactMouseEvent<HTMLElement>, name: string) => {
+      const target = event.target as HTMLElement;
+      // Les contrôles gardent leur action, y compris les menus rendus en portail dont les clics remontent jusqu'ici.
+      if (target.closest("button, a, input, select, textarea, label, [role=menu], [role=menuitem], [role=dialog]"))
+        return;
+      // Sélectionner un nom ou un chemin pour le copier ne coche pas la ligne.
+      if (window.getSelection()?.toString()) return;
+      setSelectedModules((current) => {
+        const next = new Set(current);
+        if (!next.delete(name)) next.add(name);
+        return next;
+      });
+    },
+    [setSelectedModules],
+  );
   const projectName = selectedProject?.name;
   const rowActions = useMemo<ModuleRowActions>(
     () => ({
@@ -619,6 +649,22 @@ export function ModulesTab({
         >
           <ModuleSelectionBar {...selectionBarProps} floating />
         </div>
+      )}
+      {showScrollTop && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className={cn(
+            "fixed left-1/2 z-30 -translate-x-1/2 rounded-full border border-primary/50 bg-card px-4 text-primary shadow-lg hover:bg-selected lg:left-[calc(50%+10rem)]",
+            showFloatingModuleActions ? "bottom-28" : "bottom-6",
+          )}
+          onClick={scrollToTop}
+          title="Revenir en haut des modules"
+        >
+          <ArrowUp className="h-4 w-4" />
+          Haut de page
+        </Button>
       )}
     </TabsContent>
   );

@@ -8,6 +8,7 @@ import { useUpdateInstaller } from "@/hooks/use-update-installer";
 import { useDatabaseDependencies } from "@/hooks/use-database-dependencies";
 import { useHiddenBelowStickyHeader } from "@/hooks/use-hidden-below-sticky-header";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useProjectScroll } from "@/hooks/use-project-scroll";
 import { useJobs } from "@/hooks/use-jobs";
 import { useLiveUpdates } from "@/hooks/use-live-updates";
 import { useManagerState } from "@/hooks/use-manager-state";
@@ -176,7 +177,7 @@ export default function Home() {
   const [modules, setModules] = useState<ModuleInfo[]>([]);
   const [moduleRepositories, setModuleRepositories] = useState<ModuleRepository[]>([]);
   const [loadingModules, setLoadingModules] = useState(false);
-  const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
+  const [modulesContext, setModulesContext] = useState("");
   const [socleDialogOpen, setSocleDialogOpen] = useState(false);
   const [selectedSoclePresets, setSelectedSoclePresets] = useState<Set<string>>(new Set());
   const [socleCatalog, setSocleCatalog] = useState<SocleCatalog | null>(null);
@@ -298,6 +299,28 @@ export default function Home() {
     setSelectedProjectName,
     pendingProjectNames,
   });
+  const selectionContext = JSON.stringify([overview?.workspace || "", selectedProjectName, selectedDb]);
+  const [moduleSelection, setModuleSelection] = useState<{ context: string; names: Set<string> }>({
+    context: selectionContext,
+    names: new Set(),
+  });
+  const selectedModules = useMemo(
+    () => (moduleSelection.context === selectionContext ? moduleSelection.names : new Set<string>()),
+    [moduleSelection, selectionContext],
+  );
+  const setSelectedModules = useCallback<React.Dispatch<React.SetStateAction<Set<string>>>>(
+    (update) =>
+      setModuleSelection((current) => {
+        const names = current.context === selectionContext ? current.names : new Set<string>();
+        return { context: selectionContext, names: typeof update === "function" ? update(names) : update };
+      }),
+    [selectionContext],
+  );
+  useEffect(() => {
+    setModuleSelection((current) =>
+      current.context === selectionContext ? current : { context: selectionContext, names: new Set() },
+    );
+  }, [selectionContext]);
   useEffect(() => {
     if (selectedProjectName) {
       projectTabs.current[JSON.stringify([overview?.workspace || "", selectedProjectName])] = activeTab;
@@ -417,6 +440,14 @@ export default function Home() {
   const wideScreen = useMediaQuery("(min-width: 1024px)");
   const [projectPanel, setProjectPanel] = useState<HTMLElement | null>(null);
   const panelScrollRoot = refinedInterface && wideScreen ? projectPanel : null;
+  useProjectScroll(
+    panelScrollRoot,
+    overview?.workspace || "",
+    selectedProjectName,
+    activeTab,
+    activeTab !== "modules" ||
+      (!loadingModules && modulesContext === JSON.stringify([selectedProjectName, selectedDb])),
+  );
   const { projectHeaderRef, projectHeaderHeight, projectTabsRef, projectTabsHeight, projectHeaderCompact } =
     useStickyProjectHeader(stickyHeader, projectViewOpen, selectedProject?.name, panelScrollRoot);
   const [setModuleSelectionBanner, moduleSelectionBannerHidden] = useHiddenBelowStickyHeader(
@@ -534,6 +565,7 @@ export default function Home() {
     const generation = ++modulesRequestGeneration.current;
     if (!projectName || !selectedDb || selectedDb === "postgres") {
       setModules([]);
+      setModulesContext("");
       setModuleRepositories([]);
       setLoadingModules(false);
       return;
@@ -545,6 +577,7 @@ export default function Home() {
       );
       if (generation !== modulesRequestGeneration.current) return;
       setModules(payload.modules);
+      setModulesContext(JSON.stringify([projectName, selectedDb]));
       setModuleRepositories(payload.repositories ?? []);
       setSelectedModules((current) => {
         const available = new Set(payload.modules.map((module) => module.name));
@@ -563,7 +596,7 @@ export default function Home() {
     } finally {
       if (generation === modulesRequestGeneration.current) setLoadingModules(false);
     }
-  }, [pushToast, refreshOverview, selectedDb, selectedProject?.name]);
+  }, [pushToast, refreshOverview, selectedDb, selectedProject?.name, setSelectedModules]);
 
   useEffect(() => {
     const completionKey = jobs
@@ -1556,7 +1589,7 @@ export default function Home() {
     }
     window.addEventListener("keydown", clearSelectionOnEscape);
     return () => window.removeEventListener("keydown", clearSelectionOnEscape);
-  }, [activeTab, hasModuleSelection]);
+  }, [activeTab, hasModuleSelection, setSelectedModules]);
 
   if (initializing) {
     return (
@@ -1940,6 +1973,9 @@ export default function Home() {
                       createJob={createJob}
                       loading={loading}
                       loadingModules={loadingModules}
+                      modulesReady={
+                        !loadingModules && modulesContext === JSON.stringify([selectedProject?.name, selectedDb])
+                      }
                       modules={modules}
                       moduleRepositories={moduleRepositories}
                       moduleSelectionBarProps={moduleSelectionBarProps}
@@ -1962,6 +1998,7 @@ export default function Home() {
                       selectedModules={selectedModules}
                       selectedProject={selectedProject}
                       selectedProjectReady={selectedProjectReady}
+                      scrollRoot={panelScrollRoot}
                       setSelectedModules={setSelectedModules}
                       settings={settings}
                       stickyHeader={stickyHeader}
