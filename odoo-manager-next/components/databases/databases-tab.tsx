@@ -3,6 +3,8 @@
 import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 import { DropdownMenu } from "@radix-ui/themes";
 import {
+  LayoutGrid,
+  List,
   CalendarClock,
   CalendarPlus,
   CheckCircle2,
@@ -50,7 +52,24 @@ const DELETION_BADGE_VARIANTS: Record<RetentionTone, "secondary" | "warning" | "
   danger: "danger",
 };
 
+type DatabaseView = "cards" | "list";
+const DATABASE_VIEWS_KEY = "sdk-local-manager.database-views";
+function storedDatabaseViews(): Record<string, DatabaseView> {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(DATABASE_VIEWS_KEY) || "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        (entry): entry is [string, DatabaseView] => entry[1] === "cards" || entry[1] === "list",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
 type DatabasesTabProps = {
+  workspace: string;
   chooseDatabase: (db: string, projectName?: string | undefined) => void;
   dependencyReport: DependencyReport | null;
   executeDatabaseAction: (action: DatabaseMenuAction) => void;
@@ -71,6 +90,7 @@ type DatabasesTabProps = {
 };
 
 export function DatabasesTab({
+  workspace,
   chooseDatabase,
   dependencyReport,
   executeDatabaseAction,
@@ -92,6 +112,19 @@ export function DatabasesTab({
   // Bases dont la restauration s'est arrêtée avant la fin : relu à l'ouverture du projet et quand
   // la liste des bases change (suppression, nouvelle restauration).
   const [incompleteDatabases, setIncompleteDatabases] = useState<string[]>([]);
+  const [viewPreferences, setViewPreferences] = useState(storedDatabaseViews);
+  const preferenceKey = JSON.stringify([workspace, selectedProject?.name || ""]);
+  const listView = (viewPreferences[preferenceKey] || (odooDatabases.length > 4 ? "list" : "cards")) === "list";
+  function chooseView(view: DatabaseView) {
+    const next = { ...viewPreferences, [preferenceKey]: view };
+    setViewPreferences(next);
+    try {
+      window.localStorage.setItem(DATABASE_VIEWS_KEY, JSON.stringify(next));
+    } catch {
+      /* Vue conservée pour cette session. */
+    }
+  }
+  const DatabaseItem = listView ? "button" : InteractiveCard;
   const projectName = selectedProject?.name;
   const postgresRunning = selectedProject?.postgres_status === "running";
   const databasesKey = odooDatabases.join(",");
@@ -191,58 +224,115 @@ export function DatabasesTab({
           }
         />
 
+        {odooDatabases.length > 0 && (
+          <div className="flex justify-end gap-1" role="group" aria-label="Affichage des bases">
+            <Button
+              size="sm"
+              variant={!listView ? "secondary" : "ghost"}
+              aria-pressed={!listView}
+              onClick={() => chooseView("cards")}
+            >
+              <LayoutGrid className="h-4 w-4" />
+              Cartes
+            </Button>
+            <Button
+              size="sm"
+              variant={listView ? "secondary" : "ghost"}
+              aria-pressed={listView}
+              onClick={() => chooseView("list")}
+            >
+              <List className="h-4 w-4" />
+              Liste
+            </Button>
+          </div>
+        )}
         {odooDatabases.length ? (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div
+            role="group"
+            aria-label={`Bases du projet ${selectedProject?.name || ""}`}
+            className={cn(listView ? "overflow-hidden rounded-lg border bg-card" : "grid gap-3 sm:grid-cols-2")}
+          >
+            {listView && (
+              <div
+                className="sdk-database-list-heading hidden border-b bg-muted/60 text-xs font-semibold text-muted-foreground md:grid"
+                aria-hidden="true"
+              >
+                <span>Base de données</span>
+                <span>Version</span>
+                <span>Conservation et état</span>
+                <span className="text-right">Actions</span>
+              </div>
+            )}
             {odooDatabases.map((db) => {
               const expiresAt = selectedProject?.database_retention?.[db]?.expires_at ?? null;
               const deletion = expiresAt === null ? null : deletionLabel(expiresAt);
               return (
-                <div key={db} className="relative min-w-0">
-                  <InteractiveCard
+                <div key={db} className={cn("relative min-w-0", listView && "border-b last:border-b-0")}>
+                  <DatabaseItem
+                    type="button"
+                    aria-label={`Sélectionner la base ${db}`}
                     aria-pressed={selectedDb === db}
                     className={cn(
-                      "w-full min-w-0 p-4",
+                      "w-full min-w-0 p-4 text-left",
+                      listView && cn("sdk-database-list-row transition-colors hover:bg-hover", REFINED_FOCUS_RING),
                       selectedDb === db
-                        ? "border-primary bg-selected ring-2 ring-primary/35"
-                        : "hover:border-primary/35 hover:bg-hover",
+                        ? listView
+                          ? "bg-selected"
+                          : "border-primary bg-selected ring-2 ring-primary/35"
+                        : !listView && "hover:border-primary/35 hover:bg-hover",
                     )}
                     onClick={() => chooseDatabase(db)}
                   >
                     <div className="flex min-w-0 items-start gap-2 pr-24">
                       <span className={cn("min-w-0 break-all", REFINED_IDENTIFIER)}>{db}</span>
-                      {db === selectedDb && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
-                    </div>
-                    <div
-                      className={cn(
-                        "mt-2 text-xs",
-                        db === selectedDb ? "font-medium text-primary" : "text-muted-foreground",
+                      {db === selectedDb && (
+                        <CheckCircle2 aria-label="Base de travail" className="h-4 w-4 shrink-0 text-primary" />
                       )}
-                    >
-                      {db === selectedDb ? "Base de travail" : selectedProject?.database_versions?.[db] || "Base Odoo"}
                     </div>
-                    {incomplete.includes(db) && (
-                      <Badge variant="danger" className="mt-2 mr-2 gap-1">
-                        <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
-                        Incomplète
-                      </Badge>
+                    {listView && (
+                      <div className="text-xs text-muted-foreground">
+                        <span className="md:hidden">Version : </span>
+                        {selectedProject?.database_versions?.[db] || "—"}
+                      </div>
                     )}
-                    {deletion && expiresAt !== null && (
-                      <Badge
-                        variant={DELETION_BADGE_VARIANTS[deletion.tone]}
-                        className="mt-2 gap-1"
-                        title={`Suppression automatique le ${deletionMoment(expiresAt)}. Pour la garder plus longtemps : Actions, puis Prolonger la conservation de 30 jours.`}
-                      >
-                        <Timer className="h-3.5 w-3.5 shrink-0" />
-                        {deletion.text}
-                      </Badge>
-                    )}
-                  </InteractiveCard>
+                    <div className={cn(listView && "sdk-database-list-meta")}>
+                      {!listView && (
+                        <div
+                          className={cn(
+                            "mt-2 text-xs",
+                            db === selectedDb ? "font-medium text-primary" : "text-muted-foreground",
+                          )}
+                        >
+                          {db === selectedDb
+                            ? "Base de travail"
+                            : selectedProject?.database_versions?.[db] || "Base Odoo"}
+                        </div>
+                      )}
+                      {listView && !deletion && <span className="text-xs text-muted-foreground">Sans échéance</span>}
+                      {incomplete.includes(db) && (
+                        <Badge variant="danger" className="mt-2 mr-2 gap-1">
+                          <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+                          Incomplète
+                        </Badge>
+                      )}
+                      {deletion && expiresAt !== null && (
+                        <Badge
+                          variant={DELETION_BADGE_VARIANTS[deletion.tone]}
+                          className="mt-2 gap-1"
+                          title={`Suppression automatique le ${deletionMoment(expiresAt)}. Pour la garder plus longtemps : Actions, puis Prolonger la conservation de 30 jours.`}
+                        >
+                          <Timer className="h-3.5 w-3.5 shrink-0" />
+                          {deletion.text}
+                        </Badge>
+                      )}
+                    </div>
+                  </DatabaseItem>
                   <DropdownMenu.Root modal={false}>
                     <DropdownMenu.Trigger>
                       <Button
                         size="sm"
                         variant="outline"
-                        className="absolute right-2 top-2"
+                        className={cn("absolute right-2", listView ? "top-1/2 -translate-y-1/2" : "top-2")}
                         disabled={loading}
                         title={`Actions sur ${db}`}
                         aria-label={`Actions sur ${db}`}

@@ -703,3 +703,39 @@ textarea {
     display: none;
   }
 }
+
+/* Un tableau délimité distingue les bases des autres sections de la page. */
+.sdk-database-list-row {
+  display: grid;
+  gap: 0.5rem;
+  padding-right: 7.75rem;
+}
+.sdk-database-list-row > :first-child {
+  padding-right: 0;
+}
+.sdk-database-list-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.sdk-database-list-meta > * {
+  margin-top: 0;
+  margin-right: 0;
+}
+@media (min-width: 768px) {
+  .sdk-database-list-heading,
+  .sdk-database-list-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 5rem 14rem;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .sdk-database-list-heading {
+    grid-template-columns: minmax(0, 1fr) 5rem 14rem 6rem;
+    padding: 0.75rem 1rem;
+  }
+  .sdk-database-list-row > * {
+    margin-top: 0;
+  }
+}

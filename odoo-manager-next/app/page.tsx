@@ -1917,6 +1917,7 @@ export default function Home() {
 
                   {selectedProjectOnline && (
                     <DatabasesTab
+                      workspace={overview?.workspace || ""}
                       chooseDatabase={chooseDatabase}
                       dependencyReport={databaseDependencies.report}
                       executeDatabaseAction={executeDatabaseAction}
