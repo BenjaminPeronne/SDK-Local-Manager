@@ -18,9 +18,9 @@ export const REFINED_LABEL = "text-xs font-semibold uppercase tracking-wide text
 export const REFINED_IDENTIFIER = "font-mono text-[0.8125rem] font-medium tracking-tight";
 
 // Les emplacements techniques passent sous le nom du module : la ligne n'a plus de colonne large dédiée.
-// Chaque ligne est sa propre grille : toutes les colonnes sauf le nom ont une largeur fixe, sinon la
-// largeur du bouton d'action ("Installer" / "Mettre à jour") décalerait les colonnes d'une ligne à l'autre.
-export const REFINED_MODULE_COLUMNS = "xl:grid-cols-[minmax(0,1fr)_120px_110px_150px_200px]";
+// Version et origine partagent une colonne. Les colonnes secondaires gardent une largeur fixe
+// pour aligner les lignes et laisser les actions sur une seule ligne.
+export const REFINED_MODULE_COLUMNS = "xl:grid-cols-[minmax(0,1fr)_110px_150px_200px]";
 
 export function RefinedSectionHeader({
   title,

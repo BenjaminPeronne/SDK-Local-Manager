@@ -118,17 +118,14 @@ export const ModuleRow = memo(function ModuleRow({
         <span className="text-xs font-medium text-muted-foreground xl:hidden">État</span>
         <ModuleStateBadge state={module.state} />
       </div>
-      <div className="flex min-w-0 items-start justify-between gap-3 xl:block">
-        <span className="text-xs font-medium text-muted-foreground xl:hidden">Version</span>
-        <span className="min-w-0 break-all font-mono text-xs tabular-nums">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs xl:flex-col xl:items-start">
+        <span className="min-w-0 break-all font-mono tabular-nums">
+          <span className="font-sans text-muted-foreground xl:hidden">Version : </span>
           {module.installed_version || module.version || "-"}
         </span>
-      </div>
-      <div className="flex min-w-0 items-center justify-between gap-3 xl:block">
-        <span className="text-xs font-medium text-muted-foreground xl:hidden">Origine</span>
-        <Badge className="shrink-0" variant="outline">
+        <span className="text-muted-foreground" title="Origine du module">
           {moduleOriginLabel(origin)}
-        </Badge>
+        </span>
       </div>
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
         {module.state === "installed" ? (

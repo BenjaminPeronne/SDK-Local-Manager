@@ -477,8 +477,7 @@ export function ModulesTab({
               >
                 <div>Module</div>
                 <div>État</div>
-                <div>Version</div>
-                <div>Origine</div>
+                <div>Version / origine</div>
                 <div className="text-right">Actions</div>
               </div>
             </div>
