@@ -892,7 +892,7 @@ export function SettingsDialog({
                               </summary>
                               <p className="mt-2 whitespace-pre-wrap break-words text-destructive">{entry.message}</p>
                               {entry.details && (
-                                <pre className="log-terminal mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-2 text-[11px] text-slate-100">
+                                <pre className="log-terminal mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-2 text-xs text-slate-100">
                                   {entry.details}
                                 </pre>
                               )}

@@ -157,9 +157,7 @@ export function ModuleSelectionBar({
         <Button size="sm" variant="ghost" onClick={onClearSelection} title="Désélectionner tous les modules (Échap)">
           <X className="h-4 w-4" />
           Désélectionner
-          <kbd className="ml-0.5 rounded border px-1 font-mono text-[10px] font-normal text-muted-foreground">
-            Échap
-          </kbd>
+          <kbd className="ml-0.5 rounded border px-1 font-mono text-xs font-normal text-muted-foreground">Échap</kbd>
         </Button>
       </div>
     </div>

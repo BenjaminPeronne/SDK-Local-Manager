@@ -51,7 +51,7 @@ function ModuleChips({ names, tone }: { names: string[]; tone: "danger" | "neutr
         <span
           key={name}
           className={cn(
-            "rounded px-1.5 py-0.5 font-mono text-[11px]",
+            "rounded px-1.5 py-0.5 font-mono text-xs",
             tone === "danger"
               ? "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-200"
               : "bg-muted text-muted-foreground",

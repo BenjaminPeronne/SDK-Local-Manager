@@ -26,6 +26,10 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PureWindowsPath
 
+# Le python3 d'Xcode (3.9) échouerait plus loin sur une erreur d'import peu parlante.
+if sys.version_info < (3, 12):  # noqa: UP036
+    raise SystemExit(f"Python 3.12 ou plus récent requis, trouvé {sys.version.split()[0]} ({sys.executable}).")
+
 from odoo_manager_runtime import initialize_runtime_streams
 
 RUNTIME_LOG_PATH, _RUNTIME_STREAMS = initialize_runtime_streams()

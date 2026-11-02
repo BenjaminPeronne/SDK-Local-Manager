@@ -51,7 +51,7 @@ export function LoadingScreen({ appIcon, roundIcon, message, error, diagnostics,
               <details className="rounded-md border bg-muted/40 p-3 text-left text-xs">
                 <summary className="cursor-pointer font-medium">Détails techniques</summary>
                 <div className="mt-2 break-all text-muted-foreground">Journal : {diagnostics.log_path}</div>
-                <pre className="log-terminal mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-2 text-[11px] text-slate-100">
+                <pre className="log-terminal mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-2 text-xs text-slate-100">
                   {diagnostics.details}
                 </pre>
               </details>

@@ -584,7 +584,7 @@ function WantedModulesSummary({
           </summary>
           <span className="mt-2 flex flex-wrap gap-1">
             {match.absent.map((name) => (
-              <span key={name} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+              <span key={name} className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                 {name}
               </span>
             ))}

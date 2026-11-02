@@ -56,7 +56,7 @@ export function PlanModuleChips({ items }: { items: PlanModule[] }) {
       {items.map((item) => (
         <span
           key={item.name}
-          className="rounded border bg-background px-1.5 py-0.5 font-mono text-[11px] leading-4"
+          className="rounded border bg-background px-1.5 py-0.5 font-mono text-xs leading-4"
           title={item.title !== item.name ? item.title : undefined}
         >
           {item.name}

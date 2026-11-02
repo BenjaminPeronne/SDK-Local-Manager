@@ -196,7 +196,7 @@ export function SocleDialog({
                         />
                         <span className="min-w-0">
                           <span className="block font-medium">{app.label}</span>
-                          <span className="mt-0.5 block break-all font-mono text-[11px] text-muted-foreground">
+                          <span className="mt-0.5 block break-all font-mono text-xs text-muted-foreground">
                             {app.modules.join(" + ")}
                           </span>
                           {unavailable ? (

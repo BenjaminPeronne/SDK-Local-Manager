@@ -126,7 +126,7 @@ function ToastItem({
       </span>
       {(toast.count ?? 1) > 1 && (
         <span
-          className="mt-0.5 shrink-0 rounded-full bg-black/5 px-1.5 text-[11px] font-medium tabular-nums dark:bg-white/10"
+          className="mt-0.5 shrink-0 rounded-full bg-black/5 px-1.5 text-xs font-medium tabular-nums dark:bg-white/10"
           title={`Reçu ${toast.count} fois`}
         >
           ×{toast.count}

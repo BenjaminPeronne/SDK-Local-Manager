@@ -24,6 +24,8 @@ import re
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass
 
+from odoo_manager_core.database_restore import sql_literal
+
 # Odoo journalise chaque fichier de données qu'il charge (odoo/modules/loading.py, load_data).
 LOADING_FILE_RE = re.compile(r"odoo\.modules\.loading: loading (?P<module>\w+)/(?P<path>[\w./-]+\.(?:csv|xml))\b")
 INSERT_TABLE_RE = re.compile(r'INSERT INTO "?(?P<table>\w+)"?')
@@ -217,10 +219,6 @@ def data_records(conflict, content):
         return model, csv_records(content, conflict.table, conflict.module, conflict.columns)
     records, model = xml_records(content, conflict.table, conflict.module, conflict.columns)
     return model, records
-
-
-def sql_literal(value):
-    return "'" + str(value).replace("'", "''") + "'"
 
 
 def adoption_sql(conflict, model, records, column_types):
