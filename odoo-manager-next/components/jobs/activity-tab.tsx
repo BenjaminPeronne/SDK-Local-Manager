@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TabsContent } from "@/components/ui/tabs";
 import { REFINED_FOCUS_RING, RefinedPanel, RefinedSectionHeader } from "@/components/common/refined-layout";
 import { JobCancelState, JobProgressPanel, JobStopButton } from "@/components/jobs/job-controls";
@@ -72,6 +73,8 @@ export function ActivityTab({
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [command, setCommand] = useState("");
   const [launchingCommand, setLaunchingCommand] = useState(false);
+  const [historyToClear, setHistoryToClear] = useState<{ project: string; ids: number[] } | null>(null);
+  const [clearingHistory, setClearingHistory] = useState(false);
   const [activityElement, setActivityElement] = useState<HTMLDivElement | null>(null);
   const [availableHeight, setAvailableHeight] = useState<number | null>(null);
   async function runCommand(event: React.FormEvent<HTMLFormElement>) {
@@ -136,14 +139,23 @@ export function ActivityTab({
     }
   }
   async function clearJobs() {
-    stopLiveLogStream();
+    if (!historyToClear || clearingHistory) return;
+    setClearingHistory(true);
     try {
-      await api<{ ok: boolean }>("/api/jobs", { method: "DELETE" });
-      setSelectedJobId(null);
-      setExternalLogView(null);
+      await api<{ ok: boolean }>(`/api/projects/${encodeURIComponent(historyToClear.project)}/jobs`, {
+        method: "DELETE",
+        body: JSON.stringify({ ids: historyToClear.ids }),
+      });
+      if (selectedJobId !== null && historyToClear.ids.includes(selectedJobId)) {
+        stopLiveLogStream();
+        setSelectedJobId(null);
+      }
+      setHistoryToClear(null);
       await refreshJobs();
     } catch (err) {
       pushToast("error", err instanceof Error ? err.message : "Suppression de l'historique impossible.");
+    } finally {
+      setClearingHistory(false);
     }
   }
   async function deleteJob(jobId: number) {
@@ -198,8 +210,17 @@ export function ActivityTab({
             title="Activité du projet"
             count={projectJobs.length}
             actions={
-              projectJobs.length ? (
-                <Button variant="outline" size="sm" onClick={clearJobs}>
+              projectJobs.some((job) => !isJobUnfinished(job)) && selectedProject ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setHistoryToClear({
+                      project: selectedProject.name,
+                      ids: projectJobs.filter((job) => !isJobUnfinished(job)).map((job) => job.id),
+                    })
+                  }
+                >
                   <Trash2 className="h-4 w-4" />
                   Effacer
                 </Button>
@@ -466,6 +487,30 @@ export function ActivityTab({
           </div>
         </RefinedPanel>
       </div>
+      <Dialog
+        open={Boolean(historyToClear)}
+        onOpenChange={(open) => {
+          if (!open && !clearingHistory) setHistoryToClear(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Effacer l’historique du projet</DialogTitle>
+            <DialogDescription>
+              Supprimer {historyToClear?.ids.length} action(s) terminée(s) du projet {historyToClear?.project} ? Les
+              actions en cours et les autres projets seront conservés.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="outline" disabled={clearingHistory} onClick={() => setHistoryToClear(null)}>
+              Annuler
+            </Button>
+            <Button variant="destructive" disabled={clearingHistory} onClick={() => void clearJobs()}>
+              Effacer l’historique
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </TabsContent>
   );
 }

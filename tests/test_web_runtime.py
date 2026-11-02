@@ -1141,6 +1141,33 @@ class JobHistoryTests(unittest.TestCase):
 
         self.assertEqual(json.loads(self.history.read_text(encoding="utf-8"))["jobs"], [])
 
+    def test_project_clear_removes_only_confirmed_finished_jobs(self):
+        from types import SimpleNamespace
+
+        with job_queue.JOBS_LOCK:
+            job_queue.JOBS.update({
+                1: SimpleNamespace(project="DEMO", status="done"),
+                2: SimpleNamespace(project="OTHER", status="done"),
+                3: SimpleNamespace(project="DEMO", status="running"),
+                4: SimpleNamespace(project="DEMO", status="done"),
+            })
+        with patch.object(job_queue, "persist_job_history"), patch.object(job_queue, "notify_jobs_changed"):
+            job_queue.clear_jobs_history(project="DEMO", job_ids={1, 2, 3})
+        with job_queue.JOBS_LOCK:
+            self.assertEqual({2, 3, 4}, set(job_queue.JOBS))
+            job_queue.JOBS.clear()
+
+    def test_project_clear_endpoint_requires_ids_and_scopes_them(self):
+        from types import SimpleNamespace
+
+        request = SimpleNamespace(param=lambda _name: "DEMO", handler=SimpleNamespace(read_json=lambda: {"ids": [1, 2]}))
+        with patch.object(web, "validate_project", return_value="DEMO"), patch.object(web, "clear_jobs_history") as clear:
+            web.clear_project_jobs_view(request)
+            clear.assert_called_once_with(project="DEMO", job_ids={1, 2})
+            request.handler.read_json = lambda: {}
+            with self.assertRaises(ValueError):
+                web.clear_project_jobs_view(request)
+
     def test_saved_output_keeps_the_end_of_long_actions(self):
         job_queue.load_job_history(self.history)
         job = job_queue.Job("Longue sortie", lambda job: [job.add(f"ligne {index:06d}") for index in range(5000)])

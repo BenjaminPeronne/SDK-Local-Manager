@@ -451,14 +451,20 @@ def job_cancel_payload(job):
     }
 
 
-def clear_jobs_history():
+def clear_jobs_history(project=None, job_ids=None):
     with JOBS_LOCK:
-        running = {job_id: job for job_id, job in JOBS.items() if job.status in JOB_UNFINISHED_STATUSES}
-        JOBS.clear()
-        JOBS.update(running)
+        for job_id, job in list(JOBS.items()):
+            if job.status in JOB_UNFINISHED_STATUSES:
+                continue
+            if project is not None and job.project != project:
+                continue
+            if job_ids is not None and job_id not in job_ids:
+                continue
+            del JOBS[job_id]
+        running = sum(job.status in JOB_UNFINISHED_STATUSES for job in JOBS.values())
     notify_jobs_changed()
     persist_job_history()
-    return len(running)
+    return running
 
 
 def delete_job_history(job_id):

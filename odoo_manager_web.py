@@ -253,6 +253,7 @@ API_ENDPOINTS = {
         "/api/remote-backups",
         "/api/jobs",
         "/api/jobs/{job}",
+        "/api/projects/{project}/jobs",
     ),
 }
 
@@ -8615,6 +8616,15 @@ def clear_jobs_view(_request):
     return {"ok": True, "running": clear_jobs_history()}
 
 
+def clear_project_jobs_view(request):
+    project = validate_project(request.param("project"))
+    payload = request.handler.read_json()
+    ids = payload.get("ids") if isinstance(payload, dict) else None
+    if not isinstance(ids, list) or any(type(job_id) is not int or job_id <= 0 for job_id in ids):
+        raise ValueError("Liste d'actions invalide.")
+    return {"ok": True, "running": clear_jobs_history(project=project, job_ids=set(ids))}
+
+
 # --- Actions de POST /api/jobs ----------------------------------------------
 #
 # Chaque action valide la requête puis crée son Job ; une exception devient un refus 400.
@@ -9145,6 +9155,7 @@ ROUTER = Router(
         api_route("DELETE", "/api/errors", clear_errors_view),
         api_route("DELETE", "/api/remote-backups", forget_remote_backups_view),
         api_route("DELETE", "/api/jobs", clear_jobs_view),
+        api_route("DELETE", "/api/projects/{project}/jobs", clear_project_jobs_view),
         api_route("DELETE", "/api/jobs/{job}", delete_job_view),
     )
 )
