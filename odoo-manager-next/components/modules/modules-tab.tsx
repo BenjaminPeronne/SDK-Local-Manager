@@ -3,7 +3,6 @@
 import {
   type Dispatch,
   type MouseEvent as ReactMouseEvent,
-  type ReactNode,
   type SetStateAction,
   useCallback,
   useMemo,
@@ -26,7 +25,7 @@ import {
   RefreshCcw,
   Search,
 } from "lucide-react";
-import { type ModuleFilters, type ModuleView, MODULES_PER_PAGE } from "@/hooks/use-module-filters";
+import { useModuleFilters, type ModuleView, MODULES_PER_PAGE } from "@/hooks/use-module-filters";
 import { useRepositoryUpdateChecks } from "@/hooks/use-repository-updates";
 import { groupModulesByRepository } from "@/lib/module-repositories";
 import type { Job, ManagerSettings, ModuleInfo, ModuleRepository, Overview, Project } from "@/lib/types";
@@ -47,6 +46,7 @@ import {
   type RepositoryFolding,
 } from "@/components/modules/module-repository-groups";
 import { ModuleRow, type ModuleRowActions } from "@/components/modules/module-row";
+import { ModuleSelectionBar, type ModuleSelectionBarProps } from "@/components/modules/module-selection-bar";
 
 type ModulesTabProps = {
   canUseDb: boolean;
@@ -55,10 +55,14 @@ type ModulesTabProps = {
   createJob: (action: string, payload?: Record<string, unknown>) => Promise<Job | null>;
   loading: boolean;
   loadingModules: boolean;
-  moduleFilters: ModuleFilters;
   modules: ModuleInfo[];
   moduleRepositories: ModuleRepository[];
-  moduleSelectionBlock: ReactNode;
+  moduleSelectionBarProps: Omit<
+    ModuleSelectionBarProps,
+    "filteredCount" | "allFilteredSelected" | "onSelectAllFiltered"
+  >;
+  selectionBannerRef: (element: HTMLDivElement | null) => void;
+  showFloatingModuleActions: boolean;
   odooDatabases: string[];
   openRepositoryImport: () => void;
   openUrl: (url?: string) => Promise<void>;
@@ -88,10 +92,11 @@ export function ModulesTab({
   createJob,
   loading,
   loadingModules,
-  moduleFilters,
   modules,
   moduleRepositories,
-  moduleSelectionBlock,
+  moduleSelectionBarProps,
+  selectionBannerRef,
+  showFloatingModuleActions,
   odooDatabases,
   openRepositoryImport,
   openUrl,
@@ -113,6 +118,14 @@ export function ModulesTab({
   settings,
   stickyHeader,
 }: ModulesTabProps) {
+  const moduleFilters = useModuleFilters(modules, selectedProject?.name, selectedDb);
+  const filteredNames = moduleFilters.filtered.map((module) => module.name);
+  const selectionBarProps: ModuleSelectionBarProps = {
+    ...moduleSelectionBarProps,
+    filteredCount: filteredNames.length,
+    allFilteredSelected: filteredNames.length > 0 && filteredNames.every((name) => selectedModules.has(name)),
+    onSelectAllFiltered: () => setSelectedModules((current) => new Set([...current, ...filteredNames])),
+  };
   const showModuleLocations = settings?.show_technical_details ?? false;
   const toggleModuleSelection = useCallback((name: string, checked: boolean) => {
     setSelectedModules((current) => {
@@ -462,7 +475,9 @@ export function ModulesTab({
             </span>
           </div>
           {moduleViewBlock}
-          {moduleSelectionBlock}
+          <div ref={selectionBannerRef}>
+            <ModuleSelectionBar {...selectionBarProps} />
+          </div>
           {/* overflow-clip arrondit les coins sans créer de conteneur de défilement, contrairement à
               overflow-hidden qui empêcherait l'en-tête de rester collé. L'en-tête reste donc un bandeau droit :
               des coins arrondis collés en haut laisseraient voir les lignes qui défilent derrière. */}
@@ -521,6 +536,15 @@ export function ModulesTab({
           </RefinedPanel>
         </section>
       </div>
+      {showFloatingModuleActions && (
+        <div
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center bg-gradient-to-t from-background via-background/85 to-transparent px-4 pb-4 pt-12 lg:left-80"
+          role="region"
+          aria-label="Actions sur les modules sélectionnés"
+        >
+          <ModuleSelectionBar {...selectionBarProps} floating />
+        </div>
+      )}
     </TabsContent>
   );
 }

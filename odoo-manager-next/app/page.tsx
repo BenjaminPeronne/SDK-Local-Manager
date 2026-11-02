@@ -11,7 +11,6 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { useJobs } from "@/hooks/use-jobs";
 import { useLiveUpdates } from "@/hooks/use-live-updates";
 import { useManagerState } from "@/hooks/use-manager-state";
-import { useModuleFilters } from "@/hooks/use-module-filters";
 import { useScheduledTimeouts } from "@/hooks/use-scheduled-timeouts";
 import { useStickyProjectHeader } from "@/hooks/use-sticky-project-header";
 import { useToasts } from "@/hooks/use-toasts";
@@ -85,7 +84,7 @@ import { ActivityTab } from "@/components/jobs/activity-tab";
 import { CancelJobDialog } from "@/components/jobs/cancel-job-dialog";
 import { ProjectActivity } from "@/components/jobs/job-activity";
 import { DeleteModuleCodeDialog } from "@/components/modules/delete-module-code-dialog";
-import { ModuleSelectionBar, type ModuleSelectionBarProps } from "@/components/modules/module-selection-bar";
+import type { ModuleSelectionBarProps } from "@/components/modules/module-selection-bar";
 import { ModulesTab } from "@/components/modules/modules-tab";
 import { RepositoryImportDialog } from "@/components/modules/repository-import-dialog";
 import { SocleDialog } from "@/components/modules/socle-dialog";
@@ -205,7 +204,6 @@ export default function Home() {
   const [duplicateDbOpen, setDuplicateDbOpen] = useState(false);
   const [dependenciesOpen, setDependenciesOpen] = useState(false);
   const [pendingDatabaseAction, setPendingDatabaseAction] = useState<PendingDatabaseAction | null>(null);
-  const [postgresDetailsOpen, setPostgresDetailsOpen] = useState(false);
   const [rawOutputVisible, setRawOutputVisible] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [updateAllDialogOpen, setUpdateAllDialogOpen] = useState(false);
@@ -397,7 +395,6 @@ export default function Home() {
     () => sshKeys.find((key) => key.name === selectedSshKeyName) || sshKeys[0] || null,
     [selectedSshKeyName, sshKeys],
   );
-  const moduleFilters = useModuleFilters(modules, selectedProject?.name, selectedDb);
   // Interface affinée : onglets dans l'en-tête et panneau arrondi. C'est l'interface par défaut.
   const refinedInterface = settings?.interface_layout !== "classic";
   const stickyHeader = settings?.sticky_header ?? false;
@@ -450,17 +447,6 @@ export default function Home() {
     }
     return [];
   }, [jobs, moduleByName, selectedProject?.name]);
-  const filteredModuleNames = useMemo(
-    () => moduleFilters.filtered.map((module) => module.name),
-    [moduleFilters.filtered],
-  );
-  const selectedFilteredModuleCount = useMemo(
-    () => filteredModuleNames.filter((name) => selectedModules.has(name)).length,
-    [filteredModuleNames, selectedModules],
-  );
-  const allFilteredModulesSelected =
-    filteredModuleNames.length > 0 && selectedFilteredModuleCount === filteredModuleNames.length;
-
   const openSettingsDialog = useCallback(() => {
     setSettingsDraft(fallbackManagerSettings(settings, overview, systemStatus));
     setSettingsOpen(true);
@@ -1565,20 +1551,6 @@ export default function Home() {
     return () => window.removeEventListener("keydown", clearSelectionOnEscape);
   }, [activeTab, hasModuleSelection]);
 
-  const toggleFilteredModules = useCallback(
-    (checked: boolean) => {
-      setSelectedModules((current) => {
-        const next = new Set(current);
-        for (const name of filteredModuleNames) {
-          if (checked) next.add(name);
-          else next.delete(name);
-        }
-        return next;
-      });
-    },
-    [filteredModuleNames],
-  );
-
   if (initializing) {
     return (
       <LoadingScreen
@@ -1597,11 +1569,8 @@ export default function Home() {
     installableModules: selectedInstallableModuleList,
     installedModules: selectedInstalledModuleList,
     removableModules: selectedRemovableModuleList,
-    filteredCount: filteredModuleNames.length,
-    allFilteredSelected: allFilteredModulesSelected,
     busy: !canUseDb || loading,
     loading,
-    onSelectAllFiltered: () => toggleFilteredModules(true),
     onClearSelection: () => setSelectedModules(new Set()),
     onInstall: (names: string[]) =>
       void createJob("install_module", { project: selectedProject?.name, db: selectedDb, modules: names.join(",") }),
@@ -1610,17 +1579,10 @@ export default function Home() {
     onUninstall: requestUninstall,
     onResetTranslations: requestTranslationReset,
     onDeleteCode: requestDeleteCode,
-  } satisfies ModuleSelectionBarProps;
+  } satisfies Omit<ModuleSelectionBarProps, "filteredCount" | "allFilteredSelected" | "onSelectAllFiltered">;
 
   const showFloatingModuleActions =
     activeTab === "modules" && selectedModuleList.length > 0 && moduleSelectionBannerHidden;
-
-  // Le ref suit la barre en place : quand elle sort de l'écran, sa copie flottante prend le relais.
-  const moduleSelectionBlock = (
-    <div ref={setModuleSelectionBanner}>
-      <ModuleSelectionBar {...moduleSelectionBarProps} />
-    </div>
-  );
 
   const projectTabsList = (
     <TabsList
@@ -1943,14 +1905,12 @@ export default function Home() {
                       odooDatabases={odooDatabases}
                       openingPostgresql={openingPostgresql}
                       openUrl={openUrl}
-                      postgresDetailsOpen={postgresDetailsOpen}
                       selectedDb={selectedDb}
                       selectedProject={selectedProject}
                       selectedProjectReady={selectedProjectReady}
                       setCreateDbOpen={setCreateDbOpen}
                       setDependenciesOpen={setDependenciesOpen}
                       setPendingDatabaseAction={setPendingDatabaseAction}
-                      setPostgresDetailsOpen={setPostgresDetailsOpen}
                       setRestoreDbOpen={setRestoreDbOpen}
                     />
                   )}
@@ -1963,10 +1923,11 @@ export default function Home() {
                       createJob={createJob}
                       loading={loading}
                       loadingModules={loadingModules}
-                      moduleFilters={moduleFilters}
                       modules={modules}
                       moduleRepositories={moduleRepositories}
-                      moduleSelectionBlock={moduleSelectionBlock}
+                      moduleSelectionBarProps={moduleSelectionBarProps}
+                      selectionBannerRef={setModuleSelectionBanner}
+                      showFloatingModuleActions={showFloatingModuleActions}
                       odooDatabases={odooDatabases}
                       openRepositoryImport={() => openRepositoryImport()}
                       openUrl={openUrl}
@@ -2481,17 +2442,6 @@ export default function Home() {
         setPendingDeleteCodeModules={setPendingDeleteCodeModules}
         setSelectedModules={setSelectedModules}
       />
-
-      {showFloatingModuleActions && (
-        <div
-          className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center bg-gradient-to-t from-background via-background/85 to-transparent px-4 pb-4 pt-12 lg:left-80"
-          role="region"
-          aria-label="Actions sur les modules sélectionnés"
-        >
-          {/* Le dégradé estompe les lignes qui passent sous la barre ; la surface teintée la distingue du tableau. */}
-          <ModuleSelectionBar {...moduleSelectionBarProps} floating />
-        </div>
-      )}
 
       <ToastStack
         toasts={toasts}

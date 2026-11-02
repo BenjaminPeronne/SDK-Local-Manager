@@ -78,14 +78,12 @@ type DatabasesTabProps = {
   odooDatabases: string[];
   openingPostgresql: boolean;
   openUrl: (url?: string) => Promise<void>;
-  postgresDetailsOpen: boolean;
   selectedDb: string;
   selectedProject: Project | undefined;
   selectedProjectReady: boolean;
   setCreateDbOpen: Dispatch<SetStateAction<boolean>>;
   setDependenciesOpen: Dispatch<SetStateAction<boolean>>;
   setPendingDatabaseAction: Dispatch<SetStateAction<PendingDatabaseAction | null>>;
-  setPostgresDetailsOpen: Dispatch<SetStateAction<boolean>>;
   setRestoreDbOpen: Dispatch<SetStateAction<boolean>>;
 };
 
@@ -99,16 +97,15 @@ export function DatabasesTab({
   odooDatabases,
   openingPostgresql,
   openUrl,
-  postgresDetailsOpen,
   selectedDb,
   selectedProject,
   selectedProjectReady,
   setCreateDbOpen,
   setDependenciesOpen,
   setPendingDatabaseAction,
-  setPostgresDetailsOpen,
   setRestoreDbOpen,
 }: DatabasesTabProps) {
+  const [postgresDetailsOpen, setPostgresDetailsOpen] = useState(false);
   // Bases dont la restauration s'est arrêtée avant la fin : relu à l'ouverture du projet et quand
   // la liste des bases change (suppression, nouvelle restauration).
   const [incompleteDatabases, setIncompleteDatabases] = useState<string[]>([]);
