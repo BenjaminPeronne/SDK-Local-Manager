@@ -1,7 +1,7 @@
 "use client";
 
 import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
-import { Circle, FolderPlus, Info, Loader2, Search, Settings } from "lucide-react";
+import { Circle, FolderPlus, Info, Loader2, Search, Settings, Star } from "lucide-react";
 import type { StaticImageData } from "next/image";
 import { statusVariant } from "@/lib/format";
 import { isJobActive, isJobUnfinished, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
@@ -45,6 +45,22 @@ type AppSidebarProps = {
   systemStatus: SystemStatus | null;
 };
 
+const NO_FAVORITES: string[] = [];
+type ProjectFilters = { runningOnly: boolean; favoritesOnly: boolean };
+type SidebarPreferences = { favorites: Record<string, string[]>; filters: Record<string, ProjectFilters> };
+const SIDEBAR_STORAGE_KEY = "sdk-local-manager.sidebar";
+function storedSidebarPreferences(): SidebarPreferences {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(SIDEBAR_STORAGE_KEY) || "null");
+    return {
+      filters: value?.filters && typeof value.filters === "object" ? value.filters : {},
+      favorites: value?.favorites && typeof value.favorites === "object" ? value.favorites : {},
+    };
+  } catch {
+    return { favorites: {}, filters: {} };
+  }
+}
+
 export function AppSidebar({
   availableUpdate,
   dismissUpdate,
@@ -70,6 +86,34 @@ export function AppSidebar({
   updateInstaller,
 }: AppSidebarProps) {
   const [projectsFilter, setProjectsFilter] = useState("");
+  const [preferences, setPreferences] = useState(storedSidebarPreferences);
+  const workspace = overview?.workspace || "";
+  const runningOnly = preferences.filters[workspace]?.runningOnly === true;
+  const favoritesOnly = preferences.filters[workspace]?.favoritesOnly === true;
+  const favorites = Array.isArray(preferences.favorites[workspace]) ? preferences.favorites[workspace] : NO_FAVORITES;
+  function savePreferences(next: SidebarPreferences) {
+    setPreferences(next);
+    try {
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      /* Préférence conservée pour cette session. */
+    }
+  }
+  function updateFilters(changes: Partial<ProjectFilters>) {
+    savePreferences({
+      ...preferences,
+      filters: { ...preferences.filters, [workspace]: { runningOnly, favoritesOnly, ...changes } },
+    });
+  }
+  function toggleFavorite(name: string) {
+    savePreferences({
+      ...preferences,
+      favorites: {
+        ...preferences.favorites,
+        [workspace]: favorites.includes(name) ? favorites.filter((item) => item !== name) : [...favorites, name],
+      },
+    });
+  }
   const projectLifecycleJobs = useMemo(() => {
     const runningJobs = new Map<string, Job>();
     for (const job of jobs) {
@@ -90,17 +134,24 @@ export function AppSidebar({
     const query = projectsFilter.trim().toLowerCase();
     return (overview?.projects || [])
       .filter((project) => !query || project.name.toLowerCase().includes(query))
-      .map((project, index) => ({ project, index }))
+      .filter(
+        (project) =>
+          !runningOnly ||
+          (project.odoo_status === "running" && !odooServerStopped(project)) ||
+          projectBusyJobs.has(project.name),
+      )
+      .filter((project) => !favoritesOnly || favorites.includes(project.name))
       .sort((left, right) => {
-        const rank = (project: Project) => {
-          if (project.odoo_status === "running") return 0;
-          if (project.odoo_status === "absent" || project.odoo_status === "docker off") return 2;
-          return 1;
-        };
-        return rank(left.project) - rank(right.project) || left.index - right.index;
-      })
-      .map(({ project }) => project);
-  }, [overview, projectsFilter]);
+        // Favoris d’abord, puis projets allumés dans chaque groupe. À priorité égale,
+        // le tri stable conserve l’ordre du serveur et évite les déplacements inutiles.
+        const favoriteOrder = Number(favorites.includes(right.name)) - Number(favorites.includes(left.name));
+        if (favoriteOrder) return favoriteOrder;
+        const isOn = (project: Project) =>
+          (project.odoo_status === "running" && !odooServerStopped(project)) ||
+          projectLifecycleJobs.has(`Démarrer ${project.name}`);
+        return Number(isOn(right)) - Number(isOn(left));
+      });
+  }, [overview, projectsFilter, runningOnly, favoritesOnly, favorites, projectBusyJobs, projectLifecycleJobs]);
 
   return (
     <aside className="min-w-0 border-b bg-card lg:sticky lg:top-0 lg:h-screen lg:w-80 lg:flex-none lg:border-b-0 lg:border-r">
@@ -152,6 +203,25 @@ export function AppSidebar({
               onChange={(event) => setProjectsFilter(event.target.value)}
             />
           </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant={runningOnly ? "secondary" : "ghost"}
+              aria-pressed={runningOnly}
+              onClick={() => updateFilters({ runningOnly: !runningOnly })}
+            >
+              En cours
+            </Button>
+            <Button
+              size="sm"
+              variant={favoritesOnly ? "secondary" : "ghost"}
+              aria-pressed={favoritesOnly}
+              onClick={() => updateFilters({ favoritesOnly: !favoritesOnly })}
+            >
+              <Star className="h-3.5 w-3.5" />
+              Favoris
+            </Button>
+          </div>
         </div>
         <div className="min-h-0 max-h-[260px] flex-1 space-y-1 overflow-auto px-2 py-2 sm:max-h-[340px] lg:max-h-none">
           {pendingProjectArrivals.map((job) => (
@@ -187,6 +257,11 @@ export function AppSidebar({
               </button>
             </div>
           ))}
+          {!filteredProjects.length && !pendingProjectArrivals.length && (
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+              Aucun projet ne correspond aux filtres.
+            </p>
+          )}
           {filteredProjects.map((project) => {
             const running = project.odoo_status === "running";
             const serverStopped = odooServerStopped(project);
@@ -231,6 +306,17 @@ export function AppSidebar({
                     <span className="mt-0.5 block text-xs text-muted-foreground">
                       {project.odoo_version ? `Odoo ${project.odoo_version}` : "Version inconnue"}
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label={`${favorites.includes(project.name) ? "Retirer" : "Ajouter"} ${project.name} ${favorites.includes(project.name) ? "des" : "aux"} favoris`}
+                    aria-pressed={favorites.includes(project.name)}
+                    onClick={() => toggleFavorite(project.name)}
+                  >
+                    <Star
+                      className={cn("h-3.5 w-3.5", favorites.includes(project.name) && "fill-primary text-primary")}
+                    />
                   </button>
                   <div className="flex w-[74px] shrink-0 items-center justify-end gap-2">
                     {busyJob ? (
