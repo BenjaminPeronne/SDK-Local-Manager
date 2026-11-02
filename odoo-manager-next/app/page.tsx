@@ -56,6 +56,7 @@ import type {
   ModuleRepository,
   PendingDatabaseAction,
   PendingModuleOperation,
+  Project,
   ProjectCreationPrerequisites,
   ProjectDiagnostics,
   RestoreDatabasePayload,
@@ -229,6 +230,7 @@ export default function Home() {
   const [jobToCancelId, setJobToCancelId] = useState<number | null>(null);
   const [pendingDeleteCodeModules, setPendingDeleteCodeModules] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("bases");
+  const projectTabs = useRef<Record<string, string>>({});
   const [pendingCreatedProjectName, setPendingCreatedProjectName] = useState("");
   const [pendingCreatedDatabase, setPendingCreatedDatabase] = useState<{
     jobId: number;
@@ -296,6 +298,11 @@ export default function Home() {
     setSelectedProjectName,
     pendingProjectNames,
   });
+  useEffect(() => {
+    if (selectedProjectName) {
+      projectTabs.current[JSON.stringify([overview?.workspace || "", selectedProjectName])] = activeTab;
+    }
+  }, [activeTab, selectedProjectName, overview?.workspace]);
   useLiveUpdates({
     initializing,
     hasRunningJobs,
@@ -1584,6 +1591,15 @@ export default function Home() {
   const showFloatingModuleActions =
     activeTab === "modules" && selectedModuleList.length > 0 && moduleSelectionBannerHidden;
 
+  function openProject(project: Project) {
+    if (project.name === selectedProjectName) return;
+    const workspace = overview?.workspace || "";
+    if (selectedProjectName) projectTabs.current[JSON.stringify([workspace, selectedProjectName])] = activeTab;
+    const remembered = projectTabs.current[JSON.stringify([workspace, project.name])];
+    setSelectedProjectName(project.name);
+    setActiveTab(remembered || (project.odoo_status === "running" ? "bases" : "logs"));
+  }
+
   const projectTabsList = (
     <TabsList
       className={cn(
@@ -1653,6 +1669,7 @@ export default function Home() {
     >
       <div className="flex min-h-screen min-w-0 flex-col lg:flex-row">
         <AppSidebar
+          openProject={openProject}
           availableUpdate={availableUpdate}
           dismissUpdate={dismissUpdate}
           hasRunningJobs={hasRunningJobs}

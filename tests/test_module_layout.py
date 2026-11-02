@@ -21,6 +21,27 @@ class DummyJob:
 
 
 class ModuleLayoutTests(unittest.TestCase):
+    def test_listing_reads_authors_of_modules_not_registered_in_a_database(self):
+        (self.external / "__manifest__.py").write_text("{'name': 'Custom', 'author': 'Sudokeys, OCA'}\n", encoding="utf-8")
+        web.link_module_candidates(DummyJob(), self.project, [self.external])
+
+        modules = web.modules_for(self.project)
+
+        self.assertEqual("Sudokeys, OCA", next(module for module in modules if module["name"] == "custom_module")["author"])
+
+    def test_listing_reads_wsl_authors_from_the_batched_manifest_graph(self):
+        web.link_module_candidates(DummyJob(), self.project, [self.external])
+        path = self.project_root / "odoo" / "addons" / "custom_module"
+        metadata = {"removable": True, "removal_mode": "link_and_storage", "removal_note": ""}
+        with (
+            mock.patch.dict(web.WSL_MODULE_METADATA, {str(path).casefold(): metadata}),
+            mock.patch.object(web, "wsl_module_graph", return_value={"custom_module": {"author": "Sudokeys"}}) as graph,
+            mock.patch.object(web, "module_location_info", return_value={"path": str(path), "source_path": str(self.external)}),
+        ):
+            modules = web.modules_for(self.project)
+        self.assertEqual("Sudokeys", modules[0]["author"])
+        graph.assert_called_once_with(self.project)
+
     def test_cached_listing_rechecks_link_safety_without_rebuilding_layout_per_module(self):
         web.link_module_candidates(DummyJob(), self.project, [self.external])
         with mock.patch.object(web, "module_layout_context", wraps=web.module_layout_context) as layout:

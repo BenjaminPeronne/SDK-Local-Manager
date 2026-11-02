@@ -38,6 +38,7 @@ type AppSidebarProps = {
   selectJob: (jobId: number) => void;
   setAboutOpen: Dispatch<SetStateAction<boolean>>;
   setActiveTab: Dispatch<SetStateAction<string>>;
+  openProject: (project: Project) => void;
   setExternalLogView: Dispatch<SetStateAction<ExternalLogView | null>>;
   setSelectedDb: Dispatch<SetStateAction<string>>;
   setSelectedProjectName: Dispatch<SetStateAction<string>>;
@@ -74,6 +75,7 @@ export function AppSidebar({
   selectJob,
   setAboutOpen,
   setActiveTab,
+  openProject,
   setExternalLogView,
   setSelectedDb,
   setSelectedProjectName,
@@ -252,9 +254,8 @@ export function AppSidebar({
                     aria-current={selected ? "page" : undefined}
                     className="-mx-1 min-w-0 flex-1 rounded-md px-1 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                     onClick={() => {
-                      setSelectedProjectName(project.name);
                       setExternalLogView(null);
-                      setActiveTab(project.odoo_status === "running" ? "bases" : "logs");
+                      openProject(project);
                     }}
                   >
                     <span

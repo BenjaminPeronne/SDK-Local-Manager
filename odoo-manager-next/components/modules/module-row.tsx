@@ -99,6 +99,7 @@ export const ModuleRow = memo(function ModuleRow({
           {showTechnicalName && (
             <span className="mt-0.5 block break-all font-mono text-xs text-muted-foreground">{module.name}</span>
           )}
+          {module.author && <span className="mt-0.5 block text-xs text-muted-foreground">{module.author}</span>}
           {showLocations && (
             <span className="mt-1.5 block space-y-0.5 text-xs">
               {module.path_kind && <span className="block text-muted-foreground">{module.path_kind}</span>}

@@ -2428,6 +2428,20 @@ def modules_for(project, db_name=None):
 
     if base_modules is None:
         base_modules = [basic_module(project, path, layout) for path in module_dirs(project)]
+        # Les liens Linux peuvent être illisibles depuis Windows : le graphe lit alors les
+        # manifestes en une seule commande WSL, comme pour les dépendances.
+        wsl_modules = any(str(module["path"]).casefold() in WSL_MODULE_METADATA for module in base_modules)
+        if wsl_modules:
+            try:
+                authors = wsl_module_graph(project)
+            except RuntimeError:
+                authors = {}
+        else:
+            authors = {}
+        for module in base_modules:
+            metadata = authors.get(module["name"])
+            manifest = metadata if metadata is not None else read_manifest_dict(Path(module["path"]))
+            module["author"] = str(manifest.get("author") or "").strip()
         module_repository_roots(project, base_modules, layout)
         if base_modules:
             with MODULE_CACHE_LOCK:

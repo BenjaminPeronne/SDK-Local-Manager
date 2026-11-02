@@ -379,7 +379,7 @@ class ManifestRecordsTests(unittest.TestCase):
     def test_graph_is_read_from_marked_manifest_records(self):
         marker = manifests.MANIFEST_RECORD_MARKER
         output = (
-            f"\n{marker}sale\n{{'name': 'Sale', 'depends': ['mail']}}\n"
+            f"\n{marker}sale\n{{'name': 'Sale', 'author': 'Sudokeys, OCA', 'depends': ['mail']}}\n"
             f"\n{marker}sale\n{{'name': 'Doublon'}}\n"
             f"\n{marker}../evil\n{{'name': 'Refusé'}}\n"
             f"\n{marker}broken\nnot a manifest\n"
@@ -389,5 +389,6 @@ class ManifestRecordsTests(unittest.TestCase):
 
         self.assertEqual(["broken", "sale"], sorted(graph))
         self.assertEqual("Sale", graph["sale"]["title"])
+        self.assertEqual("Sudokeys, OCA", graph["sale"]["author"])
         self.assertEqual(["mail"], graph["sale"]["depends"])
         self.assertEqual([], graph["broken"]["depends"])

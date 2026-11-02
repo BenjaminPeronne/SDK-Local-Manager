@@ -10,6 +10,18 @@ const ANYWHERE = 2;
 // commence par « sale »), mais « purchase_stock » tapé en entier trouve ce module en premier.
 const COMPLEMENTARY_MODULE_PENALTY = 1.5;
 
+/** Les manifestes séparent généralement plusieurs auteurs par une virgule. */
+export function moduleAuthors(author: string | undefined) {
+  return (author || "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+export function moduleHasAuthor(author: string | undefined, selected: string) {
+  return moduleAuthors(author).some((name) => normalizeSearchText(name) === selected);
+}
+
 function matchQuality(text: string, query: string) {
   if (!text) return null;
   if (text === query) return EXACT;
@@ -19,7 +31,11 @@ function matchQuality(text: string, query: string) {
 
 /** Note d'un module pour une recherche (plus petite = plus pertinent), ou null s'il ne correspond pas. */
 export function moduleSearchScore(module: ModuleInfo, query: string) {
-  const qualities = [matchQuality(normalizeSearchText(module.title || ""), query), matchQuality(module.name, query)];
+  const qualities = [
+    matchQuality(normalizeSearchText(module.title || ""), query),
+    matchQuality(module.name, query),
+    matchQuality(normalizeSearchText(module.author || ""), query),
+  ];
   const found = qualities.filter((quality): quality is number => quality !== null);
   if (!found.length) return null;
   return Math.min(...found) + (module.application ? 0 : COMPLEMENTARY_MODULE_PENALTY);

@@ -44,6 +44,7 @@ def manifest_graph_entry(manifest):
         auto_install = bool(auto_install)
     return {
         "title": str(manifest.get("name") or ""),
+        "author": str(manifest.get("author") or "").strip(),
         "depends": depends,
         "auto_install": auto_install,
         "auto_install_triggers": triggers,

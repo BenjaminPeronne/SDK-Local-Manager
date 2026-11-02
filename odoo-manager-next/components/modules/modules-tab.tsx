@@ -11,6 +11,7 @@ import {
 import { DropdownMenu, SegmentedControl } from "@radix-ui/themes";
 import {
   Boxes,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -23,15 +24,25 @@ import {
   Loader2,
   PlusCircle,
   RefreshCcw,
+  RotateCcw,
   Search,
 } from "lucide-react";
 import { useModuleFilters, type ModuleView, MODULES_PER_PAGE } from "@/hooks/use-module-filters";
 import { useRepositoryUpdateChecks } from "@/hooks/use-repository-updates";
 import { groupModulesByRepository } from "@/lib/module-repositories";
+import { normalizeSearchText } from "@/lib/format";
 import type { Job, ManagerSettings, ModuleInfo, ModuleRepository, Overview, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TabsContent } from "@/components/ui/tabs";
 import {
@@ -118,7 +129,14 @@ export function ModulesTab({
   settings,
   stickyHeader,
 }: ModulesTabProps) {
-  const moduleFilters = useModuleFilters(modules, selectedProject?.name, selectedDb);
+  const moduleFilters = useModuleFilters(modules, selectedProject?.name, selectedDb, overview?.workspace || "");
+  const [authorDialogOpen, setAuthorDialogOpen] = useState(false);
+  const [authorSearch, setAuthorSearch] = useState("");
+  const selectedAuthor = moduleFilters.authors.find((author) => author.value === moduleFilters.author);
+  const authorQuery = normalizeSearchText(authorSearch.trim());
+  const matchingAuthors = moduleFilters.authors.filter((author) =>
+    normalizeSearchText(author.label).includes(authorQuery),
+  );
   const filteredNames = moduleFilters.filtered.map((module) => module.name);
   const selectionBarProps: ModuleSelectionBarProps = {
     ...moduleSelectionBarProps,
@@ -262,13 +280,13 @@ export function ModulesTab({
           </button>
         )}
       </div>
-      <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_180px_210px]">
+      <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_170px_220px_200px]">
         <div className="relative">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
           <Input
             className="pl-9"
-            aria-label="Rechercher un module par nom ou titre"
-            placeholder="Rechercher un module (nom ou titre)"
+            aria-label="Rechercher un module par nom, titre ou auteur"
+            placeholder="Rechercher un module ou un auteur"
             value={moduleFilters.search}
             onChange={(event) => moduleFilters.setSearch(event.target.value)}
           />
@@ -295,6 +313,63 @@ export function ModulesTab({
             <SelectItem value="other">Autre</SelectItem>
           </SelectContent>
         </Select>
+        <Dialog
+          open={authorDialogOpen}
+          onOpenChange={(open) => {
+            setAuthorDialogOpen(open);
+            if (!open) setAuthorSearch("");
+          }}
+        >
+          <DialogTrigger>
+            <Button variant="outline" className="w-full min-w-0 justify-between" aria-label="Filtrer par auteur">
+              <span className="truncate">{selectedAuthor?.label || "Tous les auteurs"}</span>
+              <ChevronDown className="h-4 w-4 shrink-0" />
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-lg gap-4 overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>Filtrer par auteur</DialogTitle>
+              <DialogDescription>Recherche un auteur puis sélectionne-le pour afficher ses modules.</DialogDescription>
+            </DialogHeader>
+            <Input
+              aria-label="Rechercher un auteur"
+              placeholder="Rechercher un auteur"
+              value={authorSearch}
+              onChange={(event) => setAuthorSearch(event.target.value)}
+            />
+            <Button
+              variant="outline"
+              className="w-full justify-start border border-primary/40 bg-primary/[0.06] text-left hover:bg-primary/[0.12]"
+              onClick={() => {
+                moduleFilters.setAuthor("all");
+                setAuthorDialogOpen(false);
+              }}
+            >
+              <RotateCcw className="h-4 w-4 text-primary" />
+              <span className="flex-1">Afficher tous les auteurs</span>
+              {moduleFilters.author === "all" && <Check className="h-4 w-4 shrink-0 text-primary" />}
+            </Button>
+            <div className="max-h-[min(50vh,24rem)] overflow-y-auto rounded-md border" aria-label="Auteurs disponibles">
+              {matchingAuthors.map((author) => (
+                <button
+                  key={author.value}
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 border-t px-4 py-3 text-left text-sm first:border-t-0 hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  onClick={() => {
+                    moduleFilters.setAuthor(author.value);
+                    setAuthorDialogOpen(false);
+                  }}
+                >
+                  <span className="min-w-0 break-words">{author.label}</span>
+                  {moduleFilters.author === author.value && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                </button>
+              ))}
+              {matchingAuthors.length === 0 && (
+                <p className="px-4 py-4 text-sm text-muted-foreground">Aucun auteur trouvé.</p>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </section>
   );

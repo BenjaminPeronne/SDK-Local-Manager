@@ -315,6 +315,7 @@ export type ModuleOrigin = "odoo" | "enterprise" | "other";
 export type ModuleInfo = {
   name: string;
   title: string;
+  author?: string;
   /** Application d'Odoo (Inventaire, Ventes), par opposition à ses modules complémentaires. */
   application?: boolean;
   state: string;

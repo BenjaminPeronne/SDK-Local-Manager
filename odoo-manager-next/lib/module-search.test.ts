@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { searchModules } from "./module-search.ts";
+import { moduleAuthors, moduleHasAuthor, searchModules } from "./module-search.ts";
 import type { ModuleInfo } from "./types.ts";
 
 function module(name: string, title: string, application = false): ModuleInfo {
@@ -42,4 +42,14 @@ test("accents and case are ignored", () => {
 
 test("without a search the list keeps its order", () => {
   assert.deepEqual(searchModules(DOMEAU, "  "), DOMEAU);
+});
+
+test("authors can be searched without accents or case, including coauthors", () => {
+  const addon = { ...module("demo", "Démonstration"), author: "Sudokeys, Équipe Exemple" };
+  assert.deepEqual(names(searchModules([addon], "SUDOKEYS")), ["demo"]);
+  assert.deepEqual(names(searchModules([addon], "equipe")), ["demo"]);
+  assert.deepEqual(moduleAuthors(addon.author), ["Sudokeys", "Équipe Exemple"]);
+  assert.deepEqual(moduleAuthors(undefined), []);
+  assert.equal(moduleHasAuthor(addon.author, "equipe exemple"), true);
+  assert.equal(moduleHasAuthor(addon.author, "equipe"), false);
 });
