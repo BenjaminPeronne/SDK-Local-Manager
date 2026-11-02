@@ -46,18 +46,14 @@ type AppSidebarProps = {
 };
 
 const NO_FAVORITES: string[] = [];
-type ProjectFilters = { runningOnly: boolean; favoritesOnly: boolean };
-type SidebarPreferences = { favorites: Record<string, string[]>; filters: Record<string, ProjectFilters> };
+type SidebarPreferences = { favorites: Record<string, string[]> };
 const SIDEBAR_STORAGE_KEY = "sdk-local-manager.sidebar";
 function storedSidebarPreferences(): SidebarPreferences {
   try {
     const value = JSON.parse(window.localStorage.getItem(SIDEBAR_STORAGE_KEY) || "null");
-    return {
-      filters: value?.filters && typeof value.filters === "object" ? value.filters : {},
-      favorites: value?.favorites && typeof value.favorites === "object" ? value.favorites : {},
-    };
+    return { favorites: value?.favorites && typeof value.favorites === "object" ? value.favorites : {} };
   } catch {
-    return { favorites: {}, filters: {} };
+    return { favorites: {} };
   }
 }
 
@@ -88,8 +84,6 @@ export function AppSidebar({
   const [projectsFilter, setProjectsFilter] = useState("");
   const [preferences, setPreferences] = useState(storedSidebarPreferences);
   const workspace = overview?.workspace || "";
-  const runningOnly = preferences.filters[workspace]?.runningOnly === true;
-  const favoritesOnly = preferences.filters[workspace]?.favoritesOnly === true;
   const favorites = Array.isArray(preferences.favorites[workspace]) ? preferences.favorites[workspace] : NO_FAVORITES;
   function savePreferences(next: SidebarPreferences) {
     setPreferences(next);
@@ -98,12 +92,6 @@ export function AppSidebar({
     } catch {
       /* Préférence conservée pour cette session. */
     }
-  }
-  function updateFilters(changes: Partial<ProjectFilters>) {
-    savePreferences({
-      ...preferences,
-      filters: { ...preferences.filters, [workspace]: { runningOnly, favoritesOnly, ...changes } },
-    });
   }
   function toggleFavorite(name: string) {
     savePreferences({
@@ -134,13 +122,6 @@ export function AppSidebar({
     const query = projectsFilter.trim().toLowerCase();
     return (overview?.projects || [])
       .filter((project) => !query || project.name.toLowerCase().includes(query))
-      .filter(
-        (project) =>
-          !runningOnly ||
-          (project.odoo_status === "running" && !odooServerStopped(project)) ||
-          projectBusyJobs.has(project.name),
-      )
-      .filter((project) => !favoritesOnly || favorites.includes(project.name))
       .sort((left, right) => {
         // Favoris d’abord, puis projets allumés dans chaque groupe. À priorité égale,
         // le tri stable conserve l’ordre du serveur et évite les déplacements inutiles.
@@ -151,7 +132,7 @@ export function AppSidebar({
           projectLifecycleJobs.has(`Démarrer ${project.name}`);
         return Number(isOn(right)) - Number(isOn(left));
       });
-  }, [overview, projectsFilter, runningOnly, favoritesOnly, favorites, projectBusyJobs, projectLifecycleJobs]);
+  }, [overview, projectsFilter, favorites, projectLifecycleJobs]);
 
   return (
     <aside className="min-w-0 border-b bg-card lg:sticky lg:top-0 lg:h-screen lg:w-80 lg:flex-none lg:border-b-0 lg:border-r">
@@ -203,25 +184,6 @@ export function AppSidebar({
               onChange={(event) => setProjectsFilter(event.target.value)}
             />
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant={runningOnly ? "secondary" : "ghost"}
-              aria-pressed={runningOnly}
-              onClick={() => updateFilters({ runningOnly: !runningOnly })}
-            >
-              En cours
-            </Button>
-            <Button
-              size="sm"
-              variant={favoritesOnly ? "secondary" : "ghost"}
-              aria-pressed={favoritesOnly}
-              onClick={() => updateFilters({ favoritesOnly: !favoritesOnly })}
-            >
-              <Star className="h-3.5 w-3.5" />
-              Favoris
-            </Button>
-          </div>
         </div>
         <div className="min-h-0 max-h-[260px] flex-1 space-y-1 overflow-auto px-2 py-2 sm:max-h-[340px] lg:max-h-none">
           {pendingProjectArrivals.map((job) => (
@@ -259,7 +221,7 @@ export function AppSidebar({
           ))}
           {!filteredProjects.length && !pendingProjectArrivals.length && (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-              Aucun projet ne correspond aux filtres.
+              Aucun projet ne correspond à la recherche.
             </p>
           )}
           {filteredProjects.map((project) => {
