@@ -15,6 +15,7 @@ SOURCE_DIR=""
 DESCRIPTION="Installateurs macOS/Windows/Linux compilés via GitHub Actions."
 HEADER_FILE=""
 MANIFEST_FILE=""
+SIGNATURE_FILE=""
 
 usage() {
   cat <<'EOF'
@@ -31,10 +32,12 @@ Options:
   -h, --help           Affiche cette aide.
 
 Pré-requis:
-  - git, python3, curl
+  - git, python3, curl, node
   - remote « gitlab » configuré (autre nom : GITLAB_REMOTE=nom)
   - GITLAB_TOKEN, jeton d'accès personnel GitLab avec le droit api (écriture,
     pas seulement read_api : la création de Release et l'upload de paquets l'exigent)
+  - UPDATE_SIGNING_KEY, clé privée Ed25519 de signature des mises à jour (trousseau
+    macOS, sdk-local-manager-update-signing) : l'application refuse un manifeste non signé
 
 Mise à jour automatique :
   Le script dépose aussi update-manifest.json (taille et empreinte de chaque
@@ -64,6 +67,9 @@ cleanup() {
   fi
   if [ -n "$MANIFEST_FILE" ]; then
     rm -f "$MANIFEST_FILE"
+  fi
+  if [ -n "$SIGNATURE_FILE" ]; then
+    rm -f "$SIGNATURE_FILE"
   fi
 }
 trap cleanup EXIT INT TERM
@@ -112,12 +118,14 @@ done
 
 [ -n "$TAG" ] || die "--tag est requis"
 [ -n "${GITLAB_TOKEN:-}" ] || die "GITLAB_TOKEN est requis (droit api, en écriture)"
+[ -n "${UPDATE_SIGNING_KEY:-}" ] || die "UPDATE_SIGNING_KEY est requise (clé de signature des mises à jour, trousseau : sdk-local-manager-update-signing)"
 [ -n "$SOURCE_DIR" ] || SOURCE_DIR="$DIST_ROOT/$TAG"
 [ -d "$SOURCE_DIR" ] || die "dossier introuvable: $SOURCE_DIR (lance d'abord scripts/build_all_platforms.sh --tag $TAG)"
 
 require_cmd git
 require_cmd python3
 require_cmd curl
+require_cmd node
 
 project=$(remote_project)
 [ -n "$project" ] || die "URL du remote $REMOTE non reconnue : $(git config --get "remote.$REMOTE.url")"
@@ -174,6 +182,30 @@ for path in map(Path, paths):
     print(f"{path.name}  {files[-1]['size']} octets")
 Path(output).write_text(json.dumps({"version": match.group(1), "tag": tag, "files": files}, indent=2) + "\n")
 PY
+
+# Signature du manifeste, vérifiée par l'application avec la clé publique de updater.cjs : un accès
+# en écriture au registre ne suffit pas à faire installer un autre programme. Publiée avant le
+# manifeste, elle ne manque jamais à un manifeste déjà visible.
+SIGNATURE_FILE=$(mktemp)
+node - "$ROOT/odoo-manager-next/electron/updater.cjs" "$MANIFEST_FILE" "$SIGNATURE_FILE" <<'JS'
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const [updater, manifest, output] = process.argv.slice(2);
+const { UPDATE_PUBLIC_KEY } = require(updater);
+const key = crypto.createPrivateKey({
+  key: Buffer.from(process.env.UPDATE_SIGNING_KEY.trim(), "base64"),
+  format: "der",
+  type: "pkcs8",
+});
+const publicKey = crypto.createPublicKey(key).export({ type: "spki", format: "der" }).toString("base64");
+if (publicKey !== UPDATE_PUBLIC_KEY) {
+  console.error("Erreur: UPDATE_SIGNING_KEY ne correspond pas à la clé publique de updater.cjs");
+  process.exit(1);
+}
+fs.writeFileSync(output, crypto.sign(null, fs.readFileSync(manifest), key).toString("base64") + "\n");
+JS
+curl -fsS --retry 3 -H "@$HEADER_FILE" --upload-file "$SIGNATURE_FILE" \
+  "$API/packages/generic/$PACKAGE_NAME/$TAG/update-manifest.json.sig" >/dev/null
 curl -fsS --retry 3 -H "@$HEADER_FILE" --upload-file "$MANIFEST_FILE" \
   "$API/packages/generic/$PACKAGE_NAME/$TAG/update-manifest.json" >/dev/null
 

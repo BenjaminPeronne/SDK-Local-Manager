@@ -500,12 +500,16 @@ Chaque runner reconstruit le backend de sa plateforme, le démarre et contrôle 
 Les installateurs sont compilés par GitHub Actions puis téléchargés dans `dist/all-platforms/<tag>/`. Pour les rendre téléchargeables depuis GitLab :
 
 ```bash
-GITLAB_TOKEN=$(security find-generic-password -a "$USER" -s sdk-local-manager-gitlab -w) ./scripts/publish_gitlab_release.sh --tag app-v0.8.0-build5
+GITLAB_TOKEN=$(security find-generic-password -a "$USER" -s sdk-local-manager-gitlab -w) \
+UPDATE_SIGNING_KEY=$(security find-generic-password -a "$USER" -s sdk-local-manager-update-signing -w) \
+./scripts/publish_gitlab_release.sh --tag app-v0.8.0-build5
 ```
 
 Le script envoie les quatre installateurs (`.deb`, `.AppImage`, `.dmg`, `.exe`) dans le registre de paquets du projet, crée la Release et n'y attache que ces fichiers ; le backend Linux et l'image WSL, qui ne servent qu'à la compilation, sont ignorés. Le tag n'a pas besoin d'être poussé sur GitLab : la Release le crée à partir du commit local, qui doit déjà y être. Relancer le script sur une Release existante remet ses pièces jointes en conformité. `GITLAB_TOKEN` doit avoir le droit `api`.
 
 Le script dépose aussi `update-manifest.json` (taille et empreinte SHA-512 de chaque installateur), qu'utilise la mise à jour en un clic. L'application télécharge sans identifiants : le registre de paquets du projet doit donc être lisible par tous (**Paramètres › Général › Visibilité, fonctionnalités du projet, permissions › Allow anyone to pull from package registry**). Le code reste privé ; seuls les installateurs deviennent téléchargeables. Tant que ce réglage est désactivé, ou pour une version publiée sans manifeste, l'application propose seulement le lien vers la Release.
+
+Le manifeste est signé (`update-manifest.json.sig`, Ed25519) : l'application refuse une mise à jour dont la signature ne correspond pas à la clé publique écrite dans `electron/updater.cjs`. Quelqu'un qui pourrait écrire dans le registre GitLab ne peut donc pas y substituer un autre programme. La clé privée reste dans le trousseau macOS de qui publie (`sdk-local-manager-update-signing`), avec une copie dans le gestionnaire de mots de passe : jamais dans le dépôt, GitLab ou la CI. Perdue, plus aucune mise à jour automatique ne passe : il faut alors une nouvelle paire, sa clé publique dans `updater.cjs` et une installation manuelle sur chaque poste. Une version publiée sans signature ne propose que le lien vers la Release.
 
 ### Build des trois plateformes avec GitLab CI
 

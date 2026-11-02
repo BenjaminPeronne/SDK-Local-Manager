@@ -11,6 +11,8 @@ const { pipeline } = require("node:stream/promises");
  * `scripts/publish_gitlab_release.sh` dépose les installateurs d'une version dans le registre de
  * paquets génériques du projet GitLab, lisible sans identifiants, avec `update-manifest.json` qui
  * donne la taille et l'empreinte SHA-512 de chacun. Le fichier téléchargé est refusé s'il diffère.
+ * Le manifeste est signé (`update-manifest.json.sig`, Ed25519) avec une clé gardée hors de GitLab :
+ * pouvoir écrire dans le registre ne suffit pas à faire installer un autre programme.
  *
  * Le mécanisme d'Electron (Squirrel) refuse sur macOS toute mise à jour non signée : l'application
  * est donc remplacée par un petit script, une fois fermée. Sous Windows, l'installateur tourne en
@@ -21,6 +23,9 @@ const { pipeline } = require("node:stream/promises");
 const PACKAGE_REGISTRY_URL =
   "https://gitlab.sudokeys.com/api/v4/projects/cdp%2Fsdk-local-manager/packages/generic/sdk-local-manager";
 const MANIFEST_NAME = "update-manifest.json";
+const SIGNATURE_NAME = `${MANIFEST_NAME}.sig`;
+// Clé publique de signature des mises à jour ; la clé privée est dans le trousseau de qui publie.
+const UPDATE_PUBLIC_KEY = "MCowBQYDK2VwAyEASfxuP2XOHwy2EYFGmnFs/UNdo3uQhuTMRk1Uqnnvm0Y=";
 const BUNDLE_IDENTIFIER = "com.sudokeys.odoo-manager";
 const RELEASE_TAG = /^app-v(\d+\.\d+\.\d+)(?:-build\d+)?$/;
 const INSTALLER_NAME = /^SDK-Local-Manager-(\d+\.\d+\.\d+)-(mac|win|linux)-([A-Za-z0-9_]+)\.(dmg|exe|AppImage|deb)$/;
@@ -42,6 +47,7 @@ const APPIMAGE_VARIABLES = ["APPIMAGE", "APPDIR", "ARGV0", "OWD"];
 const UNAVAILABLE = "Cette version n'est pas encore disponible au téléchargement automatique.";
 const UNREACHABLE = "Téléchargement impossible : vérifie la connexion à Internet, puis réessaie.";
 const CORRUPTED = "Le fichier téléchargé est incomplet ou altéré. Réessaie plus tard.";
+const UNSIGNED = "Cette version n'a pas pu être authentifiée comme venant de Sudokeys : elle n'a pas été installée.";
 
 // Attend la fermeture de l'application, la remplace par la nouvelle version, puis la relance.
 // En cas d'échec du remplacement, l'ancienne version est remise en place et relancée.
@@ -117,6 +123,18 @@ function isNewer(candidate, current) {
     if ((next[index] || 0) !== (installed[index] || 0)) return (next[index] || 0) > (installed[index] || 0);
   }
   return false;
+}
+
+/** Refuse un manifeste dont la signature (base64) n'est pas celle de la clé `publicKey` (SPKI base64). */
+function verifyManifest(manifest, signature, publicKey) {
+  const key = crypto.createPublicKey({ key: Buffer.from(publicKey, "base64"), format: "der", type: "spki" });
+  let valid = false;
+  try {
+    valid = crypto.verify(null, manifest, key, Buffer.from(signature.toString("utf8").trim(), "base64"));
+  } catch {
+    // Signature de longueur ou de forme invalide : refusée comme une signature fausse.
+  }
+  if (!valid) throw new UpdateError(UNSIGNED);
 }
 
 /** Installateurs valides du manifeste d'une version ; une entrée douteuse est ignorée. */
@@ -229,6 +247,7 @@ class AppUpdater {
     env = process.env,
     pid = process.pid,
     baseUrl = PACKAGE_REGISTRY_URL,
+    publicKey = UPDATE_PUBLIC_KEY,
     logPath = "",
     // Note de la version en cours d'installation, relue au démarrage suivant pour savoir si elle a pris.
     markerPath = "",
@@ -249,6 +268,7 @@ class AppUpdater {
     this.env = env;
     this.pid = pid;
     this.baseUrl = baseUrl.replace(/\/$/, "");
+    this.publicKey = publicKey;
     this.logPath = logPath;
     this.markerPath = markerPath;
     this.previousFailure = "";
@@ -374,7 +394,10 @@ class AppUpdater {
     fs.rmSync(directory, { recursive: true, force: true });
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     try {
-      const installers = parseManifest(await this.fetchText(`${this.baseUrl}/${tag}/${MANIFEST_NAME}`), version);
+      // Sans signature (version publiée avant elle), l'application propose la page de la Release.
+      const manifest = await this.fetchSmall(`${this.baseUrl}/${tag}/${MANIFEST_NAME}`);
+      verifyManifest(manifest, await this.fetchSmall(`${this.baseUrl}/${tag}/${SIGNATURE_NAME}`), this.publicKey);
+      const installers = parseManifest(manifest.toString("utf8"), version);
       const installer = selectInstaller(installers, this);
       if (!installer) throw new UpdateError("Cette version ne propose pas d'installateur pour cet ordinateur.");
       // L'image disque macOS est en plus extraite : de quoi tenir les deux.
@@ -415,7 +438,8 @@ class AppUpdater {
     return response;
   }
 
-  async fetchText(url) {
+  /** Petit fichier (manifeste, signature) lu en entier, octets intacts pour la signature. */
+  async fetchSmall(url) {
     const response = await this.request(url, AbortSignal.timeout(MANIFEST_TIMEOUT_MS));
     const declared = Number(response.headers.get("content-length") || 0);
     if (declared > MAX_MANIFEST_BYTES) throw new UpdateError("Le descriptif de la nouvelle version est illisible.");
@@ -437,7 +461,7 @@ class AppUpdater {
     } finally {
       reader.releaseLock();
     }
-    return Buffer.concat(chunks, size).toString("utf8");
+    return Buffer.concat(chunks, size);
   }
 
   async fetchFile(url, destination, expected) {
@@ -677,9 +701,12 @@ module.exports = {
   MAC_SCRIPT,
   MANIFEST_NAME,
   PACKAGE_REGISTRY_URL,
+  SIGNATURE_NAME,
+  UPDATE_PUBLIC_KEY,
   UpdateError,
   isNewer,
   macBundle,
   parseManifest,
   selectInstaller,
+  verifyManifest,
 };

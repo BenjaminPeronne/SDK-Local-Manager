@@ -9,6 +9,7 @@ const {
   AppUpdater,
   LINUX_SCRIPT,
   MAC_SCRIPT,
+  UPDATE_PUBLIC_KEY,
   UpdateError,
   isNewer,
   macBundle,
@@ -22,6 +23,13 @@ const DMG = "SDK-Local-Manager-0.14.0-mac-arm64.dmg";
 const EXE = "SDK-Local-Manager-0.14.0-win-x64.exe";
 const APPIMAGE = "SDK-Local-Manager-0.14.0-linux-x86_64.AppImage";
 const DEB = "SDK-Local-Manager-0.14.0-linux-amd64.deb";
+// Clé de signature des tests : la vraie clé privée ne quitte pas le trousseau de qui publie.
+const SIGNING = crypto.generateKeyPairSync("ed25519");
+const PUBLIC_KEY = SIGNING.publicKey.export({ type: "spki", format: "der" }).toString("base64");
+
+function sign(body, privateKey = SIGNING.privateKey) {
+  return crypto.sign(null, Buffer.from(body), privateKey).toString("base64");
+}
 
 function sha512(data) {
   return crypto.createHash("sha512").update(data).digest("hex");
@@ -41,9 +49,13 @@ function temporaryDirectory(t, prefix = "sdk-update-") {
   return directory;
 }
 
-/** Registre de paquets simulé : `files` associe un nom de fichier à son contenu. */
-function registry(files, { manifest, status = {}, redirect = {} } = {}) {
+/**
+ * Registre de paquets simulé : `files` associe un nom de fichier à son contenu. Le manifeste est
+ * signé avec la clé des tests, sauf `signature` donnée.
+ */
+function registry(files, { manifest, signature, status = {}, redirect = {} } = {}) {
   const calls = [];
+  const manifestBody = JSON.stringify(manifest ?? manifestOf(files));
   const fetch = async (url, init) => {
     calls.push({ url, init });
     const name = decodeURIComponent(url.slice(`${BASE}/${TAG}/`.length));
@@ -51,10 +63,12 @@ function registry(files, { manifest, status = {}, redirect = {} } = {}) {
       status[name] !== undefined
         ? new Response("", { status: status[name] })
         : name === "update-manifest.json"
-          ? new Response(JSON.stringify(manifest ?? manifestOf(files)), { status: 200 })
-          : files[name] !== undefined
-            ? new Response(files[name], { status: 200, headers: { "content-length": String(files[name].length) } })
-            : new Response("", { status: 404 });
+          ? new Response(manifestBody, { status: 200 })
+          : name === "update-manifest.json.sig"
+            ? new Response(signature ?? sign(manifestBody), { status: 200 })
+            : files[name] !== undefined
+              ? new Response(files[name], { status: 200, headers: { "content-length": String(files[name].length) } })
+              : new Response("", { status: 404 });
     if (redirect[name]) Object.defineProperty(response, "url", { value: redirect[name] });
     return response;
   };
@@ -79,6 +93,7 @@ function updater(t, overrides = {}) {
     execPath: "C:\\Users\\me\\AppData\\Local\\Programs\\sdk\\SDK Local Manager.exe",
     env: { SystemRoot: "C:\\Windows" },
     pid: 4242,
+    publicKey: PUBLIC_KEY,
     openPath: async () => "",
     ...overrides,
   });
@@ -107,7 +122,7 @@ test("a manifest without content length is stopped as soon as the streamed limit
     { highWaterMark: 0 },
   );
   const update = updater(t, { fetch: async () => new Response(stream) });
-  await assert.rejects(update.fetchText(`${BASE}/${TAG}/update-manifest.json`), /illisible/);
+  await assert.rejects(update.fetchSmall(`${BASE}/${TAG}/update-manifest.json`), /illisible/);
   assert.equal(reads, 3);
   assert.equal(cancelled, true);
 });
@@ -200,14 +215,14 @@ test("the installer is downloaded, checked against the manifest and reported as 
   assert.deepEqual(result, { version: "0.14.0", mode: "restart", hint: "" });
   assert.deepEqual(
     calls.map((call) => call.url),
-    [`${BASE}/${TAG}/update-manifest.json`, `${BASE}/${TAG}/${EXE}`],
+    [`${BASE}/${TAG}/update-manifest.json`, `${BASE}/${TAG}/update-manifest.json.sig`, `${BASE}/${TAG}/${EXE}`],
   );
-  assert.equal(calls[1].init.redirect, "follow");
+  assert.equal(calls[2].init.redirect, "follow");
   assert.deepEqual(fs.readFileSync(update.prepared.file), installer);
   assert.deepEqual(progress.at(-1), { received: installer.length, total: installer.length });
   // Une seconde demande ne retélécharge pas.
   assert.deepEqual(await update.download(TAG), result);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
 });
 
 test("a corrupted download is refused and leaves nothing behind", async (t) => {
@@ -230,8 +245,42 @@ test("a full disk stops the update before downloading anything", async (t) => {
   await assert.rejects(update.download(TAG), /Espace disque insuffisant/);
   assert.deepEqual(
     calls.map((call) => call.url),
-    [`${BASE}/${TAG}/update-manifest.json`],
+    [`${BASE}/${TAG}/update-manifest.json`, `${BASE}/${TAG}/update-manifest.json.sig`],
   );
+});
+
+test("the embedded update key is an Ed25519 public key", () => {
+  const key = crypto.createPublicKey({ key: Buffer.from(UPDATE_PUBLIC_KEY, "base64"), format: "der", type: "spki" });
+  assert.equal(key.asymmetricKeyType, "ed25519");
+});
+
+test("a manifest that is not signed by the publisher's key downloads nothing", async (t) => {
+  const installer = Buffer.from("installer");
+  const genuine = JSON.stringify(manifestOf({ [EXE]: installer }));
+  const otherKey = crypto.generateKeyPairSync("ed25519").privateKey;
+  const cases = {
+    "signed by another key": sign(genuine, otherKey),
+    // Le registre substitue l'installateur et son empreinte, avec la signature de l'ancien manifeste.
+    "signature of another manifest": sign(JSON.stringify(manifestOf({ [EXE]: Buffer.from("genuine") }))),
+    "not a signature": "not-base64!",
+    empty: "",
+  };
+  for (const [label, signature] of Object.entries(cases)) {
+    const { fetch, calls } = registry({ [EXE]: installer }, { signature });
+    const update = updater(t, { fetch });
+    await assert.rejects(update.download(TAG), /authentifiée/, label);
+    assert.equal(update.prepared, null, label);
+    assert.ok(!calls.some((call) => call.url.endsWith(EXE)), label);
+  }
+});
+
+test("a release published without signature falls back to the release page", async (t) => {
+  const { fetch, calls } = registry(
+    { [EXE]: Buffer.from("installer") },
+    { status: { "update-manifest.json.sig": 404 } },
+  );
+  await assert.rejects(updater(t, { fetch }).download(TAG), /pas encore disponible/);
+  assert.ok(!calls.some((call) => call.url.endsWith(EXE)));
 });
 
 test("a release without automatic download falls back to the release page", async (t) => {
