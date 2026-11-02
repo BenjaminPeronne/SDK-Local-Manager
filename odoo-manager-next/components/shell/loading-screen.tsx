@@ -15,6 +15,12 @@ type LoadingScreenProps = {
 
 /** Écran affiché pendant le démarrage du service local, avec l'erreur et les diagnostics s'il échoue. */
 export function LoadingScreen({ appIcon, roundIcon, message, error, diagnostics, onRetry }: LoadingScreenProps) {
+  const accessRequired = error.includes("clé d’accès au gestionnaire");
+  const title = accessRequired
+    ? "Accès au gestionnaire requis"
+    : error
+      ? "Démarrage impossible"
+      : "Chargement du gestionnaire";
   return (
     <main className="sdk-shell grid min-h-screen place-items-center bg-background px-6">
       {/* Couleur du texte explicite : au tout premier affichage, avant que la page prenne vie, le thème
@@ -32,8 +38,10 @@ export function LoadingScreen({ appIcon, roundIcon, message, error, diagnostics,
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
           )}
         </div>
-        <h1 className="mt-4 text-lg font-semibold">Chargement du gestionnaire</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{message}</p>
+        <h1 className="mt-4 text-lg font-semibold">{title}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {accessRequired ? "Ouvre le lien fourni au lancement du gestionnaire." : message}
+        </p>
         {error && (
           <div className="mt-4 space-y-3">
             <p className="break-words rounded-md border border-amber-200 bg-amber-50 p-3 text-left text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
@@ -48,10 +56,12 @@ export function LoadingScreen({ appIcon, roundIcon, message, error, diagnostics,
                 </pre>
               </details>
             )}
-            <Button className="w-full" onClick={onRetry}>
-              <RefreshCcw className="h-4 w-4" />
-              Réessayer
-            </Button>
+            {!accessRequired && (
+              <Button className="w-full" onClick={onRetry}>
+                <RefreshCcw className="h-4 w-4" />
+                Réessayer
+              </Button>
+            )}
           </div>
         )}
       </div>

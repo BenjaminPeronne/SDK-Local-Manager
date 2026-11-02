@@ -1674,6 +1674,14 @@ export default function Home() {
     </TabsList>
   );
 
+  const advisoryCount = [
+    migrationBannerVisible,
+    systemStatus?.workspace_icloud_synced && icloudNoticeDismissedFor !== workspacePath,
+    diskEncryption?.state === "off" && !noticeSnoozed(encryptionNoticeDismissedAt),
+    (systemStatus?.abandoned_staging?.count ?? 0) > 0,
+    settings?.interface_layout === "classic" && !settings.beta_interface_banner_dismissed,
+  ].filter(Boolean).length;
+
   return (
     <main
       className={cn("sdk-shell min-h-screen overflow-x-clip", refinedInterface && "lg:h-screen lg:overflow-hidden")}
@@ -1786,28 +1794,6 @@ export default function Home() {
                   dockerRunning={dockerRunning}
                 />
               )}
-              {migrationBannerVisible && (
-                <MigrationNotice
-                  dismissMigrationProposal={dismissMigrationProposal}
-                  loading={loading}
-                  migration={migration}
-                  migrationCandidates={migrationCandidates}
-                  requestProjectMigration={requestProjectMigration}
-                  setMigrationBannerClosed={setMigrationBannerClosed}
-                />
-              )}
-              {systemStatus?.workspace_icloud_synced && icloudNoticeDismissedFor !== workspacePath && (
-                <ICloudNotice
-                  openSettingsDialog={openSettingsDialog}
-                  onDismiss={() => dismissICloudNotice(workspacePath)}
-                />
-              )}
-              {diskEncryption?.state === "off" && !noticeSnoozed(encryptionNoticeDismissedAt) && (
-                <DiskEncryptionNotice
-                  platform={diskEncryption.platform}
-                  onDismiss={() => dismissEncryptionNotice(String(Date.now()))}
-                />
-              )}
               {retentionDeletions.length > 0 && (
                 <RetentionNotice
                   deletions={retentionDeletions}
@@ -1821,13 +1807,6 @@ export default function Home() {
                     }
                     return submitted;
                   }}
-                />
-              )}
-              {(systemStatus?.abandoned_staging?.count ?? 0) > 0 && (
-                <StagingCleanupNotice
-                  loading={loading}
-                  requestStagingCleanup={requestStagingCleanup}
-                  count={systemStatus!.abandoned_staging!.count}
                 />
               )}
               {selectedProject && addonLinks?.supported && (addonLinks.wsl_links > 0 || addonLinks.interrupted) && (
@@ -1844,11 +1823,49 @@ export default function Home() {
                   {error}
                 </Notice>
               )}
-              {settings?.interface_layout === "classic" && !settings.beta_interface_banner_dismissed && (
-                <RefinedInterfaceNotice
-                  dismissRefinedInterfaceProposal={dismissRefinedInterfaceProposal}
-                  switchToRefinedInterface={switchToRefinedInterface}
-                />
+              {advisoryCount > 0 && (
+                <details className="mb-4 rounded-lg border bg-card">
+                  <summary className="cursor-pointer rounded-lg px-4 py-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    {advisoryCount} {advisoryCount === 1 ? "point à vérifier" : "points à vérifier"}
+                  </summary>
+                  <div className="border-t px-4 pt-4">
+                    {migrationBannerVisible && (
+                      <MigrationNotice
+                        dismissMigrationProposal={dismissMigrationProposal}
+                        loading={loading}
+                        migration={migration}
+                        migrationCandidates={migrationCandidates}
+                        requestProjectMigration={requestProjectMigration}
+                        setMigrationBannerClosed={setMigrationBannerClosed}
+                      />
+                    )}
+                    {systemStatus?.workspace_icloud_synced && icloudNoticeDismissedFor !== workspacePath && (
+                      <ICloudNotice
+                        openSettingsDialog={openSettingsDialog}
+                        onDismiss={() => dismissICloudNotice(workspacePath)}
+                      />
+                    )}
+                    {diskEncryption?.state === "off" && !noticeSnoozed(encryptionNoticeDismissedAt) && (
+                      <DiskEncryptionNotice
+                        platform={diskEncryption.platform}
+                        onDismiss={() => dismissEncryptionNotice(String(Date.now()))}
+                      />
+                    )}
+                    {(systemStatus?.abandoned_staging?.count ?? 0) > 0 && (
+                      <StagingCleanupNotice
+                        loading={loading}
+                        requestStagingCleanup={requestStagingCleanup}
+                        count={systemStatus!.abandoned_staging!.count}
+                      />
+                    )}
+                    {settings?.interface_layout === "classic" && !settings.beta_interface_banner_dismissed && (
+                      <RefinedInterfaceNotice
+                        dismissRefinedInterfaceProposal={dismissRefinedInterfaceProposal}
+                        switchToRefinedInterface={switchToRefinedInterface}
+                      />
+                    )}
+                  </div>
+                </details>
               )}
               {/* L'onglet Activité montre déjà l'action suivie : pas de rappel au-dessus. */}
               {activeTab !== "logs" && <ProjectActivity jobs={selectedProjectRunningJobs} onFollowJob={followJob} />}

@@ -223,7 +223,7 @@ export function ProjectHeader({
     <Button
       key="stop-project"
       className={actionWidth}
-      variant="destructive"
+      variant="outline"
       disabled={
         !selectedProjectReady || !selectedProjectHasContainers || loading || Boolean(selectedProjectLifecycleJob)
       }
@@ -250,73 +250,85 @@ export function ProjectHeader({
   );
   const openOdooGroup = selectedProject && (
     // Le bouton désactivé ne reçoit pas le survol : l'explication est portée par son conteneur.
-    <div className="col-span-2 flex sm:col-span-1">
-      <span
-        className="flex min-w-0 flex-1"
-        title={
-          !selectedProjectOnline
-            ? "Démarre le projet pour ouvrir Odoo."
-            : selectedOdooServerStopped
-              ? "Le serveur Odoo ne tourne pas : il sera relancé avant l'ouverture."
-              : undefined
-        }
-      >
-        <Button
-          className="w-full whitespace-nowrap rounded-r-none px-3"
-          variant="outline"
-          disabled={
-            !selectedProjectReady || !selectedProjectOnline || openingOdoo || Boolean(selectedProjectLifecycleJob)
+    <div className="col-span-2 min-w-0 max-w-full sm:col-span-1">
+      <div className="flex">
+        <span
+          className="flex min-w-0 flex-1"
+          title={
+            !selectedProjectOnline
+              ? "Démarre le projet pour ouvrir Odoo."
+              : selectedOdooServerStopped
+                ? "Le serveur Odoo ne tourne pas : il sera relancé avant l'ouverture."
+                : undefined
           }
-          onClick={() => requestOpenOdoo()}
         >
-          {openingOdoo ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
-          {openingOdoo ? "Ouverture…" : "Ouvrir Odoo"}
-        </Button>
-      </span>
-      <DropdownMenu.Root modal={false}>
-        <DropdownMenu.Trigger>
           <Button
-            className="-ml-px shrink-0 rounded-l-none px-2"
-            variant="outline"
-            disabled={!selectedProjectReady || !selectedProjectOnline || Boolean(selectedProjectLifecycleJob)}
-            title="Mode debug et e-mails"
-            aria-label="Ouvrir le menu debug et e-mails"
+            className="w-full whitespace-nowrap rounded-r-none px-3"
+            variant="default"
+            disabled={
+              !selectedProjectReady || !selectedProjectOnline || openingOdoo || Boolean(selectedProjectLifecycleJob)
+            }
+            aria-describedby="odoo-opening-target"
+            onClick={() => requestOpenOdoo()}
           >
-            <span>Debug et e-mails</span>
-            <ChevronDown className="h-4 w-4" />
+            {openingOdoo ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+            {openingOdoo ? "Ouverture…" : "Ouvrir Odoo"}
           </Button>
-        </DropdownMenu.Trigger>
-        <DropdownMenu.Content align="end" className="min-w-64">
-          <DropdownMenu.Label>Ouvrir Odoo</DropdownMenu.Label>
-          <DropdownMenu.Item
-            disabled={!selectedProjectOnline || openingOdoo || Boolean(selectedProjectLifecycleJob)}
-            onSelect={() => requestOpenOdoo("1")}
-          >
-            <Bug className="h-4 w-4" />
-            En mode debug
-          </DropdownMenu.Item>
-          <DropdownMenu.Item
-            disabled={!selectedProjectOnline || openingOdoo || Boolean(selectedProjectLifecycleJob)}
-            onSelect={() => requestOpenOdoo("assets")}
-          >
-            <FileCode className="h-4 w-4" />
-            En mode debug avec assets
-          </DropdownMenu.Item>
-          <DropdownMenu.Separator />
-          <DropdownMenu.Label>E-mails des bases neutralisées</DropdownMenu.Label>
-          {mailpit?.running ? (
-            <DropdownMenu.Item onSelect={requestOpenMailpit}>
-              <Mail className="h-4 w-4" />
-              Voir les e-mails (Mailpit)
+        </span>
+        <DropdownMenu.Root modal={false}>
+          <DropdownMenu.Trigger>
+            <Button
+              className="-ml-px shrink-0 rounded-l-none px-2"
+              variant="outline"
+              disabled={!selectedProjectReady || !selectedProjectOnline || Boolean(selectedProjectLifecycleJob)}
+              title="Mode debug et e-mails"
+              aria-label="Ouvrir le menu debug et e-mails"
+            >
+              <span>Debug et e-mails</span>
+              <ChevronDown className="h-4 w-4" />
+            </Button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="end" className="min-w-64">
+            <DropdownMenu.Label>Ouvrir Odoo</DropdownMenu.Label>
+            <DropdownMenu.Item
+              disabled={!selectedProjectOnline || openingOdoo || Boolean(selectedProjectLifecycleJob)}
+              onSelect={() => requestOpenOdoo("1")}
+            >
+              <Bug className="h-4 w-4" />
+              En mode debug
             </DropdownMenu.Item>
-          ) : (
-            <DropdownMenu.Item disabled={!mailpit?.can_start || loading} onSelect={requestStartMailpit}>
-              <Mail className="h-4 w-4" />
-              {mailpit?.installed ? "Démarrer Mailpit" : "Installer Mailpit"}
+            <DropdownMenu.Item
+              disabled={!selectedProjectOnline || openingOdoo || Boolean(selectedProjectLifecycleJob)}
+              onSelect={() => requestOpenOdoo("assets")}
+            >
+              <FileCode className="h-4 w-4" />
+              En mode debug avec assets
             </DropdownMenu.Item>
-          )}
-        </DropdownMenu.Content>
-      </DropdownMenu.Root>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Label>E-mails des bases neutralisées</DropdownMenu.Label>
+            {mailpit?.running ? (
+              <DropdownMenu.Item onSelect={requestOpenMailpit}>
+                <Mail className="h-4 w-4" />
+                Voir les e-mails (Mailpit)
+              </DropdownMenu.Item>
+            ) : (
+              <DropdownMenu.Item disabled={!mailpit?.can_start || loading} onSelect={requestStartMailpit}>
+                <Mail className="h-4 w-4" />
+                {mailpit?.installed ? "Démarrer Mailpit" : "Installer Mailpit"}
+              </DropdownMenu.Item>
+            )}
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+      </div>
+      <p id="odoo-opening-target" className="mt-1 max-w-[22rem] break-all text-xs text-muted-foreground">
+        {selectedDb && selectedDb !== "postgres" ? (
+          <>
+            Base : <span className="font-mono">{selectedDb}</span>
+          </>
+        ) : (
+          "Choix de la base dans Odoo"
+        )}
+      </p>
     </div>
   );
 
@@ -335,7 +347,7 @@ export function ProjectHeader({
           {titleBlock}
           <div className="mt-3 flex flex-col-reverse gap-3 lg:flex-row lg:items-end lg:justify-between lg:gap-6">
             <div className="min-w-0 overflow-x-auto">{tabs}</div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2 lg:pb-2">
+            <div className="flex min-w-0 max-w-full shrink-0 flex-wrap items-start gap-2 lg:pb-2">
               <Button
                 size="icon"
                 variant="outline"
@@ -366,7 +378,7 @@ export function ProjectHeader({
         )}
       >
         {titleBlock}
-        <div className="grid w-full shrink-0 grid-cols-2 items-stretch gap-2 sm:grid-cols-3 xl:w-[540px]">
+        <div className="grid w-full shrink-0 grid-cols-2 items-start gap-2 sm:grid-cols-[auto_auto_minmax(0,1fr)] xl:w-[540px]">
           <Button className="w-full" variant="outline" onClick={refreshAllViews}>
             <RefreshCcw className="h-4 w-4" />
             Actualiser
