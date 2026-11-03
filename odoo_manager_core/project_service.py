@@ -1525,7 +1525,11 @@ class ProjectService:
                 clone_destination = self.command_path(clone_prefix, temporary)
                 code = self.stream([*clone_prefix, clone_destination], cwd=parent_dir, log=log)
                 if code != 0:
-                    raise RuntimeError("Impossible de cloner docker-local-tools. Vérifie Git et ta clé SSH GitLab.")
+                    raise RuntimeError(
+                        "Impossible de récupérer la configuration de Traefik sur GitLab. Vérifie ta clé SSH GitLab, "
+                        "puis demande à un administrateur GitLab l'accès en lecture au groupe devops "
+                        "(rôle « Reporter », qui ne permet aucune modification)."
+                    )
                 temporary_traefik = temporary / "traefik"
                 if not any((temporary_traefik / name).is_file() for name in COMPOSE_FILENAMES):
                     raise RuntimeError("Le dépôt docker-local-tools ne contient pas de configuration Traefik valide.")
