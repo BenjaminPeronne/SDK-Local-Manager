@@ -42,6 +42,7 @@ from odoo_manager_core import (
     database_restore,
     docker_status,
     git_checkouts,
+    iot_box,
     job_progress,
     job_queue,
     performance,
@@ -297,8 +298,10 @@ API_ACTIONS = (
     "restore_module_update_exclusions",
     "restore_remote_backup",
     "apply_docker_resources",
+    "start_iotbox",
     "start_mailpit",
     "start_project",
+    "stop_iotbox",
     "stop_mailpit",
     "stop_project",
     "switch_repository_branch",
@@ -1008,6 +1011,50 @@ def mailpit_status(docker, traefik):
     }
 
 
+# (projet, version) de la box, relus par `docker inspect` une fois par conteneur et non à chaque rafraîchissement.
+IOTBOX_OWNER = None
+
+
+def iotbox_owner(state):
+    global IOTBOX_OWNER
+    if state == "absent":
+        IOTBOX_OWNER = None
+        return "", ""
+    if IOTBOX_OWNER is None:
+        code, output = run_capture(
+            docker_command(
+                SETTINGS,
+                "inspect",
+                "--format",
+                f'{{{{index .Config.Labels "{iot_box.IOTBOX_PROJECT_LABEL}"}}}}|'
+                f'{{{{index .Config.Labels "{iot_box.IOTBOX_VERSION_LABEL}"}}}}',
+                iot_box.IOTBOX_CONTAINER,
+            ),
+            timeout=5,
+            stdout_only=True,
+        )
+        if code != 0 or "|" not in output:
+            return "", ""
+        IOTBOX_OWNER = tuple(output.strip().split("|", 1))
+    return IOTBOX_OWNER
+
+
+def iotbox_status(docker, traefik):
+    """IoT Box virtuelle partagée : elle tourne avec le code Odoo d'un projet à la fois."""
+    state = container_status(iot_box.IOTBOX_CONTAINER) if docker["running"] else "absent"
+    project, version = iotbox_owner(state)
+    return {
+        "state": state,
+        "running": state == "running",
+        "installed": state != "absent",
+        "project": project,
+        "version": version,
+        "versions": list(iot_box.IOTBOX_MODULES),
+        "url": url_with_port(f"http://{iot_box.IOTBOX_HOST}/", traefik.get("http_port")),
+        "can_start": docker["running"] and traefik["running"],
+    }
+
+
 def abandoned_staging_snapshot():
     """Dossiers de créations interrompues, proposés au nettoyage par l'interface."""
     entries = abandoned_staging_entries(WORKSPACE)
@@ -1025,6 +1072,7 @@ def system_status_snapshot(docker=None):
         "docker": docker,
         "traefik": traefik,
         "mailpit": mailpit_status(docker, traefik),
+        "iotbox": iotbox_status(docker, traefik),
         "workspace": str(WORKSPACE),
         "workspace_exists": safe_path_is_dir(WORKSPACE),
         # Bases clients copiées chez Apple : signalé en permanence, pas seulement après une analyse du disque.
@@ -3369,6 +3417,8 @@ JOB_CANCEL_POLICIES = {
     "prune_docker_build_cache_job": (False, "opération courte de Docker."),
     "start_mailpit_job": (True, "Le téléchargement de l'image s'arrête ; relance l'action pour le reprendre."),
     "stop_mailpit_job": (False, "arrêt court d'un conteneur."),
+    "start_iotbox_job": (True, "La préparation de la box s'arrête ; relance l'action pour la reprendre."),
+    "stop_iotbox_job": (False, "arrêt court d'un conteneur."),
     "repair_enterprise_links_job": (False, "opération courte sur les liens de modules."),
     "cancel_missing_module_operations_job": (
         False,
@@ -3407,6 +3457,8 @@ JOB_EXPECTED_DURATIONS = {
     "install_git_job": 120,
     "start_mailpit_job": 40,
     "stop_mailpit_job": 10,
+    "start_iotbox_job": 30,
+    "stop_iotbox_job": 10,
     "purge_deleted_projects_job": 60,
     "database_retention_job": 60,
     "remove_docker_images_job": 60,
@@ -3871,6 +3923,73 @@ def stop_mailpit_job(job):
         return
     if run_stream(job, docker_command(SETTINGS, "stop", MAILPIT_CONTAINER)) != 0:
         raise RuntimeError("Docker n'a pas pu arrêter Mailpit.")
+
+
+def start_iotbox_job(job, project):
+    global IOTBOX_OWNER
+    project = validate_project(project)
+    version = project_odoo_version(project)
+    reason = iot_box.unsupported_reason(version)
+    if reason:
+        raise RuntimeError(reason)
+    if not safe_path_exists(WORKSPACE / project / "odoo" / "odoo" / "odoo-bin"):
+        raise RuntimeError(f"Le code Odoo de {project} est introuvable : l'IoT Box ne peut pas démarrer.")
+    if not docker_status(SETTINGS)["running"]:
+        raise RuntimeError("Docker doit être démarré pour lancer l'IoT Box.")
+    code, _output = run_capture(docker_command(SETTINGS, "network", "inspect", TRAEFIK_NETWORK), timeout=10)
+    if code != 0:
+        raise RuntimeError(f"Le réseau {TRAEFIK_NETWORK} est introuvable : installe et démarre Traefik d'abord.")
+
+    state = container_status(iot_box.IOTBOX_CONTAINER)
+    if state != "absent" and iotbox_owner(state) == (project, version):
+        if state == "running":
+            job.add(f"L'IoT Box tourne déjà avec {project} (Odoo {version}).")
+            return
+        job.add("Démarrage de l'IoT Box...")
+        if run_stream(job, docker_command(SETTINGS, "start", iot_box.IOTBOX_CONTAINER)) != 0:
+            raise RuntimeError("Docker n'a pas pu démarrer l'IoT Box.")
+        job.add(f"L'IoT Box est disponible sur http://{iot_box.IOTBOX_HOST}/.")
+        return
+
+    code, recipe = run_capture(
+        docker_command(
+            SETTINGS,
+            "image",
+            "inspect",
+            "--format",
+            f'{{{{index .Config.Labels "{iot_box.IOTBOX_RECIPE_LABEL}"}}}}',
+            iot_box.image_tag(version),
+        ),
+        timeout=10,
+        stdout_only=True,
+    )
+    if code != 0 or recipe.strip() != iot_box.RECIPE_DIGEST:
+        job.add(f"Préparation de l'IoT Box pour Odoo {version} (quelques minutes la première fois)...")
+        context = iot_box.write_build_context(SETTINGS_STORE.path.parent / "iotbox-build")
+        if run_stream(job, docker_command(SETTINGS, *iot_box.build_arguments(version)), cwd=context) != 0:
+            raise RuntimeError("Docker n'a pas pu préparer l'IoT Box.")
+
+    if state != "absent":
+        # Une seule box à la fois : celle d'un autre projet ou d'une autre version est remplacée, son volume reste.
+        job.add("Remplacement de l'IoT Box précédente...")
+        IOTBOX_OWNER = None
+        if run_stream(job, docker_command(SETTINGS, "rm", "--force", iot_box.IOTBOX_CONTAINER)) != 0:
+            raise RuntimeError("Docker n'a pas pu retirer l'IoT Box précédente.")
+    job.add(f"Démarrage de l'IoT Box avec le code Odoo {version} de {project}...")
+    IOTBOX_OWNER = None
+    command = docker_command(SETTINGS, *iot_box.run_arguments(project, version, TRAEFIK_NETWORK))
+    if run_stream(job, command, cwd=WORKSPACE / project) != 0:
+        raise RuntimeError("Docker n'a pas pu démarrer l'IoT Box.")
+    job.add(f"L'IoT Box est disponible sur http://{iot_box.IOTBOX_HOST}/.")
+    job.add("Les appareils USB ne sont pas visibles depuis la box : utilise des appareils reliés au réseau.")
+
+
+def stop_iotbox_job(job):
+    if container_status(iot_box.IOTBOX_CONTAINER) != "running":
+        job.add("L'IoT Box est déjà arrêtée.")
+        return
+    if run_stream(job, docker_command(SETTINGS, "stop", iot_box.IOTBOX_CONTAINER)) != 0:
+        raise RuntimeError("Docker n'a pas pu arrêter l'IoT Box.")
 
 
 def start_project_job(job, project):
@@ -9057,11 +9176,15 @@ JOB_ACTIONS = {
     "apply_docker_resources": lambda _payload: Job(
         "Donner plus de ressources à Docker Desktop",
         apply_docker_resources_job,
-        # Redémarrer Docker arrête tous les projets, Traefik et Mailpit.
-        resources={"*", "traefik", "mailpit", "disk"},
+        # Redémarrer Docker arrête tous les projets, Traefik, Mailpit et l'IoT Box.
+        resources={"*", "traefik", "mailpit", "iotbox", "disk"},
     ),
     "start_mailpit": lambda _payload: Job("Démarrer Mailpit", start_mailpit_job, resources={"mailpit"}),
     "stop_mailpit": lambda _payload: Job("Arrêter Mailpit", stop_mailpit_job, resources={"mailpit"}),
+    "start_iotbox": lambda payload: Job(
+        "Démarrer l'IoT Box", start_iotbox_job, (str(payload.get("project", "")),), resources={"iotbox"}
+    ),
+    "stop_iotbox": lambda _payload: Job("Arrêter l'IoT Box", stop_iotbox_job, resources={"iotbox"}),
     "create_database": create_database_action,
     "restore_remote_backup": restore_remote_backup_action,
     "drop_database": drop_database_action,

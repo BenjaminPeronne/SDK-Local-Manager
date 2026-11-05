@@ -2,12 +2,12 @@
 
 import { type Dispatch, type ReactNode, type RefObject, type SetStateAction, useMemo } from "react";
 import { DropdownMenu } from "@radix-ui/themes";
-import { Bug, ChevronDown, ExternalLink, FileCode, Loader2, Mail, Play, RefreshCcw, Square } from "lucide-react";
+import { Bug, ChevronDown, Cpu, ExternalLink, FileCode, Loader2, Mail, Play, RefreshCcw, Square } from "lucide-react";
 import { api, waitForJob } from "@/lib/api";
 import { isDesktopRuntime, openExternalUrl } from "@/lib/desktop-runtime";
 import { isJobActive, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
 import { odooAccessUrl, odooServerStopped, type OdooDebugMode } from "@/lib/projects";
-import type { Job, MailpitStatus, OdooServerState, Project, Toast } from "@/lib/types";
+import type { IotBoxStatus, Job, MailpitStatus, OdooServerState, Project, Toast } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ type ProjectHeaderProps = {
   jobs: Job[];
   loading: boolean;
   mailpit: MailpitStatus | undefined;
+  iotbox: IotBoxStatus | undefined;
   openingOdoo: boolean;
   pendingSelectedProjectArrival: Job | undefined;
   projectHeaderCompact: boolean;
@@ -41,6 +42,7 @@ export function ProjectHeader({
   jobs,
   loading,
   mailpit,
+  iotbox,
   openingOdoo,
   pendingSelectedProjectArrival,
   projectHeaderCompact,
@@ -156,6 +158,14 @@ export function ProjectHeader({
   }
   async function requestStartMailpit() {
     await createJob("start_mailpit");
+  }
+  const projectVersion = selectedProject?.odoo_version ?? "";
+  const iotboxSupported = Boolean(iotbox?.versions.includes(projectVersion));
+  const iotboxHere = Boolean(iotbox?.running && iotbox.project === selectedProject?.name);
+  async function requestOpenIotbox() {
+    if (!iotbox?.url || !(await openExternalUrl(iotbox.url))) {
+      pushToast("error", "Impossible d'ouvrir la page de l'IoT Box.");
+    }
   }
 
   const actionWidth = tabs ? undefined : "w-full";
@@ -281,10 +291,10 @@ export function ProjectHeader({
               className="-ml-px shrink-0 rounded-l-none px-2"
               variant="outline"
               disabled={!selectedProjectReady || !selectedProjectOnline || Boolean(selectedProjectLifecycleJob)}
-              title="Mode debug et e-mails"
-              aria-label="Ouvrir le menu debug et e-mails"
+              title="Mode debug, e-mails et IoT Box"
+              aria-label="Ouvrir le menu des outils : debug, e-mails et IoT Box"
             >
-              <span>Debug et e-mails</span>
+              <span>Outils</span>
               <ChevronDown className="h-4 w-4" />
             </Button>
           </DropdownMenu.Trigger>
@@ -315,6 +325,35 @@ export function ProjectHeader({
               <DropdownMenu.Item disabled={!mailpit?.can_start || loading} onSelect={requestStartMailpit}>
                 <Mail className="h-4 w-4" />
                 {mailpit?.installed ? "Démarrer Mailpit" : "Installer Mailpit"}
+              </DropdownMenu.Item>
+            )}
+            <DropdownMenu.Separator />
+            <DropdownMenu.Label>IoT Box virtuelle</DropdownMenu.Label>
+            {iotboxHere ? (
+              <>
+                <DropdownMenu.Item onSelect={requestOpenIotbox}>
+                  <ExternalLink className="h-4 w-4" />
+                  Ouvrir la page de l&apos;IoT Box
+                </DropdownMenu.Item>
+                <DropdownMenu.Item disabled={loading} onSelect={() => void createJob("stop_iotbox")}>
+                  <Square className="h-4 w-4" />
+                  Arrêter l&apos;IoT Box
+                </DropdownMenu.Item>
+              </>
+            ) : iotboxSupported ? (
+              <DropdownMenu.Item
+                disabled={!iotbox?.can_start || loading}
+                onSelect={() => void createJob("start_iotbox", { project: selectedProject?.name })}
+              >
+                <Cpu className="h-4 w-4" />
+                {iotbox?.running
+                  ? `Passer l'IoT Box sur ce projet (utilisée par ${iotbox.project})`
+                  : "Démarrer l'IoT Box"}
+              </DropdownMenu.Item>
+            ) : (
+              <DropdownMenu.Item disabled>
+                <Cpu className="h-4 w-4" />
+                Disponible pour Odoo {iotbox?.versions.join(", ") || "17.0 à 19.0"}
               </DropdownMenu.Item>
             )}
           </DropdownMenu.Content>

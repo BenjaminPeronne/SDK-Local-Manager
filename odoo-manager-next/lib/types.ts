@@ -83,6 +83,19 @@ export type MailpitStatus = {
   can_start: boolean;
 };
 
+// IoT Box virtuelle partagée : elle tourne avec le code Odoo d'un projet (`project`, `version`) à la fois.
+export type IotBoxStatus = {
+  state: string;
+  running: boolean;
+  installed: boolean;
+  project: string;
+  version: string;
+  /** Versions d'Odoo avec lesquelles la box sait tourner. */
+  versions: string[];
+  url: string;
+  can_start: boolean;
+};
+
 // Dernière version publiée sur GitLab. `checked` est faux quand GitLab n'a pas pu être lu.
 export type AppUpdate = {
   current: string;
@@ -102,6 +115,7 @@ export type SystemStatus = {
   docker: DockerStatus;
   traefik?: TraefikStatus;
   mailpit?: MailpitStatus;
+  iotbox?: IotBoxStatus;
   workspace: string;
   workspace_exists: boolean;
   /** Dossier des projets synchronisé par iCloud (macOS) : les bases des clients partent en ligne. */
