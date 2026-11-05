@@ -11,6 +11,8 @@ prévu pour tourner ailleurs que sur un Pi.
 
 import hashlib
 import json
+import re
+import socket
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -45,15 +47,17 @@ RUN apt-get update \\
  && rm -rf /var/lib/apt/lists/*
 RUN . "$PYTHON_VENV_PATH/bin/activate" \\
  && pip install --no-cache-dir netifaces pycups python-escpos websocket-client schedule pyusb pyserial \\
-    pyudev evdev polib dbus-python --config-settings=setup-args=-Dtests=false
+    pyudev evdev polib zeroconf dbus-python --config-settings=setup-args=-Dtests=false
 RUN id pi >/dev/null 2>&1 || useradd -M -d /home/pi pi
 COPY sudo /usr/local/bin/
 COPY git /usr/bin/git
 COPY entrypoint.sh /usr/local/bin/iotbox-entrypoint
+COPY lan_scan.py /usr/local/bin/iotbox-lan-scan
 COPY sitecustomize.py /tmp/sitecustomize.py
 RUN chmod +x /usr/local/bin/sudo /usr/bin/git /usr/local/bin/iotbox-entrypoint \\
  && mv /tmp/sitecustomize.py "$("$PYTHON_VENV_PATH/bin/python" -c 'import sysconfig;print(sysconfig.get_paths()["purelib"])')/" \\
- && mkdir -p /var/odoo && echo 24.10 > /var/odoo/iotbox_version
+ && mkdir -p /var/odoo /root_bypass_ramdisks/etc/ssl/certs /root_bypass_ramdisks/etc/ssl/private \\
+ && echo 24.10 > /var/odoo/iotbox_version && echo "IoT Box virtuelle" > /var/odoo/device-model
 EXPOSE 8069
 ENTRYPOINT ["/usr/local/bin/iotbox-entrypoint"]
 """
@@ -61,7 +65,7 @@ ENTRYPOINT ["/usr/local/bin/iotbox-entrypoint"]
 SUDO_SHIM = """\
 #!/bin/sh
 # Le code IoT du Raspberry Pi remonte le disque, relance nginx, renomme la machine : sans objet ici.
-case "$1" in mount|service|systemctl|hostname|reboot|chmod|chown) exit 0;; esac
+case "$1" in mount|service|systemctl|hostname|reboot|chmod|chown|chroot|chpasswd|rsync|bash) exit 0;; esac
 exec "$@"
 """
 
@@ -73,22 +77,32 @@ exit 0
 """
 
 SITECUSTOMIZE = """\
-# Le code IoT 17/18 lit le numéro de série du Raspberry Pi, que Docker masque : on lit celui de la box.
+import builtins
 import pathlib
+import platform
 
-_PI_SERIAL = "/sys/firmware/devicetree/base/serial-number"
-_BOX_SERIAL = pathlib.Path("/home/pi/serial-number")
+# Hors Raspberry Pi, le code IoT 19 passe en mode « Test », qui ne charge aucun pilote ni aucune interface.
+_release = platform.release
+platform.release = lambda: f"{_release()}-rpi"
+
+# Le code IoT lit des fichiers du Raspberry Pi, que Docker masque : on lit ceux de la box.
+_PI_FILES = {
+    "/sys/firmware/devicetree/base/serial-number": "/home/pi/serial-number",
+    "/proc/device-tree/model": "/var/odoo/device-model",
+}
 
 
 def _redirect(method):
     def wrapper(self, *args, **kwargs):
-        return method(_BOX_SERIAL if str(self) == _PI_SERIAL else self, *args, **kwargs)
+        return method(pathlib.Path(_PI_FILES.get(str(self), self)), *args, **kwargs)
 
     return wrapper
 
 
 pathlib.Path.exists = _redirect(pathlib.Path.exists)
 pathlib.Path.open = _redirect(pathlib.Path.open)
+_open = builtins.open
+builtins.open = lambda file, *args, **kwargs: _open(_PI_FILES.get(file, file), *args, **kwargs)
 
 
 # Odoo 17/18 ne choisit la base d'une requête que par la session (ou s'il n'y en a qu'une), et leur box
@@ -166,6 +180,37 @@ if pathlib.Path("/home/pi/odoo/addons/hw_drivers").is_dir():
         pass
 """
 
+LAN_SCAN = """\
+# Docker Desktop ne laisse passer ni multicast ni diffusion : la recherche d'imprimantes de CUPS ne voit
+# pas le réseau local. Une connexion directe passe : on y cherche les ports d'impression, puis CUPS
+# interroge chaque adresse trouvée (SNMP) et la box les remonte comme une vraie.
+import concurrent.futures
+import os
+import pathlib
+import socket
+import time
+
+LAN = os.environ.get("IOTBOX_LAN")
+PORTS = (9100, 631, 515)
+known = set()
+
+
+def answers(address):
+    with socket.socket() as probe:
+        probe.settimeout(1)
+        return probe.connect_ex(address) == 0
+
+
+while LAN:
+    addresses = [(f"{LAN}.{host}", port) for host in range(1, 255) for port in PORTS]
+    with concurrent.futures.ThreadPoolExecutor(128) as pool:
+        # Une adresse trouvée le reste : une imprimante en veille ne doit pas disparaître d'Odoo.
+        known |= {address[0] for address, found in zip(addresses, pool.map(answers, addresses)) if found}
+    lines = [f"Address {ip}" for ip in sorted(known)] + ["Community public"]
+    pathlib.Path("/etc/cups/snmp.conf").write_text("\\n".join(lines) + "\\n")
+    time.sleep(60)
+"""
+
 ENTRYPOINT = """\
 #!/bin/bash
 set -e
@@ -175,6 +220,9 @@ set -e
 mkdir -p /run/dbus && rm -f /run/dbus/pid && dbus-daemon --system --fork
 cupsd
 . "$PYTHON_VENV_PATH/bin/activate"
+python /usr/local/bin/iotbox-lan-scan &
+# Le premier balayage doit finir avant la première détection : en 17/18 la suivante attend 2 minutes.
+sleep 8
 handlers="addons/${IOTBOX_MODULES%%,*}/iot_handlers"
 cp -a "/home/pi/odoo-source/$handlers/." "/home/pi/odoo/$handlers/"
 cd /home/pi/odoo
@@ -187,13 +235,32 @@ BUILD_FILES = {
     "git": GIT_SHIM,
     "sitecustomize.py": SITECUSTOMIZE,
     "entrypoint.sh": ENTRYPOINT,
+    "lan_scan.py": LAN_SCAN,
 }
 # Change avec la recette : une image ou une box d'avant une mise à jour du gestionnaire est refaite.
 # À changer quand `run_arguments` change : une box lancée autrement est alors recréée.
-RUN_LAYOUT = "3"
+RUN_LAYOUT = "4"
 RECIPE_DIGEST = hashlib.sha256(
     "\0".join([RUN_LAYOUT, *(f"{k}\0{v}" for k, v in sorted(BUILD_FILES.items()))]).encode()
 ).hexdigest()[:12]
+
+
+def local_lan():
+    """Réseau local du poste (« 192.168.1 »), "" sans réseau.
+
+    shortcut: suppose un réseau en /24 et le poste sur un seul réseau, à élargir au masque réel si besoin.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        try:
+            probe.connect(("192.0.2.1", 9))  # UDP : rien n'est envoyé, le système choisit juste l'interface
+        except OSError:
+            return ""
+        return probe.getsockname()[0].rpartition(".")[0]
+
+
+def box_recipe(lan):
+    """Repère d'une box : changer de réseau la recrée, le réseau à balayer étant fixé à sa création."""
+    return f"{RECIPE_DIGEST}:{lan}"
 
 
 def image_tag(version):
@@ -236,7 +303,7 @@ def build_arguments(version):
     ]
 
 
-def run_arguments(project, version, network):
+def run_arguments(project, version, network, lan):
     """`docker run` lancé depuis le dossier du projet : le code Odoo y est monté en lecture seule."""
     return [
         "run",
@@ -254,7 +321,7 @@ def run_arguments(project, version, network):
         "--label",
         f"{IOTBOX_VERSION_LABEL}={version}",
         "--label",
-        f"{IOTBOX_RECIPE_LABEL}={RECIPE_DIGEST}",
+        f"{IOTBOX_RECIPE_LABEL}={box_recipe(lan)}",
         "--label",
         "traefik.enable=true",
         "--label",
@@ -265,6 +332,8 @@ def run_arguments(project, version, network):
         "traefik.http.services.iotbox.loadbalancer.server.port=8069",
         "--env",
         f"IOTBOX_MODULES={IOTBOX_MODULES[version]}",
+        "--env",
+        f"IOTBOX_LAN={lan}",
         "--volume",
         f"{volume_name(version)}:/home/pi",
         "--volume",
@@ -313,3 +382,9 @@ def connect_failure(output):
     if result.get("status") == "success":
         return ""
     return str(result.get("message") or "La box a refusé la connexion.")
+
+
+def box_identifiers(networks, serial):
+    """Valeurs SQL des identifiants possibles de la box, tirées de sa sortie `docker inspect` et de son volume."""
+    found = {*re.findall(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}", networks.lower()), *re.findall(r"SDK[0-9a-f]+", serial)}
+    return ", ".join(f"'{value}'" for value in sorted(found)) or "''"

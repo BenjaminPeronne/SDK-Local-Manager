@@ -20,20 +20,27 @@ class IotBoxRecipeTests(unittest.TestCase):
             self.assertNotIn(b"\r\n", (context / "entrypoint.sh").read_bytes())
 
     def test_box_runs_project_code_read_only_with_a_volume_per_version(self):
-        arguments = iot_box.run_arguments("demo", "19.0", "traefik-local")
+        arguments = iot_box.run_arguments("demo", "19.0", "traefik-local", "192.168.1")
         self.assertIn("./odoo/odoo:/home/pi/odoo:ro", arguments)
         self.assertIn("odoo-manager-iotbox-19.0:/home/pi", arguments)
         self.assertIn("IOTBOX_MODULES=iot_drivers,web", arguments)
+        self.assertIn("IOTBOX_LAN=192.168.1", arguments)
         self.assertEqual(arguments[-1], "odoo-manager-iotbox:19.0")
 
 
 class IotBoxPairingTests(unittest.TestCase):
-    def test_box_python_patch_compiles(self):
+    def test_box_python_files_compile(self):
         compile(iot_box.SITECUSTOMIZE, "sitecustomize.py", "exec")
+        compile(iot_box.LAN_SCAN, "lan_scan.py", "exec")
 
     def test_pairing_token_targets_the_project_container_and_database(self):
         token = iot_box.pairing_token("demo", "base a", "abc", "uuid", "")
         self.assertEqual(token, "http://odoo-demo:8069?token=abc&db_uuid=uuid&enterprise_code=&db_name=base+a")
+
+    def test_box_identifiers_keep_only_the_mac_and_serial(self):
+        identifiers = iot_box.box_identifiers("map[net:{BE:84:2D:5C:F8:59 x'}]", "SDKba5fd6001833\n'; drop")
+        self.assertEqual(identifiers, "'SDKba5fd6001833', 'be:84:2d:5c:f8:59'")
+        self.assertEqual(iot_box.box_identifiers("", ""), "''")
 
     def test_connect_failure_reads_the_box_answer(self):
         self.assertEqual(iot_box.connect_failure('{"result": {"status": "success"}}'), "")

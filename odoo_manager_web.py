@@ -3945,8 +3945,9 @@ def start_iotbox_job(job, project):
     if code != 0:
         raise RuntimeError(f"Le réseau {TRAEFIK_NETWORK} est introuvable : installe et démarre Traefik d'abord.")
 
+    lan = iot_box.local_lan()
     state = container_status(iot_box.IOTBOX_CONTAINER)
-    if state != "absent" and iotbox_owner(state) == (project, version, iot_box.RECIPE_DIGEST):
+    if state != "absent" and iotbox_owner(state) == (project, version, iot_box.box_recipe(lan)):
         if state == "running":
             job.add(f"L'IoT Box tourne déjà avec {project} (Odoo {version}).")
             return
@@ -3982,7 +3983,7 @@ def start_iotbox_job(job, project):
             raise RuntimeError("Docker n'a pas pu retirer l'IoT Box précédente.")
     job.add(f"Démarrage de l'IoT Box avec le code Odoo {version} de {project}...")
     IOTBOX_OWNER = None
-    command = docker_command(SETTINGS, *iot_box.run_arguments(project, version, TRAEFIK_NETWORK))
+    command = docker_command(SETTINGS, *iot_box.run_arguments(project, version, TRAEFIK_NETWORK, lan))
     if run_stream(job, command, cwd=WORKSPACE / project) != 0:
         raise RuntimeError("Docker n'a pas pu démarrer l'IoT Box.")
     job.add(f"L'IoT Box est disponible sur http://{iot_box.IOTBOX_HOST}/.")
@@ -4004,7 +4005,7 @@ def link_iotbox_job(job, project, db_name):
         job.add(f"Installation de l'application IoT dans {db_name}...")
         module_command_job(job, "--install-module", project, db_name, "iot")
     state = container_status(iot_box.IOTBOX_CONTAINER)
-    if state != "running" or iotbox_owner(state) != (project, version, iot_box.RECIPE_DIGEST):
+    if state != "running" or iotbox_owner(state) != (project, version, iot_box.box_recipe(iot_box.local_lan())):
         start_iotbox_job(job, project)
 
     code, output = psql_capture(
@@ -4042,24 +4043,34 @@ def link_iotbox_job(job, project, db_name):
     else:
         raise RuntimeError(failure)
 
-    code, box_ip = run_capture(
+    # La box se présente sous son numéro de série (19) ou son adresse MAC (17, 18) ; son « ip » dans Odoo devient
+    # le nom de son certificat dès qu'elle en a un.
+    _code, mac = run_capture(
         docker_command(
             SETTINGS,
             "inspect",
             "--format",
-            f'{{{{(index .NetworkSettings.Networks "{TRAEFIK_NETWORK}").IPAddress}}}}',
+            "{{range .NetworkSettings.Networks}}{{.MacAddress}}{{end}}",
             iot_box.IOTBOX_CONTAINER,
         ),
         timeout=10,
         stdout_only=True,
     )
-    literal_ip = box_ip.strip().replace("'", "''")
+    _code, serial = run_capture(
+        docker_command(SETTINGS, "exec", iot_box.IOTBOX_CONTAINER, "cat", "/home/pi/serial-number"),
+        timeout=10,
+        stdout_only=True,
+    )
+    identifiers = iot_box.box_identifiers(mac, serial)
     job.add("Attente de la box dans Odoo...")
     for _ in range(45):  # la box redémarre puis se présente à la base
         time.sleep(2)
-        code, name = psql_capture(project, f"select name from iot_box where ip = '{literal_ip}' limit 1;", db_name)
+        code, name = psql_capture(
+            project, f"select name from iot_box where identifier in ({identifiers}) limit 1;", db_name
+        )
         if code == 0 and name.strip():
             job.add(f"L'IoT Box est reliée à {db_name} : elle apparaît dans Odoo sous « {name.strip()} » (app IoT).")
+            job.add("Les imprimantes du réseau y apparaissent en quelques minutes, si elles sont allumées.")
             return
     raise RuntimeError(
         f"La box n'apparaît pas dans {db_name} après une minute et demie. Ouvre la page de l'IoT Box pour voir son état."
