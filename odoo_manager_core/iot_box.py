@@ -10,7 +10,9 @@ prévu pour tourner ailleurs que sur un Pi.
 """
 
 import hashlib
+import json
 from pathlib import Path
+from urllib.parse import urlencode
 
 IOTBOX_CONTAINER = "iotbox"
 IOTBOX_IMAGE = "odoo-manager-iotbox"
@@ -23,6 +25,14 @@ IOTBOX_MODULES = {
     "17.0": "hw_drivers,hw_escpos,hw_posbox_homepage,web",
     "18.0": "hw_drivers,hw_escpos,hw_posbox_homepage,web",
     "19.0": "iot_drivers,web",
+}
+# Paramètre où la base attend le jeton d'appairage (assistant « Connecter une IoT Box » d'Odoo).
+IOTBOX_TOKEN_PARAMETERS = {"17.0": "iot_token", "18.0": "iot_token", "19.0": "iot.iot_token"}
+# Page de la box qui reçoit ce jeton.
+IOTBOX_CONNECT_ROUTES = {
+    "17.0": "/hw_posbox_homepage/connect_to_server",
+    "18.0": "/hw_posbox_homepage/connect_to_server",
+    "19.0": "/iot_drivers/connect_to_server",
 }
 
 DOCKERFILE = """\
@@ -37,10 +47,11 @@ RUN . "$PYTHON_VENV_PATH/bin/activate" \\
  && pip install --no-cache-dir netifaces pycups python-escpos websocket-client schedule pyusb pyserial \\
     pyudev evdev polib dbus-python --config-settings=setup-args=-Dtests=false
 RUN id pi >/dev/null 2>&1 || useradd -M -d /home/pi pi
-COPY sudo git /usr/local/bin/
+COPY sudo /usr/local/bin/
+COPY git /usr/bin/git
 COPY entrypoint.sh /usr/local/bin/iotbox-entrypoint
 COPY sitecustomize.py /tmp/sitecustomize.py
-RUN chmod +x /usr/local/bin/sudo /usr/local/bin/git /usr/local/bin/iotbox-entrypoint \\
+RUN chmod +x /usr/local/bin/sudo /usr/bin/git /usr/local/bin/iotbox-entrypoint \\
  && mv /tmp/sitecustomize.py "$("$PYTHON_VENV_PATH/bin/python" -c 'import sysconfig;print(sysconfig.get_paths()["purelib"])')/" \\
  && mkdir -p /var/odoo && echo 24.10 > /var/odoo/iotbox_version
 EXPOSE 8069
@@ -56,9 +67,9 @@ exec "$@"
 
 GIT_SHIM = """\
 #!/bin/sh
-# Le code IoT 17/18 lit et met à jour son dépôt /home/pi/odoo : ici le code du projet, en lecture seule.
-case "$*" in *--git-dir=/home/pi/odoo/.git*) echo 0000000; exit 0;; esac
-exec /usr/bin/git "$@"
+# Le code IoT 17/18 se met à jour par git (fetch, reset, clean) dans /home/pi/odoo, qui est ici le code du
+# projet : git ne fait rien dans la box. Sans réponse à `ls-remote`, la box saute sa mise à jour.
+exit 0
 """
 
 SITECUSTOMIZE = """\
@@ -78,6 +89,81 @@ def _redirect(method):
 
 pathlib.Path.exists = _redirect(pathlib.Path.exists)
 pathlib.Path.open = _redirect(pathlib.Path.open)
+
+
+# Odoo 17/18 ne choisit la base d'une requête que par la session (ou s'il n'y en a qu'une), et leur box
+# n'en envoie pas : chaque appel vers la base reliée porte une session ouverte sur elle. La box 19
+# envoie déjà l'en-tête X-Odoo-Database.
+if pathlib.Path("/home/pi/odoo/addons/hw_drivers").is_dir():
+    import configparser
+    import http.cookies
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    _SESSION = {"key": None, "cookie": "", "at": 0.0}
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    def _linked_database():
+        conf = configparser.ConfigParser()
+        conf.read("/home/pi/odoo.conf")
+        return conf.get("iot.box", "remote_server", fallback=""), conf.get("iot.box", "db_name", fallback="")
+
+    def _session_cookie(host):
+        server, db = _linked_database()
+        if not server or not db or urllib.parse.urlsplit(server).hostname != host:
+            return ""
+        # Renouvelée chaque heure : Odoo efface les sessions restées inactives.
+        if _SESSION["key"] == (server, db) and time.monotonic() - _SESSION["at"] < 3600:
+            return _SESSION["cookie"]
+        try:
+            response = urllib.request.build_opener(_NoRedirect).open(
+                f"{server}/web/login?db={urllib.parse.quote(db)}", timeout=10
+            )
+        except urllib.error.HTTPError as redirect:
+            response = redirect
+        except OSError:
+            return ""
+        cookies = http.cookies.SimpleCookie()
+        for header in response.headers.get_all("Set-Cookie") or []:
+            cookies.load(header)
+        cookie = cookies["session_id"].value if "session_id" in cookies else ""
+        _SESSION.update(key=(server, db), cookie=cookie, at=time.monotonic())
+        return cookie
+
+    try:
+        import urllib3.connectionpool
+
+        _urlopen = urllib3.connectionpool.HTTPConnectionPool.urlopen
+
+        def _urlopen_with_session(self, method, url, body=None, headers=None, **kwargs):
+            cookie = _session_cookie(self.host)
+            if cookie:
+                headers = {**(headers or {}), "Cookie": f"session_id={cookie}"}
+            return _urlopen(self, method, url, body, headers, **kwargs)
+
+        urllib3.connectionpool.HTTPConnectionPool.urlopen = _urlopen_with_session
+    except ImportError:
+        pass
+
+    try:
+        import websocket
+
+        _websocket_init = websocket.WebSocketApp.__init__
+
+        def _websocket_init_with_session(self, url, *args, **kwargs):
+            cookie = _session_cookie(urllib.parse.urlsplit(url).hostname)
+            if cookie:
+                kwargs["cookie"] = f"session_id={cookie}"
+            _websocket_init(self, url, *args, **kwargs)
+
+        websocket.WebSocketApp.__init__ = _websocket_init_with_session
+    except ImportError:
+        pass
 """
 
 ENTRYPOINT = """\
@@ -89,6 +175,8 @@ set -e
 mkdir -p /run/dbus && rm -f /run/dbus/pid && dbus-daemon --system --fork
 cupsd
 . "$PYTHON_VENV_PATH/bin/activate"
+handlers="addons/${IOTBOX_MODULES%%,*}/iot_handlers"
+cp -a "/home/pi/odoo-source/$handlers/." "/home/pi/odoo/$handlers/"
 cd /home/pi/odoo
 exec python odoo-bin -c /home/pi/odoo.conf --http-port=8069 --load="$IOTBOX_MODULES"
 """
@@ -100,8 +188,12 @@ BUILD_FILES = {
     "sitecustomize.py": SITECUSTOMIZE,
     "entrypoint.sh": ENTRYPOINT,
 }
-# Change avec la recette : une image construite avant une mise à jour du gestionnaire est refaite.
-RECIPE_DIGEST = hashlib.sha256("\0".join(f"{k}\0{v}" for k, v in sorted(BUILD_FILES.items())).encode()).hexdigest()[:12]
+# Change avec la recette : une image ou une box d'avant une mise à jour du gestionnaire est refaite.
+# À changer quand `run_arguments` change : une box lancée autrement est alors recréée.
+RUN_LAYOUT = "3"
+RECIPE_DIGEST = hashlib.sha256(
+    "\0".join([RUN_LAYOUT, *(f"{k}\0{v}" for k, v in sorted(BUILD_FILES.items()))]).encode()
+).hexdigest()[:12]
 
 
 def image_tag(version):
@@ -162,6 +254,8 @@ def run_arguments(project, version, network):
         "--label",
         f"{IOTBOX_VERSION_LABEL}={version}",
         "--label",
+        f"{IOTBOX_RECIPE_LABEL}={RECIPE_DIGEST}",
+        "--label",
         "traefik.enable=true",
         "--label",
         "traefik.http.routers.iotbox.entrypoints=web",
@@ -175,5 +269,47 @@ def run_arguments(project, version, network):
         f"{volume_name(version)}:/home/pi",
         "--volume",
         "./odoo/odoo:/home/pi/odoo:ro",
+        # Reliée à une base, la box y télécharge ses pilotes : en mémoire, jamais dans le code du projet,
+        # remplie au démarrage avec ceux du projet (copie lue dans /home/pi/odoo-source).
+        "--tmpfs",
+        f"/home/pi/odoo/addons/{IOTBOX_MODULES[version].split(',')[0]}/iot_handlers",
+        "--volume",
+        "./odoo/odoo:/home/pi/odoo-source:ro",
         image_tag(version),
     ]
+
+
+def pairing_token(project, db_name, token, db_uuid, enterprise_code):
+    """Jeton au format d'Odoo 18+, accepté aussi par la box 17 : la box joint Odoo par le réseau Docker."""
+    query = urlencode({"token": token, "db_uuid": db_uuid, "enterprise_code": enterprise_code, "db_name": db_name})
+    return f"http://odoo-{project}:8069?{query}"
+
+
+def connect_command(version, token):
+    """Commande lancée dans la box : son serveur n'écoute que dans le conteneur pour cet appel."""
+    payload = json.dumps({"jsonrpc": "2.0", "method": "call", "params": {"token": token}})
+    return [
+        "exec",
+        IOTBOX_CONTAINER,
+        "curl",
+        "--silent",
+        "--show-error",
+        "--max-time",
+        "20",
+        "--header",
+        "Content-Type: application/json",
+        "--data",
+        payload,
+        f"http://127.0.0.1:8069{IOTBOX_CONNECT_ROUTES[version]}",
+    ]
+
+
+def connect_failure(output):
+    """Raison d'un refus de la box, ou "" quand elle a accepté le jeton."""
+    try:
+        result = json.loads(output).get("result") or {}
+    except (ValueError, AttributeError):
+        return "La box n'a pas répondu à la demande de connexion."
+    if result.get("status") == "success":
+        return ""
+    return str(result.get("message") or "La box a refusé la connexion.")

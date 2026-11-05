@@ -47,6 +47,7 @@ Elle fonctionne sous **macOS**, **Linux** et **Windows 10/11**. Sous Windows, el
 - Création d'une base vide, restauration d'une sauvegarde ZIP Odoo de toute taille (chargée directement dans PostgreSQL, avec progression), duplication d'une base existante (filestore inclus, copie neutralisée par défaut) et suppression.
 - Neutralisation contrôlée des copies : crons métier, serveurs de messagerie et synchronisation bancaire désactivés, puis vérification dans PostgreSQL.
 - Capture des e-mails des bases neutralisées dans **Mailpit** (`http://mail.localhost/`), installé en un clic : rien ne part vers l'extérieur, tout reste consultable.
+- **IoT Box virtuelle** (Odoo 17.0 à 19.0) à côté des projets, démarrée et reliée à une base depuis le menu **Outils** d'un projet (`http://iot.localhost/`).
 - Réinitialisation du mot de passe administrateur et des traductions, régénération des assets.
 - Console `psql` ouverte à la demande dans le conteneur, sans exposer de port SQL.
 - Suppression automatique des bases 30 jours après leur arrivée sur le poste, filestore compris, pour ne pas garder les données des clients. Bandeau et notification une semaine avant puis la veille ; « Garder 30 jours de plus » repousse l'échéance.
@@ -427,6 +428,15 @@ Les dossiers du projet et `odoo/` ne comptent jamais comme dépôt d'un module :
 
 Un clic sur la branche d'un dépôt d'`addons-store` (clone, archive SDK ou copie importée) en change. Le code d'un projet est le même pour toutes ses bases : un seul serveur Odoo, un seul chemin des modules. La nouvelle branche vaut donc pour toutes les bases du projet. Avant de confirmer, le gestionnaire liste les bases qui utilisent des modules de ce dépôt et propose de les mettre à jour juste après, une par une (case cochée par défaut ; projet démarré si besoin, modules exclus localement d'une base laissés de côté). Sans cette mise à jour, une base garde les écrans et les données de l'ancienne branche alors que son code a changé. Pour faire tourner deux branches en même temps, chacune sur sa base, il faut deux projets.
 
+
+### IoT Box virtuelle
+
+Le menu **Outils** d'un projet démarré (Odoo 17.0, 18.0 ou 19.0) lance une IoT Box dans le conteneur `iotbox`, page sur `http://iot.localhost/`. Il n'y a qu'une box sur la machine, comme une vraie box reliée à une base à la fois : elle tourne avec le code Odoo du projet choisi, donc dans sa version, et passer sur un autre projet la recrée. Sa configuration (base reliée, numéro de série) reste dans le volume `odoo-manager-iotbox-<version>`.
+
+- **Relier l'IoT Box à <base>** fait ce que fait l'assistant « Connecter une IoT Box » d'Odoo : application IoT installée si besoin (module `iot`, Enterprise), jeton d'appairage écrit dans la base, puis envoyé à la box. La box joint Odoo par le réseau Docker (`odoo-<projet>:8069`) ; l'action attend qu'elle apparaisse dans l'application IoT.
+- Le code du projet est monté **en lecture seule**. Les pilotes que la box télécharge depuis la base vont dans un espace en mémoire, rempli au démarrage avec ceux du projet.
+- L'image (`odoo_manager_core/iot_box.py`) part de `sudokeys/docker-odoo-local:<version>`. Le code IoT 17.0 et 18.0 est écrit pour le Raspberry Pi : l'image fournit un utilisateur `pi`, un `sudo` et un `git` inertes (la box ne se met jamais à jour), un numéro de série, CUPS et dbus. Odoo 17/18 ne choisit la base d'une requête que par la session : la box en ouvre une sur la base reliée. Le code 19.0 a un mode « Test » prévu pour ça et envoie la base dans l'en-tête `X-Odoo-Database`.
+- Limites : pas d'appareils USB (Docker Desktop ne les transmet pas), seulement des appareils joignables par le réseau ; pas d'écran client ni de terminal Worldline (bibliothèque du Raspberry Pi). Reliée, la box demande comme une vraie un certificat HTTPS à odoo.com avec l'identifiant de la base.
 ---
 
 ## Tests

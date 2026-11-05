@@ -9,6 +9,7 @@ import os
 import posixpath
 import queue
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -284,6 +285,7 @@ API_ACTIONS = (
     "install_module",
     "install_socle",
     "install_traefik",
+    "link_iotbox",
     "link_modules",
     "migrate_project",
     "module_sources",
@@ -1011,7 +1013,7 @@ def mailpit_status(docker, traefik):
     }
 
 
-# (projet, version) de la box, relus par `docker inspect` une fois par conteneur et non à chaque rafraîchissement.
+# (projet, version, recette) de la box, relus par `docker inspect` une fois par conteneur et non à chaque rafraîchissement.
 IOTBOX_OWNER = None
 
 
@@ -1019,7 +1021,7 @@ def iotbox_owner(state):
     global IOTBOX_OWNER
     if state == "absent":
         IOTBOX_OWNER = None
-        return "", ""
+        return "", "", ""
     if IOTBOX_OWNER is None:
         code, output = run_capture(
             docker_command(
@@ -1027,22 +1029,23 @@ def iotbox_owner(state):
                 "inspect",
                 "--format",
                 f'{{{{index .Config.Labels "{iot_box.IOTBOX_PROJECT_LABEL}"}}}}|'
-                f'{{{{index .Config.Labels "{iot_box.IOTBOX_VERSION_LABEL}"}}}}',
+                f'{{{{index .Config.Labels "{iot_box.IOTBOX_VERSION_LABEL}"}}}}|'
+                f'{{{{index .Config.Labels "{iot_box.IOTBOX_RECIPE_LABEL}"}}}}',
                 iot_box.IOTBOX_CONTAINER,
             ),
             timeout=5,
             stdout_only=True,
         )
-        if code != 0 or "|" not in output:
-            return "", ""
-        IOTBOX_OWNER = tuple(output.strip().split("|", 1))
+        if code != 0 or output.count("|") != 2:
+            return "", "", ""
+        IOTBOX_OWNER = tuple(output.strip().split("|"))
     return IOTBOX_OWNER
 
 
 def iotbox_status(docker, traefik):
     """IoT Box virtuelle partagée : elle tourne avec le code Odoo d'un projet à la fois."""
     state = container_status(iot_box.IOTBOX_CONTAINER) if docker["running"] else "absent"
-    project, version = iotbox_owner(state)
+    project, version, _recipe = iotbox_owner(state)
     return {
         "state": state,
         "running": state == "running",
@@ -3419,6 +3422,7 @@ JOB_CANCEL_POLICIES = {
     "stop_mailpit_job": (False, "arrêt court d'un conteneur."),
     "start_iotbox_job": (True, "La préparation de la box s'arrête ; relance l'action pour la reprendre."),
     "stop_iotbox_job": (False, "arrêt court d'un conteneur."),
+    "link_iotbox_job": (True, "La connexion s'arrête ; une installation du module IoT déjà lancée va à son terme."),
     "repair_enterprise_links_job": (False, "opération courte sur les liens de modules."),
     "cancel_missing_module_operations_job": (
         False,
@@ -3459,6 +3463,7 @@ JOB_EXPECTED_DURATIONS = {
     "stop_mailpit_job": 10,
     "start_iotbox_job": 30,
     "stop_iotbox_job": 10,
+    "link_iotbox_job": 90,
     "purge_deleted_projects_job": 60,
     "database_retention_job": 60,
     "remove_docker_images_job": 60,
@@ -3941,7 +3946,7 @@ def start_iotbox_job(job, project):
         raise RuntimeError(f"Le réseau {TRAEFIK_NETWORK} est introuvable : installe et démarre Traefik d'abord.")
 
     state = container_status(iot_box.IOTBOX_CONTAINER)
-    if state != "absent" and iotbox_owner(state) == (project, version):
+    if state != "absent" and iotbox_owner(state) == (project, version, iot_box.RECIPE_DIGEST):
         if state == "running":
             job.add(f"L'IoT Box tourne déjà avec {project} (Odoo {version}).")
             return
@@ -3982,6 +3987,83 @@ def start_iotbox_job(job, project):
         raise RuntimeError("Docker n'a pas pu démarrer l'IoT Box.")
     job.add(f"L'IoT Box est disponible sur http://{iot_box.IOTBOX_HOST}/.")
     job.add("Les appareils USB ne sont pas visibles depuis la box : utilise des appareils reliés au réseau.")
+
+
+def link_iotbox_job(job, project, db_name):
+    """Relie la box à une base, comme l'assistant « Connecter une IoT Box » d'Odoo, sans passer par sa page."""
+    project = validate_project(project)
+    db_name = validate_odoo_db(db_name)
+    version = project_odoo_version(project)
+    reason = iot_box.unsupported_reason(version)
+    if reason:
+        raise RuntimeError(reason)
+    if container_status(f"odoo-{project}") != "running":
+        raise RuntimeError(f"Démarre d'abord {project} : la box se relie à une base allumée.")
+
+    if installed_modules(project, db_name).get("iot", {}).get("state") != "installed":
+        job.add(f"Installation de l'application IoT dans {db_name}...")
+        module_command_job(job, "--install-module", project, db_name, "iot")
+    state = container_status(iot_box.IOTBOX_CONTAINER)
+    if state != "running" or iotbox_owner(state) != (project, version, iot_box.RECIPE_DIGEST):
+        start_iotbox_job(job, project)
+
+    code, output = psql_capture(
+        project,
+        "select key, value from ir_config_parameter where key in ('database.uuid', 'database.enterprise_code');",
+        db_name,
+    )
+    if code != 0:
+        raise RuntimeError(f"Impossible de lire la base {db_name}.")
+    parameters = dict(line.split("|", 1) for line in output.splitlines() if "|" in line)
+    # Même jeton que celui de l'assistant d'Odoo : la base le reconnaît quand la box se présente.
+    token = secrets.token_hex(16)
+    parameter = iot_box.IOTBOX_TOKEN_PARAMETERS[version]
+    code, output = psql_capture(
+        project,
+        "insert into ir_config_parameter (key, value, create_date, write_date) "
+        f"values ('{parameter}', '{token}', now() at time zone 'utc', now() at time zone 'utc') "
+        "on conflict (key) do update set value = excluded.value, write_date = excluded.write_date;",
+        db_name,
+    )
+    if code != 0:
+        raise RuntimeError(f"Impossible de préparer la connexion dans {db_name} : {output[-300:]}")
+
+    pairing = iot_box.pairing_token(
+        project, db_name, token, parameters.get("database.uuid", ""), parameters.get("database.enterprise_code", "")
+    )
+    job.add(f"Connexion de l'IoT Box à {db_name}...")
+    failure = "La box ne répond pas encore."
+    for _ in range(30):  # la box peut encore démarrer
+        code, output = run_capture(docker_command(SETTINGS, *iot_box.connect_command(version, pairing)), timeout=30)
+        failure = iot_box.connect_failure(output) if code == 0 else failure
+        if code == 0 and not failure:
+            break
+        time.sleep(2)
+    else:
+        raise RuntimeError(failure)
+
+    code, box_ip = run_capture(
+        docker_command(
+            SETTINGS,
+            "inspect",
+            "--format",
+            f'{{{{(index .NetworkSettings.Networks "{TRAEFIK_NETWORK}").IPAddress}}}}',
+            iot_box.IOTBOX_CONTAINER,
+        ),
+        timeout=10,
+        stdout_only=True,
+    )
+    literal_ip = box_ip.strip().replace("'", "''")
+    job.add("Attente de la box dans Odoo...")
+    for _ in range(45):  # la box redémarre puis se présente à la base
+        time.sleep(2)
+        code, name = psql_capture(project, f"select name from iot_box where ip = '{literal_ip}' limit 1;", db_name)
+        if code == 0 and name.strip():
+            job.add(f"L'IoT Box est reliée à {db_name} : elle apparaît dans Odoo sous « {name.strip()} » (app IoT).")
+            return
+    raise RuntimeError(
+        f"La box n'apparaît pas dans {db_name} après une minute et demie. Ouvre la page de l'IoT Box pour voir son état."
+    )
 
 
 def stop_iotbox_job(job):
@@ -8802,6 +8884,19 @@ def module_command_action(flag, label):
     return build
 
 
+def link_iotbox_action(payload):
+    project = payload_project(payload)
+    db_name = payload_database(payload)
+    # Installe un module dans la base : elle attend aussi les autres actions du projet.
+    return Job(
+        f"Relier l'IoT Box à {db_name}",
+        link_iotbox_job,
+        (project, db_name),
+        project=project,
+        resources={"iotbox", f"project:{project}"},
+    )
+
+
 def repository_modules_action(payload):
     project = payload_project(payload)
     url, branch, names, commit = validate_module_repository(
@@ -9185,6 +9280,7 @@ JOB_ACTIONS = {
         "Démarrer l'IoT Box", start_iotbox_job, (str(payload.get("project", "")),), resources={"iotbox"}
     ),
     "stop_iotbox": lambda _payload: Job("Arrêter l'IoT Box", stop_iotbox_job, resources={"iotbox"}),
+    "link_iotbox": link_iotbox_action,
     "create_database": create_database_action,
     "restore_remote_backup": restore_remote_backup_action,
     "drop_database": drop_database_action,

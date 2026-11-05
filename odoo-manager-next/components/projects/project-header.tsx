@@ -2,7 +2,19 @@
 
 import { type Dispatch, type ReactNode, type RefObject, type SetStateAction, useMemo } from "react";
 import { DropdownMenu } from "@radix-ui/themes";
-import { Bug, ChevronDown, Cpu, ExternalLink, FileCode, Loader2, Mail, Play, RefreshCcw, Square } from "lucide-react";
+import {
+  Bug,
+  ChevronDown,
+  Cpu,
+  ExternalLink,
+  FileCode,
+  Loader2,
+  Mail,
+  Play,
+  Plug,
+  RefreshCcw,
+  Square,
+} from "lucide-react";
 import { api, waitForJob } from "@/lib/api";
 import { isDesktopRuntime, openExternalUrl } from "@/lib/desktop-runtime";
 import { isJobActive, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
@@ -161,6 +173,7 @@ export function ProjectHeader({
   }
   const projectVersion = selectedProject?.odoo_version ?? "";
   const iotboxSupported = Boolean(iotbox?.versions.includes(projectVersion));
+  const linkableDb = Boolean(selectedDb && selectedDb !== "postgres");
   const iotboxHere = Boolean(iotbox?.running && iotbox.project === selectedProject?.name);
   async function requestOpenIotbox() {
     if (!iotbox?.url || !(await openExternalUrl(iotbox.url))) {
@@ -354,6 +367,15 @@ export function ProjectHeader({
               <DropdownMenu.Item disabled>
                 <Cpu className="h-4 w-4" />
                 Disponible pour Odoo {iotbox?.versions.join(", ") || "17.0 à 19.0"}
+              </DropdownMenu.Item>
+            )}
+            {iotboxSupported && (
+              <DropdownMenu.Item
+                disabled={!iotbox?.can_start || loading || !linkableDb}
+                onSelect={() => void createJob("link_iotbox", { project: selectedProject?.name, db: selectedDb })}
+              >
+                <Plug className="h-4 w-4" />
+                {linkableDb ? `Relier l'IoT Box à ${selectedDb}` : "Relier l'IoT Box : choisis d'abord une base"}
               </DropdownMenu.Item>
             )}
           </DropdownMenu.Content>

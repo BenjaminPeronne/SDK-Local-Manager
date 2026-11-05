@@ -27,7 +27,32 @@ class IotBoxRecipeTests(unittest.TestCase):
         self.assertEqual(arguments[-1], "odoo-manager-iotbox:19.0")
 
 
+class IotBoxPairingTests(unittest.TestCase):
+    def test_box_python_patch_compiles(self):
+        compile(iot_box.SITECUSTOMIZE, "sitecustomize.py", "exec")
+
+    def test_pairing_token_targets_the_project_container_and_database(self):
+        token = iot_box.pairing_token("demo", "base a", "abc", "uuid", "")
+        self.assertEqual(token, "http://odoo-demo:8069?token=abc&db_uuid=uuid&enterprise_code=&db_name=base+a")
+
+    def test_connect_failure_reads_the_box_answer(self):
+        self.assertEqual(iot_box.connect_failure('{"result": {"status": "success"}}'), "")
+        self.assertEqual(iot_box.connect_failure('{"result": {"status": "failure", "message": "Non"}}'), "Non")
+        self.assertIn("répondu", iot_box.connect_failure("<html>"))
+
+
 class IotBoxJobTests(unittest.TestCase):
+    def test_link_needs_the_project_started(self):
+        with (
+            patch.object(web, "validate_project", side_effect=lambda project: project),
+            patch.object(web, "project_odoo_version", return_value="19.0"),
+            patch.object(web, "container_status", return_value="exited"),
+            patch.object(web, "psql_capture") as psql_capture,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Démarre d'abord demo"):
+                web.link_iotbox_job(object(), "demo", "base")
+        psql_capture.assert_not_called()
+
     def test_start_refuses_a_project_on_an_unsupported_version(self):
         with (
             patch.object(web, "validate_project", side_effect=lambda project: project),
@@ -44,7 +69,7 @@ class IotBoxJobTests(unittest.TestCase):
         traefik = {"running": True, "http_port": 80}
         with (
             patch.object(web, "container_status", return_value="running"),
-            patch.object(web, "run_capture", return_value=(0, "demo|19.0\n")) as run_capture,
+            patch.object(web, "run_capture", return_value=(0, "demo|19.0|abc\n")) as run_capture,
         ):
             first = web.iotbox_status(docker, traefik)
             web.iotbox_status(docker, traefik)
