@@ -550,25 +550,6 @@ export function SettingsDialog({
                       <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-hover">
                         <Checkbox
                           className="mt-0.5"
-                          checked={settingsDraft.show_technical_details}
-                          onCheckedChange={(checked) =>
-                            setSettingsDraft({ ...settingsDraft, show_technical_details: checked === true })
-                          }
-                        />
-                        <span className="min-w-0">
-                          <span className="block font-medium">Afficher les détails techniques</span>
-                          <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
-                            Affiche les états Odoo et PostgreSQL ainsi que le nombre de bases dans la liste des projets,
-                            les emplacements des modules, et les actions de mise à jour du code et des images Docker.
-                            Désactivé, le gestionnaire présente uniquement le voyant d’état des projets et une liste de
-                            modules compacte.
-                          </span>
-                        </span>
-                      </label>
-
-                      <label className="flex cursor-pointer items-start gap-3 p-3 text-sm transition-colors hover:bg-hover">
-                        <Checkbox
-                          className="mt-0.5"
                           checked={settingsDraft.sticky_header}
                           onCheckedChange={(checked) =>
                             setSettingsDraft({ ...settingsDraft, sticky_header: checked === true })

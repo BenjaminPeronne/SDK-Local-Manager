@@ -1,11 +1,11 @@
 "use client";
 
-import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
-import { Circle, FolderPlus, Info, Loader2, Search, Settings, Star } from "lucide-react";
+import { type Dispatch, type ReactNode, type SetStateAction, useMemo, useState } from "react";
+import { Check, Copy, Database, FolderPlus, Info, Loader2, Play, Search, Settings, Star } from "lucide-react";
 import type { StaticImageData } from "next/image";
-import { statusVariant, workspaceLabel } from "@/lib/format";
+import { workspaceLabel } from "@/lib/format";
 import { isJobActive, isJobUnfinished, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
-import { odooServerStopped } from "@/lib/projects";
+import { odooServerStopped, runningProjectDatabaseCount } from "@/lib/projects";
 import type { Season } from "@/lib/seasonal";
 import type { AppUpdate, ExternalLogView, Job, ManagerSettings, Overview, Project, SystemStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/shell/update-banner";
 import { GeneralActivity } from "@/components/jobs/job-activity";
 import type { UpdateInstaller } from "@/hooks/use-update-installer";
+import type { PushToast } from "@/hooks/use-toasts";
 
 type AppSidebarProps = {
   availableUpdate: AppUpdate | null;
@@ -30,6 +31,8 @@ type AppSidebarProps = {
   openSettingsDialog: () => void;
   openUrl: (url?: string) => Promise<void>;
   overview: Overview | null;
+  pushToast: PushToast;
+  startProject: (project: Project) => Promise<void>;
   pendingProjectArrivals: Job[];
   season: Season | null;
   selectedAppIcon: StaticImageData;
@@ -67,6 +70,8 @@ export function AppSidebar({
   openSettingsDialog,
   openUrl,
   overview,
+  pushToast,
+  startProject,
   pendingProjectArrivals,
   season,
   selectedAppIcon,
@@ -84,6 +89,7 @@ export function AppSidebar({
   updateInstaller,
 }: AppSidebarProps) {
   const [projectsFilter, setProjectsFilter] = useState("");
+  const [workspaceCopied, setWorkspaceCopied] = useState(false);
   const [preferences, setPreferences] = useState(storedSidebarPreferences);
   const workspace = overview?.workspace || "";
   const favorites = Array.isArray(preferences.favorites[workspace]) ? preferences.favorites[workspace] : NO_FAVORITES;
@@ -170,6 +176,29 @@ export function AppSidebar({
             >
               {overview?.workspace ? workspaceLabel(overview.workspace) : "Workspace local"}
             </p>
+            {workspace && (
+              <button
+                type="button"
+                className="shrink-0 rounded p-1 text-muted-foreground hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                title={workspaceCopied ? "Chemin copié" : `Copier le chemin : ${workspace}`}
+                aria-label="Copier le chemin du dossier des projets"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(workspace);
+                    setWorkspaceCopied(true);
+                    window.setTimeout(() => setWorkspaceCopied(false), 1500);
+                  } catch {
+                    pushToast("error", "Impossible de copier le chemin des projets.");
+                  }
+                }}
+              >
+                {workspaceCopied ? (
+                  <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+              </button>
+            )}
             <Badge
               className="shrink-0"
               variant={(systemStatus?.docker.running ?? overview?.docker_ok) ? "success" : "destructive"}
@@ -238,6 +267,9 @@ export function AppSidebar({
             const displayedServerStopped = serverStopped && !switchingOn;
             const busyJob = lifecycleJob || projectBusyJobs.get(project.name);
             const selected = selectedProject?.name === project.name;
+            const databaseCount = runningProjectDatabaseCount(project);
+            // Bouton au survol : seulement s'il y a quelque chose à démarrer et que Docker répond.
+            const canStart = !busyJob && !displayedRunning && project.odoo_status !== "docker off";
 
             return (
               <div
@@ -286,56 +318,52 @@ export function AppSidebar({
                       className={cn("h-3.5 w-3.5", favorites.includes(project.name) && "fill-primary text-primary")}
                     />
                   </button>
-                  <div className="flex w-[74px] shrink-0 items-center justify-end gap-2">
-                    {busyJob ? (
-                      <span title={busyJob.title} className="inline-flex h-6 w-6 items-center justify-center">
-                        <Loader2
-                          className="h-4 w-4 animate-spin text-primary"
-                          aria-label={`En cours : ${busyJob.title}`}
-                        />
-                      </span>
-                    ) : (
-                      <span
-                        className={cn(
-                          "inline-flex h-6 w-6 shrink-0 items-center justify-center",
-                          // Un projet arrêté n'est pas en erreur : le gris laisse le rouge aux vraies pannes.
+                  {/* Éteint : aucune pastille, la ligne reste calme ; elles n'apparaissent qu'au démarrage. */}
+                  <div className="flex shrink-0 items-center gap-1">
+                    {canStart && (
+                      <button
+                        type="button"
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-primary text-primary-foreground opacity-0 shadow-sm transition-opacity hover:bg-primary/90 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100"
+                        title={`Démarrer ${project.name}`}
+                        aria-label={`Démarrer ${project.name}`}
+                        onClick={() => void startProject(project)}
+                      >
+                        <Play className="h-3 w-3 fill-current" aria-hidden="true" />
+                      </button>
+                    )}
+                    {busyJob && (
+                      <Loader2
+                        className="mr-0.5 h-3.5 w-3.5 animate-spin text-primary"
+                        aria-label={`En cours : ${busyJob.title}`}
+                      />
+                    )}
+                    {(displayedRunning || displayedServerStopped) && (
+                      <StatusChip
+                        tone={displayedRunning ? "odoo" : "warn"}
+                        label={
                           displayedRunning
-                            ? "text-emerald-500"
-                            : displayedServerStopped
-                              ? "text-amber-500"
-                              : "text-muted-foreground/70 dark:text-muted-foreground",
-                        )}
-                        role="img"
-                        aria-label={`${project.name} : ${displayedRunning ? "allumé" : displayedServerStopped ? "conteneur démarré, Odoo arrêté" : "éteint"}`}
-                        title={
-                          displayedServerStopped
-                            ? "Le conteneur tourne, mais pas le serveur Odoo : Démarrer ou Ouvrir Odoo le relance."
-                            : undefined
+                            ? "Odoo allumé"
+                            : "Odoo arrêté : le conteneur tourne, Démarrer relance le serveur"
                         }
                       >
-                        <Circle className="h-5 w-5 fill-current" aria-hidden="true" />
-                      </span>
+                        <OdooMark />
+                      </StatusChip>
                     )}
-                    <span
-                      className={cn(
-                        "w-7 text-xs font-semibold",
-                        displayedRunning ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
-                      )}
-                    >
-                      {displayedRunning ? "ON" : "OFF"}
-                    </span>
+                    {project.postgres_status === "running" && (
+                      <StatusChip
+                        tone="database"
+                        label={
+                          databaseCount === null
+                            ? "PostgreSQL allumé"
+                            : `PostgreSQL allumé · ${databaseCount} base${databaseCount === 1 ? "" : "s"}`
+                        }
+                      >
+                        <Database className="h-3.5 w-3.5" aria-hidden="true" />
+                        {databaseCount !== null && <span className="tabular-nums">{databaseCount}</span>}
+                      </StatusChip>
+                    )}
                   </div>
                 </div>
-                {settings?.show_technical_details && (
-                  <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 text-xs">
-                    <Badge variant={statusVariant(project.odoo_status)}>Odoo {project.odoo_status}</Badge>
-                    {serverStopped && <Badge variant="warning">serveur Odoo arrêté</Badge>}
-                    <Badge variant={statusVariant(project.postgres_status)}>PostgreSQL {project.postgres_status}</Badge>
-                    <Badge variant="outline">
-                      {project.databases?.filter((db) => db !== "postgres").length || 0} base(s)
-                    </Badge>
-                  </div>
-                )}
               </div>
             );
           })}
@@ -365,5 +393,46 @@ export function AppSidebar({
         </div>
       </div>
     </aside>
+  );
+}
+
+const STATUS_CHIP_TONES = {
+  // Violet d'Odoo (#714B67), éclairci en mode sombre pour rester lisible sur fond foncé.
+  odoo: "bg-[#714B67]/12 text-[#714B67] ring-[#714B67]/30 dark:bg-[#C49BBB]/15 dark:text-[#D8B4CF] dark:ring-[#C49BBB]/35",
+  warn: "bg-amber-500/15 text-amber-600 ring-amber-500/30 dark:text-amber-400",
+  database: "bg-emerald-500/15 text-emerald-700 ring-emerald-500/30 dark:text-emerald-400",
+};
+
+/** Pastille d'un conteneur allumé ; orange quand le conteneur Odoo tourne sans son serveur. */
+function StatusChip({
+  tone,
+  label,
+  children,
+}: {
+  tone: keyof typeof STATUS_CHIP_TONES;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className={cn(
+        "inline-flex h-6 min-w-6 items-center justify-center gap-1 rounded-md px-1 text-xs font-semibold ring-1 ring-inset",
+        STATUS_CHIP_TONES[tone],
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** Le « o » rond d'Odoo, en anneau épais. */
+function OdooMark() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" aria-hidden="true">
+      <circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" strokeWidth="3.2" />
+    </svg>
   );
 }

@@ -49,7 +49,6 @@ class SettingsTests(unittest.TestCase):
                     "wsl_distribution": "Ubuntu",
                     "docker_poll_interval": 1,
                     "api_port": 19876,
-                    "show_technical_details": True,
                     "sticky_header": True,
                     "interface_icon": "local",
                     "interface_layout": "refined",
@@ -65,7 +64,6 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(loaded.execution_mode, "wsl")
             self.assertEqual(loaded.docker_poll_interval, 3)
             self.assertEqual(loaded.api_port, 19876)
-            self.assertTrue(loaded.show_technical_details)
             self.assertTrue(loaded.sticky_header)
             self.assertEqual(loaded.interface_icon, "local")
             self.assertEqual(loaded.interface_layout, "refined")
@@ -79,7 +77,8 @@ class SettingsTests(unittest.TestCase):
     def test_obsolete_open_odoo_start_preference_is_ignored(self):
         settings = ManagerSettings.from_dict({"start_project_before_open": True}, "/tmp/workspace")
         self.assertNotIn("start_project_before_open", settings.to_dict())
-        self.assertFalse(settings.show_technical_details)
+        # Réglage « Affichage technique » retiré : un ancien fichier qui le contient se charge sans lui.
+        self.assertNotIn("show_technical_details", ManagerSettings.from_dict({"show_technical_details": True}, "/tmp/workspace").to_dict())
         self.assertFalse(settings.sticky_header)
         self.assertFalse(settings.migration_banner_dismissed)
         self.assertFalse(settings.beta_interface_banner_dismissed)

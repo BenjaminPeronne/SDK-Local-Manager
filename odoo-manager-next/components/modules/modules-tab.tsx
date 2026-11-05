@@ -33,7 +33,7 @@ import { useModuleFilters, type ModuleView, MODULES_PER_PAGE } from "@/hooks/use
 import { useRepositoryUpdateChecks } from "@/hooks/use-repository-updates";
 import { groupModulesByRepository } from "@/lib/module-repositories";
 import { normalizeSearchText } from "@/lib/format";
-import type { Job, ManagerSettings, ModuleInfo, ModuleRepository, Overview, Project } from "@/lib/types";
+import type { Job, ModuleInfo, ModuleRepository, Overview, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -96,7 +96,6 @@ type ModulesTabProps = {
   selectedProjectReady: boolean;
   scrollRoot: HTMLElement | null;
   setSelectedModules: Dispatch<SetStateAction<Set<string>>>;
-  settings: ManagerSettings | null;
   stickyHeader: boolean;
 };
 
@@ -132,7 +131,6 @@ export function ModulesTab({
   selectedProjectReady,
   scrollRoot,
   setSelectedModules,
-  settings,
   stickyHeader,
 }: ModulesTabProps) {
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -168,7 +166,6 @@ export function ModulesTab({
     allFilteredSelected: filteredNames.length > 0 && filteredNames.every((name) => selectedModules.has(name)),
     onSelectAllFiltered: () => setSelectedModules((current) => new Set([...current, ...filteredNames])),
   };
-  const showModuleLocations = settings?.show_technical_details ?? false;
   const toggleModuleSelection = useCallback(
     (name: string, checked: boolean) => {
       setSelectedModules((current) => {
@@ -614,7 +611,6 @@ export function ModulesTab({
                   searchActive={searchKey !== ""}
                   selectedModules={selectedModules}
                   setSelectedModules={setSelectedModules}
-                  showLocations={showModuleLocations}
                   stickyTop={stickyTop + tableHeaderHeight}
                   workspace={overview?.workspace}
                 />
@@ -630,7 +626,6 @@ export function ModulesTab({
                         actions={rowActions}
                         module={module}
                         selected={selectedModules.has(module.name)}
-                        showLocations={showModuleLocations}
                         workspace={overview?.workspace}
                       />
                     ))

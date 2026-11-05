@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { odooAccessUrl, odooServerStopped, windowsPathFromMount } from "./projects.ts";
+import { odooAccessUrl, odooServerStopped, runningProjectDatabaseCount, windowsPathFromMount } from "./projects.ts";
 
 test("a Windows drive mounted in the Linux environment is shown as Windows writes it", () => {
   assert.equal(windowsPathFromMount("/mnt/d/Projets/Odoo"), "D:\\Projets\\Odoo");
@@ -32,4 +32,12 @@ test("a started container without its Odoo server is told apart from a running p
   assert.equal(odooServerStopped({ odoo_status: "running", odoo_server: "unknown" }), false);
   assert.equal(odooServerStopped({ odoo_status: "exited", odoo_server: null }), false);
   assert.equal(odooServerStopped(undefined), false);
+});
+
+test("database count is shown only when both containers are running", () => {
+  const project = { odoo_status: "running", postgres_status: "running", databases: ["postgres", "demo"] };
+  assert.equal(runningProjectDatabaseCount(project), 1);
+  assert.equal(runningProjectDatabaseCount({ ...project, databases: ["postgres"] }), 0);
+  assert.equal(runningProjectDatabaseCount({ ...project, odoo_status: "exited" }), null);
+  assert.equal(runningProjectDatabaseCount({ ...project, postgres_status: "exited" }), null);
 });

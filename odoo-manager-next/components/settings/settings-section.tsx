@@ -21,7 +21,6 @@ export const SETTINGS_SAVED_KEYS = [
   "allowed_origins",
   "docker_poll_interval",
   "api_port",
-  "show_technical_details",
   "sticky_header",
   "interface_icon",
   "interface_layout",

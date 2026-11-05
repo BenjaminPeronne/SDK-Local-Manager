@@ -88,7 +88,6 @@ type ModuleRepositoryGroupsProps = {
   searchActive: boolean;
   selectedModules: Set<string>;
   setSelectedModules: Dispatch<SetStateAction<Set<string>>>;
-  showLocations: boolean;
   /** Hauteur occupée au-dessus de la liste (en-têtes du projet et du tableau) : l'en-tête de dépôt s'y colle. */
   stickyTop: number;
   workspace?: string;
@@ -106,7 +105,6 @@ export function ModuleRepositoryGroups({
   searchActive,
   selectedModules,
   setSelectedModules,
-  showLocations,
   stickyTop,
   workspace,
 }: ModuleRepositoryGroupsProps) {
@@ -285,7 +283,6 @@ export function ModuleRepositoryGroups({
                     module={module}
                     selected={selectedModules.has(module.name)}
                     replacedShownAbove={replaced?.label}
-                    showLocations={showLocations}
                     workspace={workspace}
                   />
                 ))}

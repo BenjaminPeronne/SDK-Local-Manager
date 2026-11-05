@@ -195,7 +195,6 @@ export type ManagerSettings = {
   docker_poll_interval: number;
   api_port: number;
   api_port_actual?: number;
-  show_technical_details: boolean;
   sticky_header: boolean;
   interface_icon: InterfaceIcon;
   interface_layout: "classic" | "refined";

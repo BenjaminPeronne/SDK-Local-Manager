@@ -1016,6 +1016,14 @@ export default function Home() {
     }
   }
 
+  async function startProjectFromSidebar(project: Project) {
+    const job = await createJob("start_project", { project: project.name });
+    if (job) {
+      schedule(refreshOverview, 1800);
+      schedule(refreshSystemStatus, 2200);
+    }
+  }
+
   /**
    * Bascule d'un clic vers l'interface affinée et l'en-tête fixe.
    *
@@ -1711,6 +1719,8 @@ export default function Home() {
           openSettingsDialog={openSettingsDialog}
           openUrl={openUrl}
           overview={overview}
+          pushToast={pushToast}
+          startProject={startProjectFromSidebar}
           pendingProjectArrivals={pendingProjectArrivals}
           season={season}
           selectedAppIcon={selectedAppIcon}
@@ -2001,7 +2011,6 @@ export default function Home() {
                       selectedProjectReady={selectedProjectReady}
                       scrollRoot={panelScrollRoot}
                       setSelectedModules={setSelectedModules}
-                      settings={settings}
                       stickyHeader={stickyHeader}
                     />
                   )}
@@ -2038,7 +2047,6 @@ export default function Home() {
                     selectedProject={selectedProject}
                     selectedProjectReady={selectedProjectReady}
                     setDeleteDialogOpen={setDeleteDialogOpen}
-                    settings={settings}
                   />
                 </>
               )}

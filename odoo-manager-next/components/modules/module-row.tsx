@@ -32,7 +32,6 @@ type ModuleRowProps = {
   /** Dépôt remplacé déjà affiché dans l'en-tête du groupe : la ligne ne le répète pas. */
   replacedShownAbove?: string;
   selected: boolean;
-  showLocations: boolean;
   workspace?: string;
 };
 
@@ -42,14 +41,9 @@ export const ModuleRow = memo(function ModuleRow({
   module,
   replacedShownAbove,
   selected,
-  showLocations,
   workspace,
 }: ModuleRowProps) {
   const sourcePath = module.source_path || module.path;
-  const linkPath = module.link_path || (module.path_kind?.startsWith("lien") ? module.path : "");
-  const displaySourcePath = compactWorkspacePath(sourcePath, workspace);
-  const displayLinkPath = compactWorkspacePath(linkPath, workspace);
-  const samePaths = Boolean(linkPath && sourcePath && linkPath === sourcePath);
   const origin = normalizedModuleOrigin(module.origin, sourcePath);
   const moduleTitle = module.title || module.name;
   const showTechnicalName = moduleTitle !== module.name;
@@ -78,6 +72,7 @@ export const ModuleRow = memo(function ModuleRow({
                 "min-w-0",
                 showTechnicalName ? cn("break-words", REFINED_ROW_TITLE) : cn("break-all", REFINED_IDENTIFIER),
               )}
+              title={sourcePath ? compactWorkspacePath(sourcePath, workspace) : undefined}
             >
               {moduleTitle}
             </span>
@@ -100,19 +95,6 @@ export const ModuleRow = memo(function ModuleRow({
             <span className="mt-0.5 block break-all font-mono text-xs text-muted-foreground">{module.name}</span>
           )}
           {module.author && <span className="mt-0.5 block text-xs text-muted-foreground">{module.author}</span>}
-          {showLocations && (
-            <span className="mt-1.5 block space-y-0.5 text-xs">
-              {module.path_kind && <span className="block text-muted-foreground">{module.path_kind}</span>}
-              <span className="block truncate font-mono text-teal-700 dark:text-teal-300" title={sourcePath}>
-                {displaySourcePath || "-"}
-              </span>
-              {displayLinkPath && !samePaths && (
-                <span className="block truncate font-mono text-blue-700 dark:text-blue-300" title={linkPath}>
-                  {displayLinkPath}
-                </span>
-              )}
-            </span>
-          )}
         </span>
       </label>
       <div className="flex min-w-0 items-center justify-between gap-3 xl:block">

@@ -87,6 +87,11 @@ export function firstOdooDatabase(project?: Project) {
   return project?.databases?.find((db) => db !== "postgres") || "";
 }
 
+export function runningProjectDatabaseCount(project: Pick<Project, "odoo_status" | "postgres_status" | "databases">) {
+  if (project.odoo_status !== "running" || project.postgres_status !== "running") return null;
+  return project.databases.filter((db) => db !== "postgres").length;
+}
+
 /** `1` active le mode développeur d'Odoo, `assets` sert en plus les fichiers JS et CSS non minifiés. */
 export type OdooDebugMode = "1" | "assets";
 
@@ -123,7 +128,6 @@ export function fallbackManagerSettings(
     docker_poll_interval: current?.docker_poll_interval || 10,
     api_port: current?.api_port || 18765,
     api_port_actual: current?.api_port_actual,
-    show_technical_details: current?.show_technical_details ?? false,
     sticky_header: current?.sticky_header ?? false,
     interface_icon: current?.interface_icon === "local" ? "local" : "manager",
     interface_layout: current?.interface_layout === "classic" ? "classic" : "refined",
