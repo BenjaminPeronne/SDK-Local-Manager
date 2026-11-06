@@ -161,7 +161,13 @@ from odoo_manager_core.project_creator import (
     validate_new_project_name,
     validate_odoo_version,
 )
-from odoo_manager_core.project_service import ODOO_DATA_DIR, POSTGRES_DATA_DIR, NeutralizationRestartError, OdooError
+from odoo_manager_core.project_service import (
+    ODOO_DATA_DIR,
+    POSTGRES_DATA_DIR,
+    NeutralizationRestartError,
+    OdooError,
+    host_port_in_use,
+)
 from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
 from odoo_manager_core.releases import RELEASES_PAGE, RELEASES_REPOSITORY, release_check_error, release_update
 from odoo_manager_core.repositories import (
@@ -1040,6 +1046,15 @@ def iotbox_owner(state):
             return "", "", ""
         IOTBOX_OWNER = tuple(output.strip().split("|"))
     return IOTBOX_OWNER
+
+
+def iotbox_network(state):
+    """(réseau local, port des terminaux publié) voulus pour la box.
+
+    Son propre port compte comme libre, et un port occupé est repris dès qu'il se libère.
+    """
+    published = iotbox_owner(state)[2].endswith(f":{iot_box.IOTBOX_TERMINAL_PORT}")
+    return iot_box.local_lan(), published or not host_port_in_use(iot_box.IOTBOX_TERMINAL_PORT)
 
 
 def iotbox_status(docker, traefik):
@@ -3945,9 +3960,9 @@ def start_iotbox_job(job, project):
     if code != 0:
         raise RuntimeError(f"Le réseau {TRAEFIK_NETWORK} est introuvable : installe et démarre Traefik d'abord.")
 
-    lan = iot_box.local_lan()
     state = container_status(iot_box.IOTBOX_CONTAINER)
-    if state != "absent" and iotbox_owner(state) == (project, version, iot_box.box_recipe(lan)):
+    lan, terminal_port = iotbox_network(state)
+    if state != "absent" and iotbox_owner(state) == (project, version, iot_box.box_recipe(lan, terminal_port)):
         if state == "running":
             job.add(f"L'IoT Box tourne déjà avec {project} (Odoo {version}).")
             return
@@ -3983,11 +3998,17 @@ def start_iotbox_job(job, project):
             raise RuntimeError("Docker n'a pas pu retirer l'IoT Box précédente.")
     job.add(f"Démarrage de l'IoT Box avec le code Odoo {version} de {project}...")
     IOTBOX_OWNER = None
-    command = docker_command(SETTINGS, *iot_box.run_arguments(project, version, TRAEFIK_NETWORK, lan))
+    command = docker_command(SETTINGS, *iot_box.run_arguments(project, version, TRAEFIK_NETWORK, lan, terminal_port))
     if run_stream(job, command, cwd=WORKSPACE / project) != 0:
         raise RuntimeError("Docker n'a pas pu démarrer l'IoT Box.")
     job.add(f"L'IoT Box est disponible sur http://{iot_box.IOTBOX_HOST}/.")
     job.add("Les appareils USB ne sont pas visibles depuis la box : utilise des appareils reliés au réseau.")
+    port = iot_box.IOTBOX_TERMINAL_PORT
+    if terminal_port:
+        job.add(f"Terminaux de paiement Ingenico : indique-leur l'adresse {iot_box.local_ip()}, port {port}.")
+    else:
+        job.add(f"Le port {port} est déjà pris sur cette machine : les terminaux de paiement Ingenico ne joindront pas")
+        job.add("la box. Libère-le puis redémarre l'IoT Box.")
 
 
 def link_iotbox_job(job, project, db_name):
@@ -4005,7 +4026,8 @@ def link_iotbox_job(job, project, db_name):
         job.add(f"Installation de l'application IoT dans {db_name}...")
         module_command_job(job, "--install-module", project, db_name, "iot")
     state = container_status(iot_box.IOTBOX_CONTAINER)
-    if state != "running" or iotbox_owner(state) != (project, version, iot_box.box_recipe(iot_box.local_lan())):
+    wanted = iot_box.box_recipe(*iotbox_network(state))
+    if state != "running" or iotbox_owner(state) != (project, version, wanted):
         start_iotbox_job(job, project)
 
     code, output = psql_capture(

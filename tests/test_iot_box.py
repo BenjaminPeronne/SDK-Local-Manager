@@ -20,12 +20,14 @@ class IotBoxRecipeTests(unittest.TestCase):
             self.assertNotIn(b"\r\n", (context / "entrypoint.sh").read_bytes())
 
     def test_box_runs_project_code_read_only_with_a_volume_per_version(self):
-        arguments = iot_box.run_arguments("demo", "19.0", "traefik-local", "192.168.1")
+        arguments = iot_box.run_arguments("demo", "19.0", "traefik-local", "192.168.1", True)
         self.assertIn("./odoo/odoo:/home/pi/odoo:ro", arguments)
         self.assertIn("odoo-manager-iotbox-19.0:/home/pi", arguments)
         self.assertIn("IOTBOX_MODULES=iot_drivers,web", arguments)
         self.assertIn("IOTBOX_LAN=192.168.1", arguments)
+        self.assertIn("9000:9000", arguments)
         self.assertEqual(arguments[-1], "odoo-manager-iotbox:19.0")
+        self.assertNotIn("--publish", iot_box.run_arguments("demo", "19.0", "traefik-local", "192.168.1", False))
 
 
 class IotBoxPairingTests(unittest.TestCase):
@@ -69,6 +71,22 @@ class IotBoxJobTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "17.0, 18.0, 19.0"):
                 web.start_iotbox_job(object(), "demo")
         run_stream.assert_not_called()
+
+    def test_terminal_port_stays_with_the_box_that_publishes_it(self):
+        recipe = iot_box.box_recipe("192.168.1", True)
+        with (
+            patch.object(web, "iotbox_owner", return_value=("demo", "19.0", recipe)),
+            patch.object(web, "host_port_in_use", return_value=True),
+        ):
+            self.assertTrue(web.iotbox_network("running")[1])
+
+    def test_terminal_port_busy_elsewhere_is_left_out_then_taken_back(self):
+        with (
+            patch.object(web, "iotbox_owner", return_value=("demo", "19.0", iot_box.box_recipe("192.168.1", False))),
+            patch.object(web, "host_port_in_use", side_effect=[True, False]),
+        ):
+            self.assertFalse(web.iotbox_network("running")[1])
+            self.assertTrue(web.iotbox_network("running")[1])
 
     def test_status_reads_the_box_owner_once(self):
         web.IOTBOX_OWNER = None
