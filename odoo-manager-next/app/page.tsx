@@ -1960,13 +1960,16 @@ export default function Home() {
                     <DatabasesTab
                       workspace={overview?.workspace || ""}
                       chooseDatabase={chooseDatabase}
+                      createJob={createJob}
                       dependencyReport={databaseDependencies.report}
                       executeDatabaseAction={executeDatabaseAction}
                       extendDatabaseRetention={(project, db) => void extendDatabasesRetention([{ project, db }])}
                       loading={loading}
+                      mobile={systemStatus?.mobile}
                       odooDatabases={odooDatabases}
                       openingPostgresql={openingPostgresql}
                       openUrl={openUrl}
+                      refreshSystemStatus={refreshSystemStatus}
                       selectedDb={selectedDb}
                       selectedProject={selectedProject}
                       selectedProjectReady={selectedProjectReady}

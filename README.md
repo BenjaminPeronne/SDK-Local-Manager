@@ -431,7 +431,7 @@ Un clic sur la branche d'un dépôt d'`addons-store` (clone, archive SDK ou copi
 
 ### Ouvrir Odoo sur mobile
 
-Le menu **Outils** d'un projet démarré ouvre Odoo aux appareils du même Wi-Fi : l'adresse à saisir sur le téléphone s'affiche dans le menu, et **Fermer l'accès** la coupe. Un seul projet à la fois ; l'accès se ferme aussi quand Docker s'arrête. Il passe par le port 8069 de ce poste, sur son adresse Wi-Fi uniquement.
+Le bouton téléphone de chaque base, ou **Outils > Sur mobile (QR code)** pour un projet, ouvre une fenêtre avec un QR code : il suffit de le scanner avec le téléphone, connecté au même Wi-Fi, pour arriver directement sur la base. L'accès s'ouvre tout seul et reste ouvert jusqu'à **Couper l'accès**, ou jusqu'à l'arrêt de Docker. Un seul projet à la fois. Il passe par le port 8069 de ce poste, sur son adresse Wi-Fi uniquement.
 
 Les échanges ne sont pas chiffrés : mots de passe et données restent lisibles sur le réseau, à n'ouvrir que sur un Wi-Fi de confiance. Si le téléphone n'arrive pas à se connecter, vérifie le pare-feu du poste.
 

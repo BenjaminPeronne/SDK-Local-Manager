@@ -1,6 +1,6 @@
 "use client";
 
-import { type Dispatch, type ReactNode, type RefObject, type SetStateAction, useMemo } from "react";
+import { type Dispatch, type ReactNode, type RefObject, type SetStateAction, useMemo, useState } from "react";
 import { DropdownMenu } from "@radix-ui/themes";
 import {
   Bug,
@@ -22,8 +22,17 @@ import { api, waitForJob } from "@/lib/api";
 import { isDesktopRuntime, openExternalUrl } from "@/lib/desktop-runtime";
 import { isJobActive, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
 import { odooAccessUrl, odooServerStopped, type OdooDebugMode } from "@/lib/projects";
-import type { IotBoxStatus, Job, MailpitStatus, MobileAccessStatus, OdooServerState, Project, Toast } from "@/lib/types";
+import type {
+  IotBoxStatus,
+  Job,
+  MailpitStatus,
+  MobileAccessStatus,
+  OdooServerState,
+  Project,
+  Toast,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { MobileAccessDialog } from "@/components/projects/mobile-access-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -116,11 +125,8 @@ export function ProjectHeader({
       schedule(refreshSystemStatus, 1600);
     }
   }
+  const [mobileOpen, setMobileOpen] = useState(false);
   const mobileHere = Boolean(mobile?.running && mobile.project === selectedProject?.name);
-  async function requestMobileAccess(action: "start_mobile_access" | "stop_mobile_access") {
-    const job = await createJob(action, { project: selectedProject?.name });
-    if (job) schedule(refreshSystemStatus, 2500);
-  }
   async function requestCutOdoo() {
     if (!selectedProject) return;
     const job = await createJob("stop_odoo_server", { project: selectedProject.name });
@@ -348,6 +354,10 @@ export function ProjectHeader({
               <FileCode className="h-4 w-4" />
               En mode debug avec assets
             </DropdownMenu.Item>
+            <DropdownMenu.Item disabled={!selectedProjectOnline} onSelect={() => setMobileOpen(true)}>
+              <Smartphone className="h-4 w-4" />
+              Sur mobile (QR code)
+            </DropdownMenu.Item>
             <DropdownMenu.Separator />
             <DropdownMenu.Label>E-mails des bases neutralisées</DropdownMenu.Label>
             {mailpit?.running ? (
@@ -359,30 +369,6 @@ export function ProjectHeader({
               <DropdownMenu.Item disabled={!mailpit?.can_start || loading} onSelect={requestStartMailpit}>
                 <Mail className="h-4 w-4" />
                 {mailpit?.installed ? "Démarrer Mailpit" : "Installer Mailpit"}
-              </DropdownMenu.Item>
-            )}
-            <DropdownMenu.Separator />
-            <DropdownMenu.Label>Ouvrir sur mobile</DropdownMenu.Label>
-            {mobileHere ? (
-              <>
-                <DropdownMenu.Label className="h-auto break-all font-mono text-xs select-text">
-                  {odooAccessUrl(selectedProject && { ...selectedProject, url: mobile?.url ?? "" }, selectedDb)}
-                </DropdownMenu.Label>
-                <DropdownMenu.Item disabled={loading} onSelect={() => void requestMobileAccess("stop_mobile_access")}>
-                  <Square className="h-4 w-4" />
-                  Fermer l&apos;accès
-                </DropdownMenu.Item>
-              </>
-            ) : (
-              <DropdownMenu.Item
-                disabled={!mobile?.can_start || loading}
-                title="Pour un appareil sur le même Wi-Fi. Les échanges ne sont pas chiffrés : à réserver à un réseau de confiance."
-                onSelect={() => void requestMobileAccess("start_mobile_access")}
-              >
-                <Smartphone className="h-4 w-4" />
-                {mobile?.running
-                  ? `Passer sur ce projet (ouvert pour ${mobile.project})`
-                  : "Ouvrir pour un appareil du même Wi-Fi"}
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Separator />
@@ -439,6 +425,15 @@ export function ProjectHeader({
           </DropdownMenu.Content>
         </DropdownMenu.Root>
       </div>
+      <MobileAccessDialog
+        createJob={createJob}
+        db={selectedDb !== "postgres" ? selectedDb : ""}
+        mobile={mobile}
+        onOpenChange={setMobileOpen}
+        open={mobileOpen}
+        project={selectedProject}
+        refreshSystemStatus={refreshSystemStatus}
+      />
       <p id="odoo-opening-target" className="mt-1 max-w-[22rem] break-all text-xs text-muted-foreground">
         {selectedDb && selectedDb !== "postgres" ? (
           <>

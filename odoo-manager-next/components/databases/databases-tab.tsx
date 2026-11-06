@@ -19,6 +19,7 @@ import {
   PlusCircle,
   ShieldCheck,
   Terminal,
+  Smartphone,
   Timer,
   Trash2,
   TriangleAlert,
@@ -28,7 +29,15 @@ import {
 import { api } from "@/lib/api";
 import { formatNameList, statusVariant } from "@/lib/format";
 import { deletionLabel, deletionMoment, type RetentionTone } from "@/lib/retention";
-import type { DatabaseMenuAction, DependencyReport, PendingDatabaseAction, Project } from "@/lib/types";
+import { MobileAccessDialog } from "@/components/projects/mobile-access-dialog";
+import type {
+  DatabaseMenuAction,
+  DependencyReport,
+  Job,
+  MobileAccessStatus,
+  PendingDatabaseAction,
+  Project,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,13 +80,16 @@ function storedDatabaseViews(): Record<string, DatabaseView> {
 type DatabasesTabProps = {
   workspace: string;
   chooseDatabase: (db: string, projectName?: string | undefined) => void;
+  createJob: (action: string, payload?: Record<string, unknown>) => Promise<Job | null>;
   dependencyReport: DependencyReport | null;
   executeDatabaseAction: (action: DatabaseMenuAction) => void;
   extendDatabaseRetention: (project: string, db: string) => void;
   loading: boolean;
+  mobile: MobileAccessStatus | undefined;
   odooDatabases: string[];
   openingPostgresql: boolean;
   openUrl: (url?: string) => Promise<void>;
+  refreshSystemStatus: () => Promise<void>;
   selectedDb: string;
   selectedProject: Project | undefined;
   selectedProjectReady: boolean;
@@ -90,13 +102,16 @@ type DatabasesTabProps = {
 export function DatabasesTab({
   workspace,
   chooseDatabase,
+  createJob,
   dependencyReport,
   executeDatabaseAction,
   extendDatabaseRetention,
   loading,
+  mobile,
   odooDatabases,
   openingPostgresql,
   openUrl,
+  refreshSystemStatus,
   selectedDb,
   selectedProject,
   selectedProjectReady,
@@ -106,6 +121,7 @@ export function DatabasesTab({
   setRestoreDbOpen,
 }: DatabasesTabProps) {
   const [postgresDetailsOpen, setPostgresDetailsOpen] = useState(false);
+  const [mobileDb, setMobileDb] = useState<string | null>(null);
   // Bases dont la restauration s'est arrêtée avant la fin : relu à l'ouverture du projet et quand
   // la liste des bases change (suppression, nouvelle restauration).
   const [databaseVersions, setDatabaseVersions] = useState<{
@@ -292,7 +308,7 @@ export function DatabasesTab({
                     )}
                     onClick={() => chooseDatabase(db)}
                   >
-                    <div className="flex min-w-0 items-start gap-2 pr-24">
+                    <div className="flex min-w-0 items-start gap-2 pr-44">
                       <span className={cn("min-w-0 break-all", REFINED_IDENTIFIER)}>{db}</span>
                       {db === selectedDb && (
                         <CheckCircle2 aria-label="Base de travail" className="h-4 w-4 shrink-0 text-primary" />
@@ -334,104 +350,117 @@ export function DatabasesTab({
                       )}
                     </div>
                   </DatabaseItem>
-                  <DropdownMenu.Root modal={false}>
-                    <DropdownMenu.Trigger>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className={cn("absolute right-2", listView ? "top-1/2 -translate-y-1/2" : "top-2")}
-                        disabled={loading}
-                        title={`Actions sur ${db}`}
-                        aria-label={`Actions sur ${db}`}
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                        Actions
-                      </Button>
-                    </DropdownMenu.Trigger>
-                    <DropdownMenu.Content align="end" className="w-[min(22rem,calc(100vw-2rem))]">
-                      <DropdownMenu.Label className="truncate" title={db}>
-                        Actions sur {db}
-                      </DropdownMenu.Label>
-                      <DropdownMenu.Separator />
-                      <DropdownMenu.Label>Entretenir la base</DropdownMenu.Label>
-                      <DropdownMenu.Item
-                        className="h-auto items-start py-2"
-                        onSelect={() => runDatabaseAction(db, "regenerate_assets")}
-                      >
-                        <Paintbrush className="mt-0.5 h-4 w-4 shrink-0" />
-                        <span>
-                          <span className="block">Régénérer les ressources d’affichage</span>
-                          <span className="block text-xs text-muted-foreground">Reconstruit les assets de la base</span>
-                        </span>
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "reset_translations")}>
-                        <Languages className="h-4 w-4" />
-                        Réinitialiser les traductions
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "fix_expiration")}>
-                        <CalendarClock className="h-4 w-4" />
-                        Corriger une base expirée
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Separator />
-                      <DropdownMenu.Label>Sécuriser et préparer</DropdownMenu.Label>
-                      <DropdownMenu.Item
-                        className="h-auto items-start py-2"
-                        onSelect={() => runDatabaseAction(db, "neutralize")}
-                      >
-                        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-                        <span>
-                          <span className="block">Neutraliser et contrôler</span>
-                          <span className="block text-xs text-muted-foreground">
-                            Réduit les risques d’envois et d’automatisations
+                  <div className={cn("absolute right-2 flex gap-1", listView ? "top-1/2 -translate-y-1/2" : "top-2")}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      title={`Ouvrir ${db} sur un téléphone`}
+                      aria-label={`Ouvrir ${db} sur un téléphone`}
+                      onClick={() => setMobileDb(db)}
+                    >
+                      <Smartphone className="h-4 w-4" />
+                      Mobile
+                    </Button>
+                    <DropdownMenu.Root modal={false}>
+                      <DropdownMenu.Trigger>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={loading}
+                          title={`Actions sur ${db}`}
+                          aria-label={`Actions sur ${db}`}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                          Actions
+                        </Button>
+                      </DropdownMenu.Trigger>
+                      <DropdownMenu.Content align="end" className="w-[min(22rem,calc(100vw-2rem))]">
+                        <DropdownMenu.Label className="truncate" title={db}>
+                          Actions sur {db}
+                        </DropdownMenu.Label>
+                        <DropdownMenu.Separator />
+                        <DropdownMenu.Label>Entretenir la base</DropdownMenu.Label>
+                        <DropdownMenu.Item
+                          className="h-auto items-start py-2"
+                          onSelect={() => runDatabaseAction(db, "regenerate_assets")}
+                        >
+                          <Paintbrush className="mt-0.5 h-4 w-4 shrink-0" />
+                          <span>
+                            <span className="block">Régénérer les ressources d’affichage</span>
+                            <span className="block text-xs text-muted-foreground">
+                              Reconstruit les assets de la base
+                            </span>
                           </span>
-                        </span>
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "admin_password")}>
-                        <KeyRound className="h-4 w-4" />
-                        Modifier le mot de passe administrateur
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "test_user")}>
-                        <UserCheck className="h-4 w-4" />
-                        Configurer un utilisateur de recette
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Separator />
-                      <DropdownMenu.Label>Gérer la base</DropdownMenu.Label>
-                      {deletion && selectedProject && (
-                        <DropdownMenu.Item onSelect={() => extendDatabaseRetention(selectedProject.name, db)}>
-                          <CalendarPlus className="h-4 w-4" />
-                          Prolonger la conservation de 30 jours
                         </DropdownMenu.Item>
-                      )}
-                      <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "dependencies")}>
-                        <PackageX className="h-4 w-4" />
-                        Vérifier les modules manquants
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item
-                        disabled={!selectedProjectReady}
-                        onSelect={() => runDatabaseAction(db, "duplicate")}
-                      >
-                        <Copy className="h-4 w-4" />
-                        Dupliquer la base
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Separator />
-                      <DropdownMenu.Sub>
-                        <DropdownMenu.SubTrigger>Actions avancées</DropdownMenu.SubTrigger>
-                        <DropdownMenu.SubContent>
-                          <DropdownMenu.Item
-                            disabled={selectedProject?.postgres_status !== "running" || openingPostgresql}
-                            onSelect={() => runDatabaseAction(db, "psql")}
-                          >
-                            <Terminal className="h-4 w-4" />
-                            Ouvrir PostgreSQL (psql)
+                        <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "reset_translations")}>
+                          <Languages className="h-4 w-4" />
+                          Réinitialiser les traductions
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "fix_expiration")}>
+                          <CalendarClock className="h-4 w-4" />
+                          Corriger une base expirée
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Separator />
+                        <DropdownMenu.Label>Sécuriser et préparer</DropdownMenu.Label>
+                        <DropdownMenu.Item
+                          className="h-auto items-start py-2"
+                          onSelect={() => runDatabaseAction(db, "neutralize")}
+                        >
+                          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                          <span>
+                            <span className="block">Neutraliser et contrôler</span>
+                            <span className="block text-xs text-muted-foreground">
+                              Réduit les risques d’envois et d’automatisations
+                            </span>
+                          </span>
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "admin_password")}>
+                          <KeyRound className="h-4 w-4" />
+                          Modifier le mot de passe administrateur
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "test_user")}>
+                          <UserCheck className="h-4 w-4" />
+                          Configurer un utilisateur de recette
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Separator />
+                        <DropdownMenu.Label>Gérer la base</DropdownMenu.Label>
+                        {deletion && selectedProject && (
+                          <DropdownMenu.Item onSelect={() => extendDatabaseRetention(selectedProject.name, db)}>
+                            <CalendarPlus className="h-4 w-4" />
+                            Prolonger la conservation de 30 jours
                           </DropdownMenu.Item>
-                        </DropdownMenu.SubContent>
-                      </DropdownMenu.Sub>
-                      <DropdownMenu.Item color="red" onSelect={() => runDatabaseAction(db, "drop")}>
-                        <Trash2 className="h-4 w-4" />
-                        Supprimer la base
-                      </DropdownMenu.Item>
-                    </DropdownMenu.Content>
-                  </DropdownMenu.Root>
+                        )}
+                        <DropdownMenu.Item onSelect={() => runDatabaseAction(db, "dependencies")}>
+                          <PackageX className="h-4 w-4" />
+                          Vérifier les modules manquants
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item
+                          disabled={!selectedProjectReady}
+                          onSelect={() => runDatabaseAction(db, "duplicate")}
+                        >
+                          <Copy className="h-4 w-4" />
+                          Dupliquer la base
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Separator />
+                        <DropdownMenu.Sub>
+                          <DropdownMenu.SubTrigger>Actions avancées</DropdownMenu.SubTrigger>
+                          <DropdownMenu.SubContent>
+                            <DropdownMenu.Item
+                              disabled={selectedProject?.postgres_status !== "running" || openingPostgresql}
+                              onSelect={() => runDatabaseAction(db, "psql")}
+                            >
+                              <Terminal className="h-4 w-4" />
+                              Ouvrir PostgreSQL (psql)
+                            </DropdownMenu.Item>
+                          </DropdownMenu.SubContent>
+                        </DropdownMenu.Sub>
+                        <DropdownMenu.Item color="red" onSelect={() => runDatabaseAction(db, "drop")}>
+                          <Trash2 className="h-4 w-4" />
+                          Supprimer la base
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Root>
+                  </div>
                 </div>
               );
             })}
@@ -488,6 +517,15 @@ export function DatabasesTab({
           )}
         </RefinedPanel>
       </div>
+      <MobileAccessDialog
+        createJob={createJob}
+        db={mobileDb ?? ""}
+        mobile={mobile}
+        onOpenChange={(open) => !open && setMobileDb(null)}
+        open={mobileDb !== null}
+        project={selectedProject}
+        refreshSystemStatus={refreshSystemStatus}
+      />
     </TabsContent>
   );
 }
