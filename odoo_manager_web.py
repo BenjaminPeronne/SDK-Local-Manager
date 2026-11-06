@@ -1021,6 +1021,7 @@ def mailpit_status(docker, traefik):
 
 # (projet, version, recette) de la box, relus par `docker inspect` une fois par conteneur et non à chaque rafraîchissement.
 IOTBOX_OWNER = None
+IOTBOX_START_SECONDS = 300
 
 
 def iotbox_owner(state):
@@ -4011,6 +4012,33 @@ def start_iotbox_job(job, project):
         job.add("la box. Libère-le puis redémarre l'IoT Box.")
 
 
+def iotbox_failure(job, message, detail=""):
+    """Erreur à lever, après avoir mis dans l'activité ce que la box a écrit : sans cela, rien à diagnostiquer."""
+    _code, logs = run_capture(docker_command(SETTINGS, "logs", "--tail", "30", iot_box.IOTBOX_CONTAINER), timeout=15)
+    for line in f"{logs}\n{detail}".splitlines():
+        job.add(line)
+    return RuntimeError(message)
+
+
+def connect_iotbox(job, version, pairing):
+    """Envoie le jeton à la box, qui peut mettre plusieurs minutes à démarrer sur une machine lente."""
+    deadline = time.monotonic() + IOTBOX_START_SECONDS
+    told_slow = False
+    detail = ""
+    while time.monotonic() < deadline:
+        if container_status(iot_box.IOTBOX_CONTAINER) != "running":
+            raise iotbox_failure(job, "L'IoT Box s'est arrêtée pendant son démarrage. Voir son journal ci-dessus.")
+        code, output = run_capture(docker_command(SETTINGS, *iot_box.connect_command(version, pairing)), timeout=30)
+        detail = iot_box.connect_failure(output) if code == 0 else output
+        if code == 0 and not detail:
+            return
+        if not told_slow and deadline - time.monotonic() < IOTBOX_START_SECONDS - 30:
+            told_slow = True
+            job.add("L'IoT Box démarre encore, cela peut prendre quelques minutes...")
+        time.sleep(2)
+    raise iotbox_failure(job, "L'IoT Box ne répond toujours pas après 5 minutes. Voir son journal ci-dessus.", detail)
+
+
 def link_iotbox_job(job, project, db_name):
     """Relie la box à une base, comme l'assistant « Connecter une IoT Box » d'Odoo, sans passer par sa page."""
     project = validate_project(project)
@@ -4055,15 +4083,7 @@ def link_iotbox_job(job, project, db_name):
         project, db_name, token, parameters.get("database.uuid", ""), parameters.get("database.enterprise_code", "")
     )
     job.add(f"Connexion de l'IoT Box à {db_name}...")
-    failure = "La box ne répond pas encore."
-    for _ in range(30):  # la box peut encore démarrer
-        code, output = run_capture(docker_command(SETTINGS, *iot_box.connect_command(version, pairing)), timeout=30)
-        failure = iot_box.connect_failure(output) if code == 0 else failure
-        if code == 0 and not failure:
-            break
-        time.sleep(2)
-    else:
-        raise RuntimeError(failure)
+    connect_iotbox(job, version, pairing)
 
     # La box se présente sous son numéro de série (19) ou son adresse MAC (17, 18) ; son « ip » dans Odoo devient
     # le nom de son certificat dès qu'elle en a un.
@@ -4085,7 +4105,8 @@ def link_iotbox_job(job, project, db_name):
     )
     identifiers = iot_box.box_identifiers(mac, serial)
     job.add("Attente de la box dans Odoo...")
-    for _ in range(45):  # la box redémarre puis se présente à la base
+    deadline = time.monotonic() + IOTBOX_START_SECONDS
+    while time.monotonic() < deadline:  # la box redémarre puis se présente à la base
         time.sleep(2)
         code, name = psql_capture(
             project, f"select name from iot_box where identifier in ({identifiers}) limit 1;", db_name
@@ -4094,8 +4115,8 @@ def link_iotbox_job(job, project, db_name):
             job.add(f"L'IoT Box est reliée à {db_name} : elle apparaît dans Odoo sous « {name.strip()} » (app IoT).")
             job.add("Les imprimantes du réseau y apparaissent en quelques minutes, si elles sont allumées.")
             return
-    raise RuntimeError(
-        f"La box n'apparaît pas dans {db_name} après une minute et demie. Ouvre la page de l'IoT Box pour voir son état."
+    raise iotbox_failure(
+        job, f"La box n'apparaît pas dans {db_name} après 5 minutes. Ouvre la page de l'IoT Box pour voir son état."
     )
 
 

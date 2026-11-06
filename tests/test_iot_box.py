@@ -77,6 +77,42 @@ class IotBoxPairingTests(unittest.TestCase):
         self.assertIn("répondu", iot_box.connect_failure("<html>"))
 
 
+class IotBoxConnectTests(unittest.TestCase):
+    def setUp(self):
+        self.lines = []
+        self.job = type("Job", (), {"add": lambda _job, line: self.lines.append(line)})()
+        patcher = patch.object(web.time, "sleep")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_box_that_stops_is_reported_at_once_with_its_journal(self):
+        with (
+            patch.object(web, "container_status", return_value="exited"),
+            patch.object(web, "run_capture", return_value=(0, "cp: permission denied")) as run_capture,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "s'est arrêtée"):
+                web.connect_iotbox(self.job, "19.0", "jeton")
+        self.assertEqual(run_capture.call_count, 1)
+        self.assertIn("cp: permission denied", self.lines)
+
+    def test_a_slow_box_is_waited_for(self):
+        answers = [(7, "connexion refusée"), (7, "connexion refusée"), (0, '{"result": {"status": "success"}}')]
+        with (
+            patch.object(web, "container_status", return_value="running"),
+            patch.object(web, "run_capture", side_effect=answers),
+        ):
+            web.connect_iotbox(self.job, "19.0", "jeton")
+
+    def test_giving_up_shows_the_real_error(self):
+        with (
+            patch.object(web, "IOTBOX_START_SECONDS", 0.001),
+            patch.object(web, "container_status", return_value="running"),
+            patch.object(web, "run_capture", return_value=(7, "wsl: erreur précise")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "après 5 minutes"):
+                web.connect_iotbox(self.job, "19.0", "jeton")
+
+
 class IotBoxJobTests(unittest.TestCase):
     def test_link_needs_the_project_started(self):
         with (
