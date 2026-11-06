@@ -1762,6 +1762,7 @@ export default function Home() {
                 loading={loading}
                 mailpit={systemStatus?.mailpit}
                 iotbox={systemStatus?.iotbox}
+                mobile={systemStatus?.mobile}
                 openingOdoo={openingOdoo}
                 pendingSelectedProjectArrival={pendingSelectedProjectArrival}
                 projectHeaderCompact={projectHeaderCompact}

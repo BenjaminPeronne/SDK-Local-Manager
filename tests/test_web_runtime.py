@@ -1224,6 +1224,50 @@ class EventWatchCostTests(unittest.TestCase):
         self.assertEqual({"A": ["a"], "B": ["b"], "CACHED": ["cached"], "C": ["c"]}, result)
         self.assertEqual({"A", "B", "C"}, {call.args[0] for call in list_databases.call_args_list})
 
+    def test_mobile_access_opens_only_the_project_on_the_wifi_address(self):
+        job = Mock()
+        with (
+            patch.object(web, "validate_project", return_value="DEMO"),
+            patch.object(web, "docker_status", return_value={"running": True}),
+            patch.object(web, "container_status", side_effect=lambda name: "running" if name == "odoo-DEMO" else "absent"),
+            patch.object(web.iot_box, "local_ip", return_value="192.168.1.20"),
+            patch.object(web, "host_port_in_use", return_value=False),
+            patch.object(web, "docker_command", side_effect=lambda _settings, *args: list(args)),
+            patch.object(web, "run_stream", return_value=0) as run_stream,
+        ):
+            web.start_mobile_access_job(job, "DEMO")
+
+        command = run_stream.call_args.args[1]
+        self.assertIn("192.168.1.20:8069:8069", command)
+        self.assertEqual("TCP:odoo-DEMO:8069", command[-1])
+        self.assertIn("--rm", command)
+        self.assertNotIn("--restart", command)
+
+    def test_mobile_access_explains_a_machine_without_network(self):
+        with (
+            patch.object(web, "validate_project", return_value="DEMO"),
+            patch.object(web, "docker_status", return_value={"running": True}),
+            patch.object(web, "container_status", return_value="running"),
+            patch.object(web.iot_box, "local_ip", return_value=""),
+            patch.object(web, "run_stream") as run_stream,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Wi-Fi"):
+                web.start_mobile_access_job(Mock(), "DEMO")
+        run_stream.assert_not_called()
+
+    def test_cutting_odoo_stops_only_the_server_and_forgets_its_cached_state(self):
+        service = Mock()
+        job = Mock()
+        web.OVERVIEW_ODOO_SERVERS_CACHE["DEMO"] = (0, "running")
+        with patch.object(web, "project_service", return_value=service), patch.object(
+            web, "validate_project", return_value="DEMO"
+        ):
+            web.stop_odoo_server_job(job, "DEMO")
+
+        service.stop_odoo_server.assert_called_once_with("DEMO", log=job.add)
+        service.stop_project.assert_not_called()
+        self.assertNotIn("DEMO", web.OVERVIEW_ODOO_SERVERS_CACHE)
+
     def test_odoo_server_state_is_cached_but_an_unanswered_docker_is_retried(self):
         web.invalidate_overview_odoo_servers()
         self.addCleanup(web.invalidate_overview_odoo_servers)

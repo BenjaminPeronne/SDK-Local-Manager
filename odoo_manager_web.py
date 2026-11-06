@@ -308,9 +308,12 @@ API_ACTIONS = (
     "apply_docker_resources",
     "start_iotbox",
     "start_mailpit",
+    "start_mobile_access",
     "start_project",
     "stop_iotbox",
     "stop_mailpit",
+    "stop_mobile_access",
+    "stop_odoo_server",
     "stop_project",
     "switch_repository_branch",
     "uninstall_module",
@@ -1019,6 +1022,15 @@ def mailpit_status(docker, traefik):
     }
 
 
+# Porte vers le seul conteneur Odoo choisi : Traefik reste réservé à ce poste, le téléphone ne pouvant pas résoudre
+# les adresses *.localhost. Pas de redémarrage automatique : l'accès se referme avec Docker. Le nom ne commence pas
+# par « odoo- », réservé aux conteneurs des projets (un projet peut s'appeler « mobile »).
+MOBILE_CONTAINER = "mobile-access"
+MOBILE_IMAGE = "alpine/socat@sha256:beb4a68d9e4fe6b0f21ea774a0fde6c31f580dde6368939ed70100c5385b015e"  # 1.8.0.3
+MOBILE_PORT = 8069
+MOBILE_PROJECT_LABEL = "odoo-manager.mobile.project"
+MOBILE_URL_LABEL = "odoo-manager.mobile.url"
+
 # (projet, version, recette) de la box, relus par `docker inspect` une fois par conteneur et non à chaque rafraîchissement.
 IOTBOX_OWNER = None
 IOTBOX_START_SECONDS = 300
@@ -1074,6 +1086,29 @@ def iotbox_status(docker, traefik):
     }
 
 
+def mobile_access_owner():
+    """(projet, adresse) de l'accès mobile ouvert, relus sur son conteneur."""
+    code, output = run_capture(
+        docker_command(
+            SETTINGS,
+            "inspect",
+            "--format",
+            f'{{{{index .Config.Labels "{MOBILE_PROJECT_LABEL}"}}}}|{{{{index .Config.Labels "{MOBILE_URL_LABEL}"}}}}',
+            MOBILE_CONTAINER,
+        ),
+        timeout=5,
+        stdout_only=True,
+    )
+    return tuple(output.strip().split("|")) if code == 0 and output.count("|") == 1 else ("", "")
+
+
+def mobile_access_status(docker):
+    """Accès d'un téléphone à Odoo : un seul projet à la fois, ouvert à la demande."""
+    running = docker["running"] and container_status(MOBILE_CONTAINER) == "running"
+    project, url = mobile_access_owner() if running else ("", "")
+    return {"running": running, "project": project, "url": url, "can_start": docker["running"]}
+
+
 def abandoned_staging_snapshot():
     """Dossiers de créations interrompues, proposés au nettoyage par l'interface."""
     entries = abandoned_staging_entries(WORKSPACE)
@@ -1092,6 +1127,7 @@ def system_status_snapshot(docker=None):
         "traefik": traefik,
         "mailpit": mailpit_status(docker, traefik),
         "iotbox": iotbox_status(docker, traefik),
+        "mobile": mobile_access_status(docker),
         "workspace": str(WORKSPACE),
         "workspace_exists": safe_path_is_dir(WORKSPACE),
         # Bases clients copiées chez Apple : signalé en permanence, pas seulement après une analyse du disque.
@@ -3348,6 +3384,7 @@ JOB_CANCEL_POLICIES = {
         "Les conteneurs et le serveur Odoo démarrés par cette action sont arrêtés ; ce qui tournait déjà reste démarré.",
     ),
     "stop_project_job": (True, "L'arrêt est interrompu : les conteneurs déjà arrêtés le restent."),
+    "stop_odoo_server_job": (False, "arrêt court du serveur Odoo."),
     "update_project_job": (
         True,
         "Le téléchargement en cours est interrompu. Un git pull commencé va d'abord à son terme.",
@@ -3436,6 +3473,8 @@ JOB_CANCEL_POLICIES = {
     "prune_docker_build_cache_job": (False, "opération courte de Docker."),
     "start_mailpit_job": (True, "Le téléchargement de l'image s'arrête ; relance l'action pour le reprendre."),
     "stop_mailpit_job": (False, "arrêt court d'un conteneur."),
+    "start_mobile_access_job": (True, "Le téléchargement de l'image s'arrête ; relance l'action pour la reprendre."),
+    "stop_mobile_access_job": (False, "arrêt court d'un conteneur."),
     "start_iotbox_job": (True, "La préparation de la box s'arrête ; relance l'action pour la reprendre."),
     "stop_iotbox_job": (False, "arrêt court d'un conteneur."),
     "link_iotbox_job": (True, "La connexion s'arrête ; une installation du module IoT déjà lancée va à son terme."),
@@ -3464,6 +3503,7 @@ def refresh_after_job():
 JOB_EXPECTED_DURATIONS = {
     "start_project_job": 40,
     "stop_project_job": 15,
+    "stop_odoo_server_job": 5,
     "update_project_job": 60,
     "update_all_projects_job": 180,
     "neutralize_database_job": 60,
@@ -3477,6 +3517,8 @@ JOB_EXPECTED_DURATIONS = {
     "install_git_job": 120,
     "start_mailpit_job": 40,
     "stop_mailpit_job": 10,
+    "start_mobile_access_job": 15,
+    "stop_mobile_access_job": 5,
     "start_iotbox_job": 30,
     "stop_iotbox_job": 10,
     "link_iotbox_job": 90,
@@ -3944,6 +3986,59 @@ def stop_mailpit_job(job):
         return
     if run_stream(job, docker_command(SETTINGS, "stop", MAILPIT_CONTAINER)) != 0:
         raise RuntimeError("Docker n'a pas pu arrêter Mailpit.")
+
+
+def start_mobile_access_job(job, project):
+    project = validate_project(project)
+    if not docker_status(SETTINGS)["running"]:
+        raise RuntimeError("Docker doit être démarré pour ouvrir l'accès mobile.")
+    if container_status(f"odoo-{project}") != "running":
+        raise RuntimeError(f"Démarre {project} avant d'ouvrir l'accès mobile.")
+    # shortcut: sous WSL, cette adresse n'est pas celle du Wi-Fi de Windows, à traiter si le besoin apparaît là-bas.
+    ip = iot_box.local_ip()
+    if not ip:
+        raise RuntimeError("Ce poste n'est relié à aucun réseau : connecte-le au Wi-Fi, puis réessaie.")
+    url = f"http://{ip}:{MOBILE_PORT}/"
+    state = container_status(MOBILE_CONTAINER)
+    if state == "running" and mobile_access_owner() == (project, url):
+        job.add(f"L'accès mobile est déjà ouvert sur {url}")
+        return
+    if state != "absent" and run_stream(job, docker_command(SETTINGS, "rm", "--force", MOBILE_CONTAINER)) != 0:
+        raise RuntimeError("Docker n'a pas pu fermer l'accès mobile précédent.")
+    if host_port_in_use(MOBILE_PORT):
+        raise RuntimeError(f"Le port {MOBILE_PORT} est déjà utilisé sur ce poste : ferme le programme qui l'occupe.")
+    job.add(f"Ouverture de {project} aux appareils du même Wi-Fi...")
+    command = docker_command(
+        SETTINGS,
+        "run",
+        "--detach",
+        "--rm",
+        "--name",
+        MOBILE_CONTAINER,
+        "--network",
+        TRAEFIK_NETWORK,
+        "--publish",
+        f"{ip}:{MOBILE_PORT}:{MOBILE_PORT}",
+        "--label",
+        f"{MOBILE_PROJECT_LABEL}={project}",
+        "--label",
+        f"{MOBILE_URL_LABEL}={url}",
+        MOBILE_IMAGE,
+        f"TCP-LISTEN:{MOBILE_PORT},fork,reuseaddr",
+        f"TCP:odoo-{project}:{MOBILE_PORT}",
+    )
+    if run_stream(job, command) != 0:
+        raise RuntimeError("Docker n'a pas pu ouvrir l'accès mobile.")
+    job.add(f"Odoo est ouvert sur {url}")
+    job.add("Les échanges ne sont pas chiffrés : n'ouvre cet accès que sur un Wi-Fi de confiance et ferme-le ensuite.")
+
+
+def stop_mobile_access_job(job):
+    if container_status(MOBILE_CONTAINER) == "absent":
+        job.add("L'accès mobile est déjà fermé.")
+        return
+    if run_stream(job, docker_command(SETTINGS, "rm", "--force", MOBILE_CONTAINER)) != 0:
+        raise RuntimeError("Docker n'a pas pu fermer l'accès mobile.")
 
 
 def start_iotbox_job(job, project):
@@ -5686,6 +5781,15 @@ def delete_module_file_entry(job, project, module_name):
 def stop_project_job(job, project):
     project = validate_project(project)
     project_service().stop_project(project, log=job.add)
+
+
+def stop_odoo_server_job(job, project):
+    """Coupure simulée : conteneurs et bases restent démarrés, les navigateurs reçoivent une erreur de connexion."""
+    project = validate_project(project)
+    project_service().stop_odoo_server(project, log=job.add)
+    with OVERVIEW_ODOO_SERVERS_CACHE_LOCK:
+        OVERVIEW_ODOO_SERVERS_CACHE.pop(project, None)
+    job.add("Odoo ne répond plus : teste le mode hors ligne, puis utilise Rétablir Odoo dans le menu Outils.")
 
 
 def addon_links_wsl_distribution(*directories, creating=False):
@@ -9279,6 +9383,7 @@ JOB_ACTIONS = {
     "switch_repository_branch": switch_repository_branch_action,
     "start_project": project_job("Démarrer {project}", start_project_job),
     "stop_project": project_job("Arrêter {project}", stop_project_job),
+    "stop_odoo_server": project_job("Couper Odoo sur {project}", stop_odoo_server_job),
     "update_project": project_job("MAJ projet {project}", update_project_job),
     "update_all": lambda _payload: Job("MAJ tous les projets", update_all_projects_job, resources={"*"}),
     "update_all_modules": update_all_modules_action,
@@ -9330,6 +9435,13 @@ JOB_ACTIONS = {
     ),
     "start_mailpit": lambda _payload: Job("Démarrer Mailpit", start_mailpit_job, resources={"mailpit"}),
     "stop_mailpit": lambda _payload: Job("Arrêter Mailpit", stop_mailpit_job, resources={"mailpit"}),
+    "start_mobile_access": lambda payload: Job(
+        f"Ouvrir {payload_project(payload)} sur mobile",
+        start_mobile_access_job,
+        (payload_project(payload),),
+        resources={"mobile"},
+    ),
+    "stop_mobile_access": lambda _payload: Job("Fermer l'accès mobile", stop_mobile_access_job, resources={"mobile"}),
     "start_iotbox": lambda payload: Job(
         "Démarrer l'IoT Box", start_iotbox_job, (str(payload.get("project", "")),), resources={"iotbox"}
     ),

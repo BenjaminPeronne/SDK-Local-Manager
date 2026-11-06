@@ -13,13 +13,16 @@ import {
   Play,
   Plug,
   RefreshCcw,
+  Smartphone,
   Square,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { api, waitForJob } from "@/lib/api";
 import { isDesktopRuntime, openExternalUrl } from "@/lib/desktop-runtime";
 import { isJobActive, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
 import { odooAccessUrl, odooServerStopped, type OdooDebugMode } from "@/lib/projects";
-import type { IotBoxStatus, Job, MailpitStatus, OdooServerState, Project, Toast } from "@/lib/types";
+import type { IotBoxStatus, Job, MailpitStatus, MobileAccessStatus, OdooServerState, Project, Toast } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +33,7 @@ type ProjectHeaderProps = {
   loading: boolean;
   mailpit: MailpitStatus | undefined;
   iotbox: IotBoxStatus | undefined;
+  mobile: MobileAccessStatus | undefined;
   openingOdoo: boolean;
   pendingSelectedProjectArrival: Job | undefined;
   projectHeaderCompact: boolean;
@@ -55,6 +59,7 @@ export function ProjectHeader({
   loading,
   mailpit,
   iotbox,
+  mobile,
   openingOdoo,
   pendingSelectedProjectArrival,
   projectHeaderCompact,
@@ -110,6 +115,16 @@ export function ProjectHeader({
       schedule(refreshOverview, 1200);
       schedule(refreshSystemStatus, 1600);
     }
+  }
+  const mobileHere = Boolean(mobile?.running && mobile.project === selectedProject?.name);
+  async function requestMobileAccess(action: "start_mobile_access" | "stop_mobile_access") {
+    const job = await createJob(action, { project: selectedProject?.name });
+    if (job) schedule(refreshSystemStatus, 2500);
+  }
+  async function requestCutOdoo() {
+    if (!selectedProject) return;
+    const job = await createJob("stop_odoo_server", { project: selectedProject.name });
+    if (job) schedule(refreshOverview, 2000);
   }
   // Relit l'état du serveur Odoo juste avant d'ouvrir : l'aperçu peut dater de quelques secondes.
   async function ensureOdooServer(project: Project): Promise<"ready" | "restarted" | "failed"> {
@@ -214,6 +229,12 @@ export function ProjectHeader({
               Odoo {selectedProject.odoo_version}
             </Badge>
           )
+        )}
+        {mobileHere && (
+          <Badge className="mt-0.5 shrink-0" variant="outline" title="Odoo est visible des appareils du même Wi-Fi.">
+            <Smartphone className="h-3.5 w-3.5" />
+            Ouvert au Wi-Fi
+          </Badge>
         )}
         {tabs && selectedProject && !pendingSelectedProjectArrival && (
           <span className="mt-1 inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground">
@@ -338,6 +359,43 @@ export function ProjectHeader({
               <DropdownMenu.Item disabled={!mailpit?.can_start || loading} onSelect={requestStartMailpit}>
                 <Mail className="h-4 w-4" />
                 {mailpit?.installed ? "Démarrer Mailpit" : "Installer Mailpit"}
+              </DropdownMenu.Item>
+            )}
+            <DropdownMenu.Separator />
+            <DropdownMenu.Label>Ouvrir sur mobile</DropdownMenu.Label>
+            {mobileHere ? (
+              <>
+                <DropdownMenu.Label className="h-auto break-all font-mono text-xs select-text">
+                  {odooAccessUrl(selectedProject && { ...selectedProject, url: mobile?.url ?? "" }, selectedDb)}
+                </DropdownMenu.Label>
+                <DropdownMenu.Item disabled={loading} onSelect={() => void requestMobileAccess("stop_mobile_access")}>
+                  <Square className="h-4 w-4" />
+                  Fermer l&apos;accès
+                </DropdownMenu.Item>
+              </>
+            ) : (
+              <DropdownMenu.Item
+                disabled={!mobile?.can_start || loading}
+                title="Pour un appareil sur le même Wi-Fi. Les échanges ne sont pas chiffrés : à réserver à un réseau de confiance."
+                onSelect={() => void requestMobileAccess("start_mobile_access")}
+              >
+                <Smartphone className="h-4 w-4" />
+                {mobile?.running
+                  ? `Passer sur ce projet (ouvert pour ${mobile.project})`
+                  : "Ouvrir pour un appareil du même Wi-Fi"}
+              </DropdownMenu.Item>
+            )}
+            <DropdownMenu.Separator />
+            <DropdownMenu.Label>Tester le mode hors ligne</DropdownMenu.Label>
+            {selectedOdooServerStopped ? (
+              <DropdownMenu.Item disabled={loading} onSelect={requestStartProject}>
+                <Wifi className="h-4 w-4" />
+                Rétablir Odoo
+              </DropdownMenu.Item>
+            ) : (
+              <DropdownMenu.Item disabled={loading} onSelect={() => void requestCutOdoo()}>
+                <WifiOff className="h-4 w-4" />
+                Couper Odoo sans fermer les pages ouvertes
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Separator />

@@ -429,6 +429,16 @@ Les dossiers du projet et `odoo/` ne comptent jamais comme dépôt d'un module :
 Un clic sur la branche d'un dépôt d'`addons-store` (clone, archive SDK ou copie importée) en change. Le code d'un projet est le même pour toutes ses bases : un seul serveur Odoo, un seul chemin des modules. La nouvelle branche vaut donc pour toutes les bases du projet. Avant de confirmer, le gestionnaire liste les bases qui utilisent des modules de ce dépôt et propose de les mettre à jour juste après, une par une (case cochée par défaut ; projet démarré si besoin, modules exclus localement d'une base laissés de côté). Sans cette mise à jour, une base garde les écrans et les données de l'ancienne branche alors que son code a changé. Pour faire tourner deux branches en même temps, chacune sur sa base, il faut deux projets.
 
 
+### Ouvrir Odoo sur mobile
+
+Le menu **Outils** d'un projet démarré ouvre Odoo aux appareils du même Wi-Fi : l'adresse à saisir sur le téléphone s'affiche dans le menu, et **Fermer l'accès** la coupe. Un seul projet à la fois ; l'accès se ferme aussi quand Docker s'arrête. Il passe par le port 8069 de ce poste, sur son adresse Wi-Fi uniquement.
+
+Les échanges ne sont pas chiffrés : mots de passe et données restent lisibles sur le réseau, à n'ouvrir que sur un Wi-Fi de confiance. Si le téléphone n'arrive pas à se connecter, vérifie le pare-feu du poste.
+
+### Tester le mode hors ligne
+
+Le menu **Outils** d'un projet démarré propose **Couper Odoo sans fermer les pages ouvertes** : le serveur Odoo s'arrête, mais les conteneurs et les bases restent démarrés. Les pages Odoo déjà ouvertes (caisse, code-barres…) perdent le serveur comme lors d'une vraie coupure. **Rétablir Odoo**, au même endroit, le relance ; **Ouvrir Odoo** aussi. Les données ne sont pas touchées.
+
 ### IoT Box virtuelle
 
 Le menu **Outils** d'un projet démarré (Odoo 17.0, 18.0 ou 19.0) lance une IoT Box dans le conteneur `iotbox`, page sur `http://iot.localhost/`. Il n'y a qu'une box sur la machine, comme une vraie box reliée à une base à la fois : elle tourne avec le code Odoo du projet choisi, donc dans sa version, et passer sur un autre projet la recrée. Sa configuration (base reliée, numéro de série) reste dans le volume `odoo-manager-iotbox-<version>`.
