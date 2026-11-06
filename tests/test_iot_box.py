@@ -46,6 +46,17 @@ class IotBoxZebraTests(unittest.TestCase):
         self.assertEqual(self.zpl_from_raster(b"^XA^FDBonjour^FS^XZ"), b"^XA^FDBonjour^FS^XZ")
 
 
+class IotBoxLanScanTests(unittest.TestCase):
+    def test_print_port_is_only_tried_when_the_others_are_closed(self):
+        scan = {"__name__": "lan_scan"}
+        with patch.dict("os.environ", {"IOTBOX_LAN": ""}):
+            exec(iot_box.LAN_SCAN, scan)
+        tried = []
+        scan["answers"] = lambda address: tried.append(address[1]) or address[1] == 631
+        self.assertTrue(scan["is_printer"]("192.168.1.41"))
+        self.assertEqual(tried, [631])
+
+
 class IotBoxPairingTests(unittest.TestCase):
     def test_box_python_files_compile(self):
         compile(iot_box.SITECUSTOMIZE, "sitecustomize.py", "exec")

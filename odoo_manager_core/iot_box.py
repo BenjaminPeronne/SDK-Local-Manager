@@ -258,7 +258,8 @@ import socket
 import time
 
 LAN = os.environ.get("IOTBOX_LAN")
-PORTS = (9100, 631, 515)
+# Une Zebra n'accepte qu'une connexion à la fois sur 9100 : la solliciter bloque l'impression. Il vient en dernier.
+PORTS = (631, 515, 9100)
 known = set()
 
 
@@ -268,11 +269,15 @@ def answers(address):
         return probe.connect_ex(address) == 0
 
 
+def is_printer(ip):
+    return any(answers((ip, port)) for port in PORTS)
+
+
 while LAN:
-    addresses = [(f"{LAN}.{host}", port) for host in range(1, 255) for port in PORTS]
+    # Une adresse trouvée le reste et n'est plus jamais sollicitée, même en veille : CUPS l'interroge en SNMP.
+    hosts = [ip for ip in (f"{LAN}.{host}" for host in range(1, 255)) if ip not in known]
     with concurrent.futures.ThreadPoolExecutor(128) as pool:
-        # Une adresse trouvée le reste : une imprimante en veille ne doit pas disparaître d'Odoo.
-        known |= {address[0] for address, found in zip(addresses, pool.map(answers, addresses)) if found}
+        known |= {ip for ip, found in zip(hosts, pool.map(is_printer, hosts)) if found}
     lines = [f"Address {ip}" for ip in sorted(known)] + ["Community public"]
     pathlib.Path("/etc/cups/snmp.conf").write_text("\\n".join(lines) + "\\n")
     time.sleep(60)
