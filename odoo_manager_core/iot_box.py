@@ -49,8 +49,9 @@ RUN apt-get update \\
  && rm -rf /var/lib/apt/lists/*
 RUN . "$PYTHON_VENV_PATH/bin/activate" \\
  && pip install --no-cache-dir netifaces pycups python-escpos websocket-client schedule pyusb pyserial \\
-    pyudev evdev polib zeroconf dbus-python --config-settings=setup-args=-Dtests=false
+    pyudev evdev polib zeroconf PyKCS11 screeninfo dbus-python --config-settings=setup-args=-Dtests=false
 RUN id pi >/dev/null 2>&1 || useradd -M -d /home/pi pi
+RUN usermod -aG lpadmin pi
 COPY sudo /usr/local/bin/
 COPY git /usr/bin/git
 COPY nmcli /usr/bin/nmcli
@@ -64,6 +65,7 @@ COPY sitecustomize.py /tmp/sitecustomize.py
 RUN chmod +x /usr/local/bin/sudo /usr/bin/git /usr/bin/nmcli /usr/bin/systemctl /usr/bin/wlr-randr /usr/lib/cups/backend/socket /usr/local/bin/iotbox-entrypoint \\
  && mv /tmp/sitecustomize.py "$("$PYTHON_VENV_PATH/bin/python" -c 'import sysconfig;print(sysconfig.get_paths()["purelib"])')/" \\
  && mkdir -p /var/odoo /root_bypass_ramdisks/etc/ssl/certs /root_bypass_ramdisks/etc/ssl/private /root_bypass_ramdisks/etc/ld.so.conf.d \\
+ && chown -R pi /etc/ssl/certs /etc/ssl/private /root_bypass_ramdisks \\
  && echo 24.10 > /var/odoo/iotbox_version && echo "IoT Box virtuelle" > /var/odoo/device-model
 EXPOSE 8069
 ENTRYPOINT ["/usr/local/bin/iotbox-entrypoint"]
@@ -300,7 +302,13 @@ cp -a "/home/pi/odoo-source/$handlers/." "/home/pi/odoo/$handlers/"
 cd /home/pi/odoo
 # La page de la box lit ce journal ; Docker garde le sien.
 mkdir -p /var/log/odoo
-exec python odoo-bin -c /home/pi/odoo.conf --http-port=8069 --load="$IOTBOX_MODULES" > >(tee /var/log/odoo/odoo-server.log) 2>&1
+chown -R pi "/home/pi/odoo/$handlers"
+find /home/pi -xdev ! -path /home/pi/odoo ! -path /home/pi/odoo-source -exec chown pi {} +
+# Sans dépôt git ni base Odoo enregistrée chez odoo.com, ces deux journaux ne disent rien d'utile ici.
+exec setpriv --reuid=pi --regid=pi --init-groups env HOME=/home/pi python odoo-bin -c /home/pi/odoo.conf \\
+    --http-port=8069 --http-interface=0.0.0.0 --load="$IOTBOX_MODULES" \\
+    --log-handler=odoo.addons.iot_drivers.tools.upgrade:ERROR \\
+    --log-handler=odoo.addons.iot_drivers.tools.certificate:ERROR > >(tee /var/log/odoo/odoo-server.log) 2>&1
 """
 
 BUILD_FILES = {
