@@ -30,6 +30,22 @@ class IotBoxRecipeTests(unittest.TestCase):
         self.assertNotIn("--publish", iot_box.run_arguments("demo", "19.0", "traefik-local", "192.168.1", False))
 
 
+class IotBoxZebraTests(unittest.TestCase):
+    def setUp(self):
+        backend = {"__name__": "socket_backend"}
+        exec(iot_box.SOCKET_BACKEND, backend)
+        self.zpl_from_raster = backend["zpl_from_raster"]
+
+    def test_receipt_raster_becomes_zpl_with_all_its_slices(self):
+        first = b"\x1d\x76\x30\x00" + (2).to_bytes(2, "little") + (1).to_bytes(2, "little") + b"\xff\x00"
+        second = b"\x1d\x76\x30\x00" + (2).to_bytes(2, "little") + (1).to_bytes(2, "little") + b"\x0f\xf0"
+        cut = b"\x1d\x56\x41\x0a"
+        self.assertEqual(self.zpl_from_raster(first + second + cut), b"^XA^PW16^LL2^FO0,0^GFA,4,4,2,FF000FF0^FS^XZ")
+
+    def test_real_zpl_goes_through_untouched(self):
+        self.assertEqual(self.zpl_from_raster(b"^XA^FDBonjour^FS^XZ"), b"^XA^FDBonjour^FS^XZ")
+
+
 class IotBoxPairingTests(unittest.TestCase):
     def test_box_python_files_compile(self):
         compile(iot_box.SITECUSTOMIZE, "sitecustomize.py", "exec")

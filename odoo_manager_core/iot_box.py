@@ -54,10 +54,14 @@ RUN id pi >/dev/null 2>&1 || useradd -M -d /home/pi pi
 COPY sudo /usr/local/bin/
 COPY git /usr/bin/git
 COPY nmcli /usr/bin/nmcli
+COPY inactive /usr/bin/systemctl
+COPY inactive /usr/bin/wlr-randr
+RUN mv /usr/lib/cups/backend/socket /usr/lib/cups/socket-real
+COPY socket_backend.py /usr/lib/cups/backend/socket
 COPY entrypoint.sh /usr/local/bin/iotbox-entrypoint
 COPY lan_scan.py /usr/local/bin/iotbox-lan-scan
 COPY sitecustomize.py /tmp/sitecustomize.py
-RUN chmod +x /usr/local/bin/sudo /usr/bin/git /usr/bin/nmcli /usr/local/bin/iotbox-entrypoint \\
+RUN chmod +x /usr/local/bin/sudo /usr/bin/git /usr/bin/nmcli /usr/bin/systemctl /usr/bin/wlr-randr /usr/lib/cups/backend/socket /usr/local/bin/iotbox-entrypoint \\
  && mv /tmp/sitecustomize.py "$("$PYTHON_VENV_PATH/bin/python" -c 'import sysconfig;print(sysconfig.get_paths()["purelib"])')/" \\
  && mkdir -p /var/odoo /root_bypass_ramdisks/etc/ssl/certs /root_bypass_ramdisks/etc/ssl/private /root_bypass_ramdisks/etc/ld.so.conf.d \\
  && echo 24.10 > /var/odoo/iotbox_version && echo "IoT Box virtuelle" > /var/odoo/device-model
@@ -83,6 +87,60 @@ NMCLI_SHIM = """\
 #!/bin/sh
 # La page de la box 19 interroge le wifi du Raspberry Pi : la box n'en a pas, le réseau passe par Docker.
 exit 0
+"""
+
+INACTIVE_SHIM = """\
+#!/bin/sh
+# Services (wifi en point d'accès) et écrans du Raspberry Pi, absents ici : répondre « inactif » et jamais « actif ».
+exit 3
+"""
+
+SOCKET_BACKEND = """\
+#!/home/_venv/bin/python -IS
+# Odoo envoie toujours un ticket de caisse en image ESC/POS, qu'une imprimante ZPL (Zebra) ne sait pas lire :
+# CUPS annonce un envoi réussi et rien ne sort. On le traduit en ZPL juste avant le vrai envoi.
+import os
+import subprocess
+import sys
+import tempfile
+
+SOCKET = "/usr/lib/cups/socket-real"
+RASTER = b"\\x1d\\x76\\x30\\x00"  # commande ESC/POS « GS v 0 » : une tranche d'image
+
+
+def zpl_from_raster(data):
+    \"\"\"ZPL d'une image en tranches « GS v 0 », ou les données telles quelles si ce n'en est pas une.\"\"\"
+    position, width, height, dots = 0, 0, 0, b""
+    while data[position : position + 4] == RASTER:
+        width = int.from_bytes(data[position + 4 : position + 6], "little")
+        rows = int.from_bytes(data[position + 6 : position + 8], "little")
+        position += 8
+        dots += data[position : position + width * rows]
+        position += width * rows
+        height += rows
+    if not dots:
+        return data
+    # ^PW et ^LL valent pour ce seul envoi : les réglages enregistrés dans l'imprimante ne changent pas.
+    size = len(dots)
+    return f"^XA^PW{width * 8}^LL{height}^FO0,0^GFA,{size},{size},{width},{dots.hex().upper()}^FS^XZ".encode()
+
+
+def main():
+    if len(sys.argv) < 6 or "ZPL" not in os.environ.get("PRINTER_INFO", ""):
+        os.execv(SOCKET, sys.argv)
+    if len(sys.argv) > 6:
+        with open(sys.argv[6], "rb") as job:
+            data = job.read()
+    else:
+        data = sys.stdin.buffer.read()
+    with tempfile.NamedTemporaryFile() as job:
+        job.write(zpl_from_raster(data))
+        job.flush()
+        sys.exit(subprocess.run([SOCKET, *sys.argv[1:6], job.name], check=False).returncode)
+
+
+if __name__ == "__main__":
+    main()
 """
 
 SITECUSTOMIZE = """\
@@ -245,6 +303,8 @@ BUILD_FILES = {
     "sudo": SUDO_SHIM,
     "git": GIT_SHIM,
     "nmcli": NMCLI_SHIM,
+    "inactive": INACTIVE_SHIM,
+    "socket_backend.py": SOCKET_BACKEND,
     "sitecustomize.py": SITECUSTOMIZE,
     "entrypoint.sh": ENTRYPOINT,
     "lan_scan.py": LAN_SCAN,
