@@ -1,4 +1,8 @@
+import hashlib
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from odoo_manager_core.config import ManagerSettings
@@ -65,6 +69,28 @@ class EndpointSelectionTests(unittest.TestCase):
     def test_skipped_for_a_custom_context(self):
         with mock.patch("odoo_manager_core.docker_api.current_docker_context", return_value="remote-prod"):
             self.assertIsNone(self.endpoint())
+
+    def test_follows_the_socket_of_a_named_context(self):
+        # Docker Desktop sous Linux : la CLI parle à ~/.docker/desktop/docker.sock, pas à /var/run/docker.sock.
+        with tempfile.TemporaryDirectory() as home:
+            digest = hashlib.sha256(b"desktop-linux").hexdigest()
+            meta = Path(home) / ".docker" / "contexts" / "meta" / digest
+            meta.mkdir(parents=True)
+            host = f"unix://{home}/.docker/desktop/docker.sock"
+            (meta / "meta.json").write_text(json.dumps({"Name": "desktop-linux", "Endpoints": {"docker": {"Host": host}}}))
+            (Path(home) / ".docker" / "config.json").write_text('{"currentContext": "desktop-linux"}')
+            self.assertEqual(
+                EngineEndpoint("unix", f"{home}/.docker/desktop/docker.sock"),
+                self.endpoint(platform_name="linux", home=home),
+            )
+            self.assertEqual(
+                EngineEndpoint("unix", "/var/run/docker.sock"),
+                self.endpoint(platform_name="linux", home=home, environ={"DOCKER_CONTEXT": "default"}),
+            )
+
+    def test_skipped_for_a_named_context_without_metadata(self):
+        with mock.patch("odoo_manager_core.docker_api.current_docker_context", return_value="desktop-linux"):
+            self.assertIsNone(self.endpoint(platform_name="linux", home="/nonexistent"))
 
     def test_skipped_for_a_custom_docker_executable(self):
         self.settings = ManagerSettings.from_dict({"docker_executable": "/opt/podman/docker"}, "/tmp/workspace")

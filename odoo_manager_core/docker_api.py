@@ -10,6 +10,7 @@ moteur : contexte Docker par défaut, pas de `DOCKER_HOST` distant, pas d'exécu
 dans WSL et pas d'exécutable Docker personnalisé. Toute erreur rend la main à la CLI.
 """
 
+import hashlib
 import json
 import os
 import socket
@@ -20,8 +21,6 @@ from typing import NamedTuple
 from .platform import platform_id
 
 DEFAULT_TIMEOUT_SECONDS = 4
-# Contextes dont le point de terminaison est celui des chemins par défaut ci-dessous.
-LOCAL_CONTEXTS = {"", "default", "desktop-linux"}
 WINDOWS_PIPE = r"\\.\pipe\docker_engine"
 UNIX_SOCKETS = ("/var/run/docker.sock",)
 
@@ -56,6 +55,17 @@ def current_docker_context(home=None):
     return str(context or "").strip()
 
 
+def context_docker_host(context, home=None):
+    """Adresse du moteur d'un contexte Docker nommé, telle que la CLI la lit, ou ''."""
+    digest = hashlib.sha256(context.encode()).hexdigest()
+    meta = Path(home or Path.home()) / ".docker" / "contexts" / "meta" / digest / "meta.json"
+    try:
+        payload = json.loads(meta.read_text(encoding="utf-8"))
+        return str(payload["Endpoints"]["docker"]["Host"] or "")
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+
+
 def local_endpoint(platform_name=None, home=None, exists=None):
     platform_name = platform_name or platform_id()
     exists = exists or os.path.exists
@@ -75,12 +85,15 @@ def engine_endpoint(settings, environ=None, platform_name=None, home=None, exist
         return None
     if str(getattr(settings, "docker_executable", "docker")).strip() not in {"", "docker"}:
         return None
+    context = environ.get("DOCKER_CONTEXT", "").strip()
     docker_host = environ.get("DOCKER_HOST", "")
-    if docker_host:
+    if docker_host and not context:
         return parse_docker_host(docker_host)
-    if current_docker_context(home) not in LOCAL_CONTEXTS:
-        return None
-    return local_endpoint(platform_name, home, exists)
+    context = context or current_docker_context(home)
+    if context in {"", "default"}:
+        return local_endpoint(platform_name, home, exists)
+    # Docker Desktop sous Linux (`desktop-linux`) a son propre moteur, distinct de /var/run/docker.sock.
+    return parse_docker_host(context_docker_host(context, home))
 
 
 def parse_http_response(raw):
