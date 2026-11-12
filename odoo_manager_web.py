@@ -1062,7 +1062,7 @@ def iotbox_status(docker, traefik):
 
 
 def mobile_access_owner():
-    """(projet, adresse) de l'accès mobile ouvert, relus sur son conteneur."""
+    """(projet, adresse, recette) de l'accès mobile ouvert, relus sur son conteneur."""
     code, output = run_capture(
         docker_command(SETTINGS, "inspect", "--format", mobile_access.OWNER_FORMAT, mobile_access.MOBILE_CONTAINER),
         timeout=5,
@@ -1074,7 +1074,7 @@ def mobile_access_owner():
 def mobile_access_status(docker):
     """Accès d'un téléphone à Odoo : un seul projet à la fois, ouvert à la demande."""
     running = docker["running"] and container_status(mobile_access.MOBILE_CONTAINER) == "running"
-    project, url = mobile_access_owner() if running else ("", "")
+    project, url, _recipe = mobile_access_owner() if running else ("", "", "")
     return {"running": running, "project": project, "url": url, "can_start": docker["running"]}
 
 
@@ -3947,7 +3947,8 @@ def start_mobile_access_job(job, project):
     url = mobile_access.access_url(ip)
     port = mobile_access.MOBILE_PORT
     state = container_status(mobile_access.MOBILE_CONTAINER)
-    if state == "running" and mobile_access_owner() == (project, url):
+    # Un relais d'une version précédente (sans filtre de la gestion des bases) est refait.
+    if state == "running" and mobile_access_owner() == (project, url, mobile_access.RECIPE):
         job.add(f"L'accès mobile est déjà ouvert sur {url}")
         return
     if (

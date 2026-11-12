@@ -1241,9 +1241,25 @@ class EventWatchCostTests(unittest.TestCase):
 
         command = run_stream.call_args.args[1]
         self.assertIn("192.168.1.20:8069:8069", command)
-        self.assertEqual("TCP:odoo-DEMO:8069", command[-1])
+        self.assertIn("MOBILE_NGINX_CONF", command[command.index("--env") + 1])
         self.assertIn("--rm", command)
         self.assertNotIn("--restart", command)
+
+    def test_a_relay_from_an_older_version_is_replaced(self):
+        with (
+            patch.object(web, "validate_project", return_value="DEMO"),
+            patch.object(web, "docker_status", return_value={"running": True}),
+            patch.object(web, "container_status", return_value="running"),
+            patch.object(web.iot_box, "local_ip", return_value="192.168.1.20"),
+            patch.object(web, "mobile_access_owner", return_value=("DEMO", "http://192.168.1.20:8069/", "")),
+            patch.object(web, "host_port_in_use", return_value=False),
+            patch.object(web, "docker_command", side_effect=lambda _settings, *args: list(args)),
+            patch.object(web, "run_stream", return_value=0) as run_stream,
+        ):
+            web.start_mobile_access_job(Mock(), "DEMO")
+
+        self.assertEqual(["rm", "--force", "mobile-access"], run_stream.call_args_list[0].args[1])
+        self.assertEqual("run", run_stream.call_args_list[1].args[1][0])
 
     def test_mobile_access_explains_a_machine_without_network(self):
         with (
