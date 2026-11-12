@@ -1615,6 +1615,7 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertIn("ODOO_TEST_USER_LOGIN=recette", shell)
         self.assertIn("ODOO_TEST_USER_SETTINGS=0", shell)
         self.assertIn('"password": login', shell[-1])
+        self.assertIn('user.email = login if "@" in login else login + "@example.com"', shell[-1])
         self.assertIn('ref("base.module_category_human_resources")', shell[-1])
         self.assertIn('"payroll" in module', shell[-1])
         self.assertIn("raise SystemExit", shell[-1])

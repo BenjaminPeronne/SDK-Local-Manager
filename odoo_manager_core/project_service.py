@@ -3846,6 +3846,9 @@ else:
     values.update({"name": "Utilisateur de recette (" + login + ")", "login": login, "lang": admin.lang, "tz": admin.tz})
     user = Users.create(values)
     print("Utilisateur créé : " + login)
+# Sans adresse, Odoo refuse d'écrire dans l'historique (créer une facture, poster une note).
+if not user.email:
+    user.email = login if "@" in login else login + "@example.com"
 env.cr.commit()
 
 print("Droits accordés :")
