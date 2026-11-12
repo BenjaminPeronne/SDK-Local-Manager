@@ -2655,9 +2655,8 @@ class OdooStartupRepairTests(unittest.TestCase):
             # Chaque session reprend les réglages de l'en-tête du dump avant toute instruction.
             self.assertTrue(text.startswith("SET statement_timeout = 0;\nSELECT pg_catalog.set_config("))
         everything = "".join(post_data)
-        self.assertIn(
-            "ADD CONSTRAINT res_partner_pkey PRIMARY KEY (id);\nCREATE INDEX res_partner_user_id_index", everything
-        )
+        self.assertIn("ADD CONSTRAINT res_partner_pkey PRIMARY KEY (id);\n\\echo ", everything)
+        self.assertLess(everything.index("res_partner_pkey"), everything.index("CREATE INDEX res_partner_user_id_index"))
         self.assertIn("REFERENCES public.res_users(id) ON DELETE SET NULL NOT VALID;", everything)
         self.assertIn("ALTER TABLE ONLY public.res_partner VALIDATE CONSTRAINT res_partner_user_id_fkey;", everything)
         self.assertNotIn("unrestrict", everything)
@@ -2675,8 +2674,24 @@ class OdooStartupRepairTests(unittest.TestCase):
     def test_a_crashed_post_data_session_fails_the_restoration(self):
         self.fake_psql_sessions(crash_on="VALIDATE CONSTRAINT")
 
-        with self.assertRaisesRegex(RuntimeError, r"avant la fin \(psql, code 1\)"):
+        with patch("odoo_manager_core.project_service.job_progress.measure") as measure:
+            with self.assertRaisesRegex(RuntimeError, r"avant la fin \(psql, code 1\)"):
+                self.load_dump_with_post_data()
+        # Instructions comptées une à une, mais jamais 100 % tant qu'une tâche n'est pas finie.
+        post_data = [call.args for call in measure.call_args_list if call.args[1] > 819200 // 8192]
+        self.assertTrue(post_data)
+        self.assertTrue(all(current < total for current, total in post_data))
+
+    def test_post_data_progress_counts_each_statement_and_ends_at_100_percent(self):
+        sessions = self.fake_psql_sessions()
+
+        with patch("odoo_manager_core.project_service.job_progress.measure") as measure:
             self.load_dump_with_post_data()
+
+        post_data = "".join(text for kind, text in sessions if kind == "post-data")
+        self.assertEqual(5, post_data.count("_statement__"))
+        current, total = measure.call_args_list[-1].args
+        self.assertEqual(total, current)
 
     def test_partitioned_tables_keep_a_single_post_data_session(self):
         sessions = self.fake_psql_sessions()

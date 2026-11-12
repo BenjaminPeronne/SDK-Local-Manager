@@ -2807,9 +2807,18 @@ class ProjectService:
         def work(index):
             replies = queue.Queue()
             marker = f"__odoo_manager_post_data_{index}__"
+            statement_marker = f"__odoo_manager_post_data_{index}_statement__"
+            # Part de la tâche en cours déjà comptée : la barre avance à chaque instruction, et la
+            # fin de la tâche ajoute le reste, si bien que 100 % n'arrive qu'une fois tout construit.
+            current = {"share": 0, "counted": 0}
 
             def on_output(line):
-                if line is None or line == marker:
+                if line == statement_marker:
+                    with condition:
+                        current["counted"] += current["share"]
+                        state["weight"] += current["share"]
+                        condition.notify_all()
+                elif line is None or line == marker:
                     replies.put(line)
 
             interrupted = []
@@ -2820,7 +2829,11 @@ class ProjectService:
                     task = pending.get()
                     if task is None:
                         return
-                    stdin.write(f"{task.script}\\echo {marker}\n".encode())
+                    with condition:
+                        current["share"] = task.weight // max(len(task.statements), 1)
+                        current["counted"] = 0
+                    script = "".join(f"{statement};\n\\echo {statement_marker}\n" for statement in task.statements)
+                    stdin.write(f"{script}\\echo {marker}\n".encode())
                     stdin.flush()
                     if replies.get() is None:
                         # psql s'est arrêté au milieu de la tâche : son code de sortie dira pourquoi.
@@ -2828,7 +2841,7 @@ class ProjectService:
                         return
                     with condition:
                         state["finished"] += 1
-                        state["weight"] += task.weight
+                        state["weight"] += task.weight - current["counted"]
                         condition.notify_all()
 
             try:
