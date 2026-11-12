@@ -2422,12 +2422,12 @@ class MailpitTests(unittest.TestCase):
 
         pull, tag, command = (call.args[1] for call in run_stream.call_args_list)
         # Téléchargée par son empreinte, nommée, puis lancée sous son nom.
-        self.assertEqual(["docker", "pull", f"axllent/mailpit@{web.MAILPIT_IMAGE_DIGEST}"], pull)
-        self.assertEqual(["docker", "tag", f"axllent/mailpit@{web.MAILPIT_IMAGE_DIGEST}", web.MAILPIT_IMAGE], tag)
+        self.assertEqual(["docker", "pull", f"axllent/mailpit@{web.mailpit.MAILPIT_IMAGE_DIGEST}"], pull)
+        self.assertEqual(["docker", "tag", f"axllent/mailpit@{web.mailpit.MAILPIT_IMAGE_DIGEST}", web.mailpit.MAILPIT_IMAGE], tag)
         self.assertEqual(["docker", "run", "--detach", "--name", "mailpit"], command[:5])
         self.assertIn("traefik-local", command)
         self.assertIn("traefik.http.routers.mailpit.rule=Host(`mail.localhost`)", command)
-        self.assertEqual(web.MAILPIT_IMAGE, command[-1])
+        self.assertEqual(web.mailpit.MAILPIT_IMAGE, command[-1])
 
     @patch("odoo_manager_web.run_stream", return_value=1)
     @patch("odoo_manager_web.container_status", return_value="absent")

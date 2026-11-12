@@ -46,6 +46,8 @@ from odoo_manager_core import (
     iot_box,
     job_progress,
     job_queue,
+    mailpit,
+    mobile_access,
     performance,
     remote_backups,
     start_docker,
@@ -990,46 +992,19 @@ def traefik_status(docker=None):
     }
 
 
-MAILPIT_CONTAINER = "mailpit"
-MAILPIT_IMAGE = "axllent/mailpit:v1.31"
-# Empreinte de l'index multi-architecture de v1.31 : une image republiée sous le même tag chez
-# l'éditeur est refusée au lieu d'être installée. Docker ne nomme pas une image téléchargée
-# par empreinte : elle reçoit ensuite le tag, que le reste de l'application reconnaît.
-MAILPIT_IMAGE_DIGEST = "sha256:ed9b00c609e77e99c79b93f1178255ebc271868920f2c69a8d166bd5634ed10d"
-MAILPIT_PINNED_IMAGE = f"axllent/mailpit@{MAILPIT_IMAGE_DIGEST}"
-MAILPIT_HOST = "mail.localhost"
-
-
 def mailpit_status(docker, traefik):
     """Capture locale des e-mails : les bases neutralisées envoient vers `mailpit:1025`."""
-    state = container_status(MAILPIT_CONTAINER) if docker["running"] else "absent"
+    state = container_status(mailpit.MAILPIT_CONTAINER) if docker["running"] else "absent"
     running = state == "running"
-    if running:
-        message = "Les e-mails de tes bases neutralisées arrivent ici, sans partir chez personne."
-    elif not traefik["running"]:
-        message = "Démarre d'abord Traefik pour pouvoir installer Mailpit."
-    elif state == "absent":
-        message = "Installe-le pour voir les e-mails envoyés par tes bases neutralisées."
-    else:
-        message = "Mailpit est arrêté : démarre-le pour voir les e-mails."
     return {
         "state": state,
         "running": running,
         "installed": state != "absent",
-        "message": message,
-        "url": url_with_port(f"http://{MAILPIT_HOST}/", traefik.get("http_port")),
+        "message": mailpit.status_message(state, traefik["running"]),
+        "url": url_with_port(f"http://{mailpit.MAILPIT_HOST}/", traefik.get("http_port")),
         "can_start": docker["running"] and traefik["running"] and not running,
     }
 
-
-# Porte vers le seul conteneur Odoo choisi : Traefik reste réservé à ce poste, le téléphone ne pouvant pas résoudre
-# les adresses *.localhost. Pas de redémarrage automatique : l'accès se referme avec Docker. Le nom ne commence pas
-# par « odoo- », réservé aux conteneurs des projets (un projet peut s'appeler « mobile »).
-MOBILE_CONTAINER = "mobile-access"
-MOBILE_IMAGE = "alpine/socat@sha256:beb4a68d9e4fe6b0f21ea774a0fde6c31f580dde6368939ed70100c5385b015e"  # 1.8.0.3
-MOBILE_PORT = 8069
-MOBILE_PROJECT_LABEL = "odoo-manager.mobile.project"
-MOBILE_URL_LABEL = "odoo-manager.mobile.url"
 
 # (projet, version, recette) de la box, relus par `docker inspect` une fois par conteneur et non à chaque rafraîchissement.
 IOTBOX_OWNER = None
@@ -1089,22 +1064,16 @@ def iotbox_status(docker, traefik):
 def mobile_access_owner():
     """(projet, adresse) de l'accès mobile ouvert, relus sur son conteneur."""
     code, output = run_capture(
-        docker_command(
-            SETTINGS,
-            "inspect",
-            "--format",
-            f'{{{{index .Config.Labels "{MOBILE_PROJECT_LABEL}"}}}}|{{{{index .Config.Labels "{MOBILE_URL_LABEL}"}}}}',
-            MOBILE_CONTAINER,
-        ),
+        docker_command(SETTINGS, "inspect", "--format", mobile_access.OWNER_FORMAT, mobile_access.MOBILE_CONTAINER),
         timeout=5,
         stdout_only=True,
     )
-    return tuple(output.strip().split("|")) if code == 0 and output.count("|") == 1 else ("", "")
+    return mobile_access.parse_owner(code, output)
 
 
 def mobile_access_status(docker):
     """Accès d'un téléphone à Odoo : un seul projet à la fois, ouvert à la demande."""
-    running = docker["running"] and container_status(MOBILE_CONTAINER) == "running"
+    running = docker["running"] and container_status(mobile_access.MOBILE_CONTAINER) == "running"
     project, url = mobile_access_owner() if running else ("", "")
     return {"running": running, "project": project, "url": url, "can_start": docker["running"]}
 
@@ -3377,7 +3346,10 @@ MODULE_FILES_CANCEL_HINT = (
 )
 # (arrêt possible, ce que fait l'arrêt ou pourquoi il est impossible), par fonction d'action.
 JOB_CANCEL_POLICIES = {
-    "container_command_job": (True, "La commande est interrompue ; ses modifications déjà effectuées ne sont pas annulées."),
+    "container_command_job": (
+        True,
+        "La commande est interrompue ; ses modifications déjà effectuées ne sont pas annulées.",
+    ),
     "module_sources_job": (True, "La recherche s’arrête ; rien n’a été modifié dans le projet."),
     "start_project_job": (
         True,
@@ -3933,58 +3905,32 @@ def start_mailpit_job(job):
     code, _output = run_capture(docker_command(SETTINGS, "network", "inspect", TRAEFIK_NETWORK), timeout=10)
     if code != 0:
         raise RuntimeError(f"Le réseau {TRAEFIK_NETWORK} est introuvable : installe et démarre Traefik d'abord.")
-    state = container_status(MAILPIT_CONTAINER)
+    state = container_status(mailpit.MAILPIT_CONTAINER)
     if state == "running":
         job.add("Mailpit est déjà démarré.")
         return
     if state == "absent":
-        job.add(f"Installation de Mailpit ({MAILPIT_IMAGE})...")
-        if run_stream(job, docker_command(SETTINGS, "pull", MAILPIT_PINNED_IMAGE)) != 0:
+        job.add(f"Installation de Mailpit ({mailpit.MAILPIT_IMAGE})...")
+        if run_stream(job, docker_command(SETTINGS, "pull", mailpit.MAILPIT_PINNED_IMAGE)) != 0:
             raise RuntimeError("Docker n'a pas pu télécharger Mailpit.")
-        if run_stream(job, docker_command(SETTINGS, "tag", MAILPIT_PINNED_IMAGE, MAILPIT_IMAGE)) != 0:
+        if run_stream(job, docker_command(SETTINGS, "tag", mailpit.MAILPIT_PINNED_IMAGE, mailpit.MAILPIT_IMAGE)) != 0:
             raise RuntimeError("Docker n'a pas pu préparer l'image de Mailpit.")
-        command = docker_command(
-            SETTINGS,
-            "run",
-            "--detach",
-            "--name",
-            MAILPIT_CONTAINER,
-            "--restart",
-            "unless-stopped",
-            "--network",
-            TRAEFIK_NETWORK,
-            "--env",
-            "MP_MAX_MESSAGES=5000",
-            # Les serveurs SMTP copiés d'une base client peuvent tenter une authentification.
-            "--env",
-            "MP_SMTP_AUTH_ACCEPT_ANY=1",
-            "--env",
-            "MP_SMTP_AUTH_ALLOW_INSECURE=1",
-            "--label",
-            "traefik.enable=true",
-            "--label",
-            "traefik.http.routers.mailpit.entrypoints=web",
-            "--label",
-            f"traefik.http.routers.mailpit.rule=Host(`{MAILPIT_HOST}`)",
-            "--label",
-            "traefik.http.services.mailpit.loadbalancer.server.port=8025",
-            MAILPIT_IMAGE,
-        )
+        command = docker_command(SETTINGS, *mailpit.run_arguments(TRAEFIK_NETWORK))
     else:
         job.add("Démarrage de Mailpit...")
-        command = docker_command(SETTINGS, "start", MAILPIT_CONTAINER)
+        command = docker_command(SETTINGS, "start", mailpit.MAILPIT_CONTAINER)
     if run_stream(job, command) != 0:
         raise RuntimeError("Docker n'a pas pu démarrer Mailpit.")
-    job.add(f"Mailpit est disponible sur http://{MAILPIT_HOST}/ (SMTP : {MAILPIT_CONTAINER}:1025).")
+    job.add(f"Mailpit est disponible sur http://{mailpit.MAILPIT_HOST}/ (SMTP : {mailpit.MAILPIT_CONTAINER}:1025).")
     job.add("Les bases neutralisées y envoient leurs e-mails ; relance « Neutraliser et contrôler » sur une base")
     job.add("neutralisée avant cette version pour rediriger ses e-mails vers Mailpit.")
 
 
 def stop_mailpit_job(job):
-    if container_status(MAILPIT_CONTAINER) != "running":
+    if container_status(mailpit.MAILPIT_CONTAINER) != "running":
         job.add("Mailpit est déjà arrêté.")
         return
-    if run_stream(job, docker_command(SETTINGS, "stop", MAILPIT_CONTAINER)) != 0:
+    if run_stream(job, docker_command(SETTINGS, "stop", mailpit.MAILPIT_CONTAINER)) != 0:
         raise RuntimeError("Docker n'a pas pu arrêter Mailpit.")
 
 
@@ -3998,36 +3944,22 @@ def start_mobile_access_job(job, project):
     ip = iot_box.local_ip()
     if not ip:
         raise RuntimeError("Ce poste n'est relié à aucun réseau : connecte-le au Wi-Fi, puis réessaie.")
-    url = f"http://{ip}:{MOBILE_PORT}/"
-    state = container_status(MOBILE_CONTAINER)
+    url = mobile_access.access_url(ip)
+    port = mobile_access.MOBILE_PORT
+    state = container_status(mobile_access.MOBILE_CONTAINER)
     if state == "running" and mobile_access_owner() == (project, url):
         job.add(f"L'accès mobile est déjà ouvert sur {url}")
         return
-    if state != "absent" and run_stream(job, docker_command(SETTINGS, "rm", "--force", MOBILE_CONTAINER)) != 0:
+    if (
+        state != "absent"
+        and run_stream(job, docker_command(SETTINGS, "rm", "--force", mobile_access.MOBILE_CONTAINER)) != 0
+    ):
         raise RuntimeError("Docker n'a pas pu fermer l'accès mobile précédent.")
     # Sur l'adresse publiée : un programme qui n'écoute qu'en local sur ce port ne gêne pas.
-    if host_port_in_use(MOBILE_PORT, host=ip):
-        raise RuntimeError(f"Le port {MOBILE_PORT} est déjà utilisé sur ce poste : ferme le programme qui l'occupe.")
+    if host_port_in_use(port, host=ip):
+        raise RuntimeError(f"Le port {port} est déjà utilisé sur ce poste : ferme le programme qui l'occupe.")
     job.add(f"Ouverture de {project} aux appareils du même Wi-Fi...")
-    command = docker_command(
-        SETTINGS,
-        "run",
-        "--detach",
-        "--rm",
-        "--name",
-        MOBILE_CONTAINER,
-        "--network",
-        TRAEFIK_NETWORK,
-        "--publish",
-        f"{ip}:{MOBILE_PORT}:{MOBILE_PORT}",
-        "--label",
-        f"{MOBILE_PROJECT_LABEL}={project}",
-        "--label",
-        f"{MOBILE_URL_LABEL}={url}",
-        MOBILE_IMAGE,
-        f"TCP-LISTEN:{MOBILE_PORT},fork,reuseaddr",
-        f"TCP:odoo-{project}:{MOBILE_PORT}",
-    )
+    command = docker_command(SETTINGS, *mobile_access.run_arguments(project, ip, TRAEFIK_NETWORK))
     if run_stream(job, command) != 0:
         raise RuntimeError("Docker n'a pas pu ouvrir l'accès mobile.")
     job.add(f"Odoo est ouvert sur {url}")
@@ -4035,10 +3967,10 @@ def start_mobile_access_job(job, project):
 
 
 def stop_mobile_access_job(job):
-    if container_status(MOBILE_CONTAINER) == "absent":
+    if container_status(mobile_access.MOBILE_CONTAINER) == "absent":
         job.add("L'accès mobile est déjà fermé.")
         return
-    if run_stream(job, docker_command(SETTINGS, "rm", "--force", MOBILE_CONTAINER)) != 0:
+    if run_stream(job, docker_command(SETTINGS, "rm", "--force", mobile_access.MOBILE_CONTAINER)) != 0:
         raise RuntimeError("Docker n'a pas pu fermer l'accès mobile.")
 
 
@@ -4587,7 +4519,9 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
                     job_progress.span("Copie du filestore", end=85, expected=30 + filestore_bytes / (40 * 1024 * 1024))
                     filestore_started = time.monotonic()
                     service.restore_filestore(project, db_name, archive, filestore, log=job.add)
-                    job.add(f"Mesure — copie du filestore : {time.monotonic() - filestore_started:.2f} s, {filestore_bytes} octets décompressés.")
+                    job.add(
+                        f"Mesure — copie du filestore : {time.monotonic() - filestore_started:.2f} s, {filestore_bytes} octets décompressés."
+                    )
             except Exception:
                 job.add(f"Restauration incomplète : suppression de la base {db_name}...")
                 try:
@@ -5332,7 +5266,7 @@ def docker_images_snapshot():
         if code != 0:
             raise RuntimeError(output or "Docker n'indique pas les images de ses conteneurs.")
         used = {line.strip() for line in output.splitlines() if line.strip()}
-    referenced = {MAILPIT_IMAGE}
+    referenced = {mailpit.MAILPIT_IMAGE}
     compose_files = [compose_file(project) for project in project_dirs()]
     compose_files.append(local_traefik_directory() / "docker-compose.yml")
     for compose in compose_files:
