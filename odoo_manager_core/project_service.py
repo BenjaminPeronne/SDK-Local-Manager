@@ -419,9 +419,9 @@ def traefik_runtime_compose(base_text, base_name, ports, replaced=None):
     return TRAEFIK_RUNTIME_HEADER.format(base=base_name) + content if content else None
 
 
-def host_port_in_use(port, timeout=0.5):
+def host_port_in_use(port, timeout=0.5, host="127.0.0.1"):
     try:
-        with socket.create_connection(("127.0.0.1", int(port)), timeout=timeout):
+        with socket.create_connection((host, int(port)), timeout=timeout):
             return True
     except OSError:
         return False

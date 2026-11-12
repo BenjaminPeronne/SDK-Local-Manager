@@ -1697,7 +1697,7 @@ class ProjectServiceTests(unittest.TestCase):
     def test_neutralization_returns_the_mode_reported_by_odoo(self):
         for mode in ("native", "partial", None):
             with self.subTest(mode=mode):
-                def stream(_command, log=None):
+                def stream(_command, log=None, mode=mode):
                     if mode:
                         log(f"ODOO_MANAGER_NEUTRALIZATION_MODE={mode}")
                     return 0

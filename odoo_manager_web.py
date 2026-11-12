@@ -4005,7 +4005,8 @@ def start_mobile_access_job(job, project):
         return
     if state != "absent" and run_stream(job, docker_command(SETTINGS, "rm", "--force", MOBILE_CONTAINER)) != 0:
         raise RuntimeError("Docker n'a pas pu fermer l'accès mobile précédent.")
-    if host_port_in_use(MOBILE_PORT):
+    # Sur l'adresse publiée : un programme qui n'écoute qu'en local sur ce port ne gêne pas.
+    if host_port_in_use(MOBILE_PORT, host=ip):
         raise RuntimeError(f"Le port {MOBILE_PORT} est déjà utilisé sur ce poste : ferme le programme qui l'occupe.")
     job.add(f"Ouverture de {project} aux appareils du même Wi-Fi...")
     command = docker_command(

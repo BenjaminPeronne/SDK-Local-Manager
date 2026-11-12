@@ -1231,11 +1231,13 @@ class EventWatchCostTests(unittest.TestCase):
             patch.object(web, "docker_status", return_value={"running": True}),
             patch.object(web, "container_status", side_effect=lambda name: "running" if name == "odoo-DEMO" else "absent"),
             patch.object(web.iot_box, "local_ip", return_value="192.168.1.20"),
-            patch.object(web, "host_port_in_use", return_value=False),
+            patch.object(web, "host_port_in_use", return_value=False) as port_in_use,
             patch.object(web, "docker_command", side_effect=lambda _settings, *args: list(args)),
             patch.object(web, "run_stream", return_value=0) as run_stream,
         ):
             web.start_mobile_access_job(job, "DEMO")
+
+        port_in_use.assert_called_once_with(8069, host="192.168.1.20")
 
         command = run_stream.call_args.args[1]
         self.assertIn("192.168.1.20:8069:8069", command)
