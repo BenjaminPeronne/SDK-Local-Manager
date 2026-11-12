@@ -318,6 +318,23 @@ class RetentionJobTests(RetentionTestCase):
             web.extend_database_retention_view(request)
 
 
+class FilestoreNameTests(unittest.TestCase):
+    def test_database_name_leaving_the_filestore_folder_has_no_filestore_path(self):
+        for name in ("../filestore/autre", "..", "a/b", "a\\b"):
+            self.assertIsNone(web.project_filestore_path("CLIENT", name))
+        self.assertEqual(web.project_filestore_path("CLIENT", "base").name, "base")
+
+    @patch("odoo_manager_web.clear_project_module_cache")
+    @patch("odoo_manager_web.invalidate_overview_databases")
+    @patch("odoo_manager_web.container_status", return_value="running")
+    @patch("odoo_manager_web.run_capture", return_value=(0, ""))
+    def test_dropping_such_a_database_never_removes_files(self, run, _status, _overview, _cache):
+        web.drop_partial_database(MagicMock(), "CLIENT", "../filestore/autre")
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(len(commands), 1)
+        self.assertNotIn("rm", commands[0])
+
+
 class ExtendViewTests(RetentionTestCase):
     @patch("odoo_manager_web.EVENT_WAKE")
     def test_the_deadline_is_pushed_back_on_request(self, _wake):

@@ -4903,10 +4903,10 @@ def drop_database_job(job, project, db_name, master_pwd=""):
         drop_partial_database(job, project, db_name)
     DATABASE_RETENTION.forget(str(WORKSPACE), project, db_name)
     filestore = project_filestore_path(project, db_name)
-    if safe_path_exists(filestore):
+    if filestore and safe_path_exists(filestore):
         # Projet arrêté : le conteneur Odoo n'a pas pu retirer le filestore, le dossier est supprimé ici.
         shutil.rmtree(filestore, ignore_errors=True)
-    if safe_path_exists(filestore):
+    if filestore and safe_path_exists(filestore):
         job.add(f"Attention : le filestore n'a pas pu être supprimé, retire-le à la main : {filestore}")
 
 
@@ -4945,6 +4945,11 @@ def drop_partial_database(job, project, db_name):
         time.sleep(2)
     else:
         raise RuntimeError(f"la base {db_name} n'a pas pu être supprimée")
+    if not project_filestore_path(project, db_name):
+        invalidate_overview_databases(project)
+        clear_project_module_cache(project)
+        job.add(f"Base {db_name} supprimée. Ses fichiers ne sont pas touchés : son nom désigne un autre dossier.")
+        return
     if container_status(f"odoo-{project}") == "running":
         run_capture(
             docker_command(
@@ -4988,6 +4993,15 @@ RETENTION_RULE_MESSAGE = (
 
 
 def project_filestore_path(project, db_name):
+    """Dossier des fichiers d'une base ; None quand son nom en sortirait.
+
+    Une base créée à la main peut s'appeler « ../filestore/autre » : supprimer « son » dossier
+    effacerait les fichiers d'une autre base.
+    """
+    try:
+        validate_new_db(db_name)
+    except ValueError:
+        return None
     return WORKSPACE / project / "odoo_data" / "filestore" / db_name
 
 
@@ -4998,7 +5012,7 @@ def drop_expired_database(job, project, db_name):
     with job_control.protected(f"suppression de la base {db_name}", irreversible=True):
         drop_partial_database(job, project, db_name)
     filestore = project_filestore_path(project, db_name)
-    if safe_path_exists(filestore):
+    if filestore and safe_path_exists(filestore):
         raise RuntimeError(f"La base {db_name} est supprimée, mais pas son filestore : {filestore}")
     DATABASE_RETENTION.forget(str(WORKSPACE), project, db_name)
 

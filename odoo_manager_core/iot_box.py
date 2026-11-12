@@ -262,7 +262,14 @@ import time
 LAN = os.environ.get("IOTBOX_LAN")
 # Une Zebra n'accepte qu'une connexion à la fois sur 9100 : la solliciter bloque l'impression. Il vient en dernier.
 PORTS = (631, 515, 9100)
+QUICK_PASSES = 5
 known = set()
+
+
+def pause(passes):
+    # Les premières minutes rattrapent une imprimante qu'on vient d'allumer. Ensuite un passage toutes les
+    # 10 minutes suffit : un balayage par minute ressemble à une attaque sur un réseau surveillé.
+    return 60 if passes < QUICK_PASSES else 600
 
 
 def answers(address):
@@ -275,6 +282,7 @@ def is_printer(ip):
     return any(answers((ip, port)) for port in PORTS)
 
 
+passes = 0
 while LAN:
     # Une adresse trouvée le reste et n'est plus jamais sollicitée, même en veille : CUPS l'interroge en SNMP.
     hosts = [ip for ip in (f"{LAN}.{host}" for host in range(1, 255)) if ip not in known]
@@ -282,7 +290,8 @@ while LAN:
         known |= {ip for ip, found in zip(hosts, pool.map(is_printer, hosts)) if found}
     lines = [f"Address {ip}" for ip in sorted(known)] + ["Community public"]
     pathlib.Path("/etc/cups/snmp.conf").write_text("\\n".join(lines) + "\\n")
-    time.sleep(60)
+    passes += 1
+    time.sleep(pause(passes))
 """
 
 ENTRYPOINT = """\

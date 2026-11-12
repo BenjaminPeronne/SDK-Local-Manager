@@ -56,6 +56,12 @@ class IotBoxLanScanTests(unittest.TestCase):
         self.assertTrue(scan["is_printer"]("192.168.1.41"))
         self.assertEqual(tried, [631])
 
+    def test_scan_slows_down_after_the_first_minutes(self):
+        scan = {"__name__": "lan_scan"}
+        with patch.dict("os.environ", {"IOTBOX_LAN": ""}):
+            exec(iot_box.LAN_SCAN, scan)
+        self.assertEqual([scan["pause"](passes) for passes in (1, 4, 5, 50)], [60, 60, 600, 600])
+
 
 class IotBoxPairingTests(unittest.TestCase):
     def test_box_python_files_compile(self):
