@@ -279,7 +279,7 @@ export function DatabasesTab({
           >
             {listView && (
               <div
-                className="sdk-database-list-heading hidden border-b bg-muted/60 text-xs font-semibold text-muted-foreground md:grid"
+                className="sdk-database-list-heading hidden border-b bg-muted/60 text-xs font-semibold text-muted-foreground lg:grid"
                 aria-hidden="true"
               >
                 <span>Base de données</span>
@@ -316,7 +316,7 @@ export function DatabasesTab({
                     </div>
                     {listView && (
                       <div className="text-xs text-muted-foreground">
-                        <span className="md:hidden">Version : </span>
+                        <span className="lg:hidden">Version : </span>
                         {versions[db] || "—"}
                       </div>
                     )}
@@ -350,7 +350,7 @@ export function DatabasesTab({
                       )}
                     </div>
                   </DatabaseItem>
-                  <div className={cn("absolute right-2 flex gap-1", listView ? "top-1/2 -translate-y-1/2" : "top-2")}>
+                  <div className={cn("absolute right-2 flex gap-1", listView ? "sdk-database-list-actions" : "top-2")}>
                     <Button
                       size="sm"
                       variant="outline"

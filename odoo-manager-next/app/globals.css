@@ -708,7 +708,11 @@ textarea {
 .sdk-database-list-row {
   display: grid;
   gap: 0.5rem;
-  padding-right: 7.75rem;
+  /* Fenêtre étroite : les boutons Mobile et Actions, posés par-dessus la ligne, passent dessous. */
+  padding-bottom: 3.25rem;
+}
+.sdk-database-list-actions {
+  bottom: 0.5rem;
 }
 .sdk-database-list-row > :first-child {
   padding-right: 0;
@@ -723,16 +727,23 @@ textarea {
   margin-top: 0;
   margin-right: 0;
 }
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
   .sdk-database-list-heading,
   .sdk-database-list-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 5rem 14rem;
     align-items: center;
     gap: 0.75rem;
+    padding-bottom: 1rem;
+    padding-right: 13.75rem;
+  }
+  .sdk-database-list-actions {
+    top: 50%;
+    bottom: auto;
+    transform: translateY(-50%);
   }
   .sdk-database-list-heading {
-    grid-template-columns: minmax(0, 1fr) 5rem 14rem 6rem;
+    grid-template-columns: minmax(0, 1fr) 5rem 14rem 12rem;
     padding: 0.75rem 1rem;
   }
   .sdk-database-list-row > * {
