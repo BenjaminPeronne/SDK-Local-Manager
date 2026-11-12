@@ -33,6 +33,33 @@ class MobileAccessRecipeTests(unittest.TestCase):
         self.assertEqual(("", "", ""), mobile_access.parse_owner(0, "DEMO|x"))
 
 
+class ProjectFoldersFromContainersTests(unittest.TestCase):
+    def test_keeps_odoo_project_parents_outside_the_workspace(self):
+        import tempfile
+        from pathlib import Path
+
+        from odoo_manager_core.project_service import project_folders_from_containers
+
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            for project in ("elsewhere/demo", "workspace/known", "gone/old"):
+                (root / project).mkdir(parents=True)
+            (root / "elsewhere/demo/docker-compose.yml").write_text("services: {}\n")
+            (root / "workspace/known/docker-compose.yml").write_text("services: {}\n")
+            output = "\n".join(
+                (
+                    f"odoo-demo odoo:17\t{root}/elsewhere/demo",
+                    f"postgresql-demo postgres:16\t{root}/elsewhere/demo",
+                    f"odoo-known odoo:17\t{root}/workspace/known",
+                    f"odoo-old odoo:16\t{root}/gone/old",
+                    f"redis redis:7\t{root}/elsewhere/cache",
+                )
+            )
+            self.assertEqual(
+                project_folders_from_containers(output, root / "workspace"),
+                [str(root / "elsewhere")],
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
-

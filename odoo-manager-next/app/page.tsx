@@ -1208,6 +1208,20 @@ export default function Home() {
     }
   }
 
+  async function switchToProjectFolder(folder: string) {
+    try {
+      const payload = await api<{ settings: ManagerSettings }>("/api/settings", {
+        method: "POST",
+        body: JSON.stringify({ workspace: folder }),
+      });
+      // Sans ça, le prochain enregistrement des paramètres renverrait l'ancien dossier.
+      setSettings(payload.settings);
+      await refreshAllViews();
+    } catch (err) {
+      pushToast("error", err instanceof Error ? err.message : "Impossible d’utiliser ce dossier.");
+    }
+  }
+
   async function refreshAllViews() {
     await Promise.all([refreshOverview(), refreshSystemStatus(), refreshJobs()]);
   }
@@ -1899,6 +1913,8 @@ export default function Home() {
                   icon={selectedAppIcon}
                   season={season}
                   hasProjects={Boolean(overview?.projects.length)}
+                  otherProjectFolders={overview?.other_project_folders ?? []}
+                  onUseFolder={(folder) => void switchToProjectFolder(folder)}
                   docker={{
                     state: docker.state,
                     message: docker.message,

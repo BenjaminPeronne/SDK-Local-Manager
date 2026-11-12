@@ -164,11 +164,13 @@ from odoo_manager_core.project_creator import (
     validate_odoo_version,
 )
 from odoo_manager_core.project_service import (
+    CONTAINER_FOLDER_FORMAT,
     ODOO_DATA_DIR,
     POSTGRES_DATA_DIR,
     NeutralizationRestartError,
     OdooError,
     host_port_in_use,
+    project_folders_from_containers,
 )
 from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
 from odoo_manager_core.releases import RELEASES_PAGE, RELEASES_REPOSITORY, release_check_error, release_update
@@ -3196,6 +3198,23 @@ def docker_poll_seconds():
         return 10
 
 
+def other_project_folders():
+    """Dossiers hors workspace où Docker a déjà lancé des projets Odoo (installation existante)."""
+    code, output = run_capture(
+        docker_command(
+            SETTINGS,
+            "ps",
+            "-a",
+            "--filter",
+            "label=com.docker.compose.project.working_dir",
+            "--format",
+            CONTAINER_FOLDER_FORMAT,
+        ),
+        timeout=8,
+    )
+    return project_folders_from_containers(output, WORKSPACE) if code == 0 else []
+
+
 def overview(docker=None, databases_max_age=None, odoo_servers_max_age=None):
     docker = docker or docker_status(SETTINGS)
     docker_ok = docker["running"]
@@ -3239,6 +3258,8 @@ def overview(docker=None, databases_max_age=None, odoo_servers_max_age=None):
         "docker_ok": docker_ok,
         "docker_message": docker_message,
         "projects": projects,
+        # Workspace vide alors que Docker fait déjà tourner des projets Odoo ailleurs : l'accueil propose ce dossier.
+        "other_project_folders": other_project_folders() if docker_ok and not project_names else [],
     }
 
 

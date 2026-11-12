@@ -55,6 +55,31 @@ from .traefik import (
 )
 
 COMPOSE_FILENAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
+# `docker ps` : nom et image du conteneur, puis le dossier compose qui l'a lancé.
+CONTAINER_FOLDER_FORMAT = '{{.Names}} {{.Image}}\t{{.Label "com.docker.compose.project.working_dir"}}'
+
+
+def project_folders_from_containers(output, workspace):
+    """Dossiers, hors `workspace`, qui contiennent des projets Odoo déjà lancés par Docker.
+
+    `output` suit CONTAINER_FOLDER_FORMAT. Seuls les dossiers encore présents, avec leur
+    fichier compose, sont gardés : ce sont ceux que le gestionnaire saurait ouvrir.
+    """
+    workspace = Path(workspace)
+    folders = set()
+    for line in (output or "").splitlines():
+        identity, _tab, working_dir = line.partition("\t")
+        working_dir = working_dir.strip()
+        if "odoo" not in identity.lower() or not working_dir:
+            continue
+        project = Path(working_dir)
+        try:
+            if project.parent == workspace or not any((project / name).is_file() for name in COMPOSE_FILENAMES):
+                continue
+        except OSError:
+            continue
+        folders.add(str(project.parent))
+    return sorted(folders)
 # Première page Odoo servie dans le conteneur : 2xx/3xx/4xx = serveur prêt, 5xx ou exception = pas encore.
 ODOO_HTTP_READY_SCRIPT = """import http.client, sys
 connection = http.client.HTTPConnection("127.0.0.1", 8069, timeout=float(sys.argv[1]))

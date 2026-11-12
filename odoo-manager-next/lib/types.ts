@@ -28,6 +28,8 @@ export type Overview = {
   docker_ok: boolean;
   docker_message: string;
   projects: Project[];
+  /** Dossiers où Docker a déjà lancé des projets Odoo, rempli seulement quand le workspace est vide. */
+  other_project_folders?: string[];
 };
 
 export type DockerStatus = {

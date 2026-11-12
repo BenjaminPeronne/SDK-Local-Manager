@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ExternalLink,
+  FolderOpen,
   FolderPlus,
   Hourglass,
   Loader2,
@@ -15,6 +16,7 @@ import {
 import { newYearGreeting, type Season } from "@/lib/seasonal";
 import type { DockerSummary } from "@/lib/system-notices";
 import type { MailpitStatus } from "@/lib/types";
+import { Notice } from "@/components/common/notice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChristmasHat, Snowfall } from "@/components/seasonal/christmas";
@@ -34,6 +36,8 @@ export function WelcomeScreen({
   icon,
   season,
   hasProjects,
+  otherProjectFolders,
+  onUseFolder,
   docker,
   traefik,
   mailpit,
@@ -46,6 +50,9 @@ export function WelcomeScreen({
   icon: { src: string };
   season: Season | null;
   hasProjects: boolean;
+  /** Dossiers où des projets Odoo tournent déjà, hors du dossier des projets choisi. */
+  otherProjectFolders: string[];
+  onUseFolder: (folder: string) => void;
   docker: { state: DockerSummary["state"]; message: string; detail: string; action?: ReactNode };
   /** `waiting` : Docker arrêté, Traefik ne peut que l'attendre. */
   traefik: { ready: boolean; waiting: boolean; message: string; action?: ReactNode } | null;
@@ -90,6 +97,25 @@ export function WelcomeScreen({
           ? "Sélectionne un projet dans la barre de gauche pour ouvrir ses bases, ses modules et son activité."
           : "Aucun projet pour l’instant. Crée ton premier environnement Odoo local : le gestionnaire prépare le code, la base et l’accès web."}
       </p>
+
+      {!hasProjects &&
+        otherProjectFolders.map((folder) => (
+          <div key={folder} className="mt-6 w-full max-w-xl text-left">
+            <Notice
+              tone="info"
+              icon={FolderOpen}
+              title="Des projets Odoo existent déjà sur cet ordinateur"
+              actions={
+                <Button size="sm" onClick={() => onUseFolder(folder)}>
+                  Afficher ces projets
+                </Button>
+              }
+            >
+              Ils se trouvent dans <span className="break-all font-mono">{folder}</span>, un autre dossier que celui
+              où le gestionnaire les cherche.
+            </Notice>
+          </div>
+        ))}
 
       <section aria-labelledby="welcome-services-title" className="mt-8 w-full max-w-xl text-left">
         <h3 id="welcome-services-title" className="mb-3 text-sm font-semibold">
