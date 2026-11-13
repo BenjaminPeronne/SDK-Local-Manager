@@ -5,7 +5,7 @@ import { Check, Copy, Database, FolderPlus, Info, Loader2, Play, Search, Setting
 import type { StaticImageData } from "next/image";
 import { workspaceLabel } from "@/lib/format";
 import { isJobActive, isJobUnfinished, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
-import { odooServerStopped, runningProjectDatabaseCount } from "@/lib/projects";
+import { odooServerStopped, projectListRank, runningProjectDatabaseCount } from "@/lib/projects";
 import type { Season } from "@/lib/seasonal";
 import type { AppUpdate, ExternalLogView, Job, ManagerSettings, Overview, Project, SystemStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -131,14 +131,13 @@ export function AppSidebar({
     return (overview?.projects || [])
       .filter((project) => !query || project.name.toLowerCase().includes(query))
       .sort((left, right) => {
-        // Favoris d’abord, puis projets allumés dans chaque groupe. À priorité égale,
-        // le tri stable conserve l’ordre du serveur et évite les déplacements inutiles.
+        // Favoris d’abord, puis projets allumés dans chaque groupe (voir projectListRank). À priorité
+        // égale, le tri stable conserve l’ordre du serveur et évite les déplacements inutiles.
         const favoriteOrder = Number(favorites.includes(right.name)) - Number(favorites.includes(left.name));
         if (favoriteOrder) return favoriteOrder;
-        const isOn = (project: Project) =>
-          (project.odoo_status === "running" && !odooServerStopped(project)) ||
-          projectLifecycleJobs.has(`Démarrer ${project.name}`);
-        return Number(isOn(right)) - Number(isOn(left));
+        const rank = (project: Project) =>
+          projectListRank(project, projectLifecycleJobs.has(`Démarrer ${project.name}`));
+        return rank(right) - rank(left);
       });
   }, [overview, projectsFilter, favorites, projectLifecycleJobs]);
 

@@ -83,6 +83,15 @@ export function odooServerStopped(project?: Pick<Project, "odoo_status" | "odoo_
   return project?.odoo_status === "running" && project.odoo_server === "stopped";
 }
 
+/**
+ * Rang d'un projet dans la liste, à favori égal : Odoo démarré (ou en cours de démarrage) d'abord,
+ * puis conteneur allumé sans serveur Odoo (`docker compose up` à la main, Docker relancé), puis le reste.
+ */
+export function projectListRank(project: Pick<Project, "odoo_status" | "odoo_server">, starting = false) {
+  if (starting || (project.odoo_status === "running" && !odooServerStopped(project))) return 2;
+  return project.odoo_status === "running" ? 1 : 0;
+}
+
 export function firstOdooDatabase(project?: Project) {
   return project?.databases?.find((db) => db !== "postgres") || "";
 }

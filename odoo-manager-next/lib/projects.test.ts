@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { odooAccessUrl, odooServerStopped, runningProjectDatabaseCount, windowsPathFromMount } from "./projects.ts";
+import {
+  odooAccessUrl,
+  odooServerStopped,
+  projectListRank,
+  runningProjectDatabaseCount,
+  windowsPathFromMount,
+} from "./projects.ts";
 
 test("a Windows drive mounted in the Linux environment is shown as Windows writes it", () => {
   assert.equal(windowsPathFromMount("/mnt/d/Projets/Odoo"), "D:\\Projets\\Odoo");
@@ -40,4 +46,14 @@ test("database count is shown only when both containers are running", () => {
   assert.equal(runningProjectDatabaseCount({ ...project, databases: ["postgres"] }), 0);
   assert.equal(runningProjectDatabaseCount({ ...project, odoo_status: "exited" }), null);
   assert.equal(runningProjectDatabaseCount({ ...project, postgres_status: "exited" }), null);
+});
+
+test("a project whose container runs without Odoo stays above the stopped ones", () => {
+  const odooOn = projectListRank({ odoo_status: "running", odoo_server: "running" });
+  const containerOnly = projectListRank({ odoo_status: "running", odoo_server: "stopped" });
+  const stopped = projectListRank({ odoo_status: "exited", odoo_server: null });
+  const absent = projectListRank({ odoo_status: "absent", odoo_server: null });
+  assert.ok(odooOn > containerOnly && containerOnly > stopped);
+  assert.equal(stopped, absent);
+  assert.equal(projectListRank({ odoo_status: "absent", odoo_server: null }, true), odooOn);
 });
