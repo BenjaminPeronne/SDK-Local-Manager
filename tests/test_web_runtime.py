@@ -3519,13 +3519,14 @@ class ContainerFolderSizeTests(unittest.TestCase):
             sizes = {str(project): 10_000, str(project / "postgresql_data"): 4096, str(project / "odoo_data"): 1000}
             measured = {"postgresql_data": 900_000, "odoo_data": None}
 
-            web.measure_container_folders(
+            replaced = web.measure_container_folders(
                 project, sizes, "pgvector/pgvector:pg16", lambda path, _image: measured[path.name]
             )
 
             self.assertEqual(900_000, sizes[str(project / "postgresql_data")])
             self.assertEqual(1000, sizes[str(project / "odoo_data")])
             self.assertEqual(10_000 - 4096 + 900_000, sizes[str(project)])
+            self.assertTrue(replaced)
 
     def test_reads_the_size_printed_by_du_in_the_container(self):
         with patch.object(web, "run_capture", return_value=(0, "123\t/measured\n")) as run:
@@ -3545,5 +3546,32 @@ class ContainerFolderSizeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "docker-compose.yml"
             path.write_text(compose, encoding="utf-8")
-            with patch.object(web, "compose_file", return_value=path):
-                self.assertEqual("pgvector/pgvector:pg16", web.postgres_image_of("demo"))
+            self.assertEqual("pgvector/pgvector:pg16", web.postgres_image_of(Path(temporary)))
+
+    def test_trash_entry_counts_its_database_measured_in_a_container(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            trash = Path(temporary) / ".odoo_manager_deleted"
+            project = trash / "20261113_120000_demo"
+            (project / "postgresql_data").mkdir(parents=True)
+            (project / "docker-compose.yml").write_text("services:\n  db:\n    image: postgres:16\n", encoding="utf-8")
+            entry = {"name": project.name, "project": "demo", "deleted_at": "2026-11-13 12:00"}
+            job = Mock()
+            with (
+                patch.object(web, "WORKSPACE", Path(temporary)),
+                patch.object(web, "DELETED_PROJECTS", trash),
+                patch.object(web, "project_dirs", return_value=[]),
+                patch.object(web, "trash_entries", return_value=[entry]),
+                patch.object(web, "MANAGER_FOLDERS", {}),
+                patch.object(web, "docker_available", return_value=(False, "")),
+                patch.object(web, "container_measurement_needed", return_value=True),
+                patch.object(web, "directory_sizes", return_value={str(project): 8192, str(project / "postgresql_data"): 4096}),
+                patch.object(web, "container_directory_size", return_value=500_000_000) as measure,
+                patch.object(web, "apparent_directory_size") as apparent,
+                patch.object(web, "publish_event"),
+            ):
+                web.scan_disk_usage_job(job)
+
+            row = web.DISK_USAGE["report"]["trash"][0]
+            measure.assert_called_once_with(project / "postgresql_data", "postgres:16")
+            apparent.assert_not_called()
+            self.assertEqual((8192 - 4096 + 500_000_000, 8192 - 4096 + 500_000_000), (row["bytes"], row["apparent_bytes"]))

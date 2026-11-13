@@ -1637,7 +1637,10 @@ def validate_country(country):
 
 
 def compose_file(project):
-    path = WORKSPACE / project
+    return compose_file_in(WORKSPACE / project)
+
+
+def compose_file_in(path):
     for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
         candidate = path / name
         if safe_path_exists(candidate):
@@ -5226,8 +5229,8 @@ def container_measurement_needed():
     return platform_id() == "linux" and os.geteuid() != 0
 
 
-def postgres_image_of(project):
-    compose = compose_file(project)
+def postgres_image_of(directory):
+    compose = compose_file_in(directory)
     try:
         text = compose.read_text(encoding="utf-8", errors="ignore") if compose else ""
     except OSError:
@@ -5248,8 +5251,20 @@ def container_directory_size(path, image):
     return parse_du_output(output).get("/measured") if code == 0 else None
 
 
-def measure_container_folders(path, sizes, image, measure=container_directory_size):
-    """Remplace dans `sizes` la taille des dossiers des conteneurs par celle mesurée dans un conteneur."""
+def project_folder_sizes(path):
+    """({chemin: octets} d'un projet et de ses dossiers, vrai si un dossier a été mesuré dans un conteneur)."""
+    sizes = directory_sizes(path, depth=1)
+    image = postgres_image_of(path) if container_measurement_needed() else None
+    return sizes, bool(image) and measure_container_folders(path, sizes, image)
+
+
+def measure_container_folders(path, sizes, image, measure=None):
+    """Remplace dans `sizes` la taille des dossiers des conteneurs par celle mesurée dans un conteneur.
+
+    Vrai si au moins un dossier a été mesuré ainsi.
+    """
+    measure = measure or container_directory_size
+    replaced = False
     for name in CONTAINER_DATA_FOLDERS:
         folder = path / name
         measured = measure(folder, image) if folder.is_dir() else None
@@ -5257,7 +5272,8 @@ def measure_container_folders(path, sizes, image, measure=container_directory_si
             continue
         sizes[str(path)] = sizes.get(str(path), 0) - sizes.get(str(folder), 0) + measured
         sizes[str(folder)] = measured
-    return sizes
+        replaced = True
+    return replaced
 
 
 def apparent_directory_size(path):
@@ -5374,10 +5390,7 @@ def scan_disk_usage_job(job):
     for project in projects:
         advance(f"Projet {project}")
         path = WORKSPACE / project
-        sizes = directory_sizes(path, depth=1)
-        image = postgres_image_of(project) if container_measurement_needed() else None
-        if image:
-            measure_container_folders(path, sizes, image)
+        sizes, _measured = project_folder_sizes(path)
         project_rows.append(
             {
                 "name": project,
@@ -5391,7 +5404,11 @@ def scan_disk_usage_job(job):
     for entry in trash:
         advance(f"Corbeille : {entry['name']}")
         path = DELETED_PROJECTS / entry["name"]
-        trash_rows.append({**entry, "bytes": directory_size(path), "apparent_bytes": apparent_directory_size(path)})
+        sizes, measured = project_folder_sizes(path)
+        size = sizes.get(str(path), 0)
+        # Pas d'iCloud sous Linux : la taille apparente ne ferait que sous-compter les données des conteneurs.
+        apparent = size if measured else apparent_directory_size(path)
+        trash_rows.append({**entry, "bytes": size, "apparent_bytes": apparent})
     folder_rows = []
     for key in folders:
         name, label = MANAGER_FOLDERS[key]
