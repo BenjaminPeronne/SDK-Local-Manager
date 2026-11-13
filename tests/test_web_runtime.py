@@ -1063,7 +1063,9 @@ class JobHistoryTests(unittest.TestCase):
             self.previous_next_job_id = job_queue.NEXT_JOB_ID
             job_queue.JOBS.clear()
             job_queue.NEXT_JOB_ID = 1
-        self.sandbox = tempfile.TemporaryDirectory(prefix="odoo-manager-jobs-")
+        # L'action enregistre son historique juste après sa fin, dans son propre fil : sur un poste lent,
+        # le fichier peut encore s'écrire quand le dossier est supprimé (« Directory not empty »).
+        self.sandbox = tempfile.TemporaryDirectory(prefix="odoo-manager-jobs-", ignore_cleanup_errors=True)
         self.history = Path(self.sandbox.name) / "jobs.json"
         self.history_patch = patch.object(job_queue, "JOB_HISTORY_PATH", None)
         self.history_patch.start()
@@ -3530,14 +3532,15 @@ class ContainerFolderSizeTests(unittest.TestCase):
 
     def test_reads_the_size_printed_by_du_in_the_container(self):
         with patch.object(web, "run_capture", return_value=(0, "123\t/measured\n")) as run:
-            self.assertEqual(123 * 1024, web.container_directory_size(Path("/w/demo/postgresql_data"), "pg:16"))
+            # Chemin Linux en texte : cette mesure ne sert que sous Linux, Path l'écrirait à la Windows.
+            self.assertEqual(123 * 1024, web.container_directory_size("/w/demo/postgresql_data", "pg:16"))
         command = run.call_args.args[0]
         self.assertIn("/w/demo/postgresql_data:/measured:ro", command)
         self.assertEqual(["never"], command[command.index("--pull") + 1 : command.index("--pull") + 2])
 
     def test_no_size_when_docker_fails(self):
         with patch.object(web, "run_capture", return_value=(125, "Unable to find image")):
-            self.assertIsNone(web.container_directory_size(Path("/w/demo/postgresql_data"), "pg:16"))
+            self.assertIsNone(web.container_directory_size("/w/demo/postgresql_data", "pg:16"))
 
     def test_finds_the_postgres_image_of_the_project(self):
         compose = (

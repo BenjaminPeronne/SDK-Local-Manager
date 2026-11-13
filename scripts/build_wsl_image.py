@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Construit l'image de la distribution WSL « SDK-Manager » (fichier .wsl).
 
-`docker build` prépare la racine du système, `docker export` en produit l'archive tar
-que Windows importe avec `wsl --install --from-file`. L'empreinte SHA-256 accompagne
+`docker build` prépare la racine du système, `docker export` en produit l'archive tar,
+compressée en gzip, que Windows importe avec `wsl --install --from-file` (format .wsl
+recommandé par Microsoft). L'empreinte SHA-256 accompagne
 l'archive : l'application refuse d'importer une image qui ne correspond pas.
 """
 
 import argparse
+import gzip
 import hashlib
 import json
 import platform
@@ -21,6 +23,9 @@ WSL_DIRECTORY = ROOT / "wsl"
 DEFAULT_OUTPUT_DIRECTORY = ROOT / "dist" / "wsl"
 IMAGE_REPOSITORY = "sdk-manager-rootfs"
 REQUIRED_FILES = ("Dockerfile", "wsl.conf", "daemon.json", "provision.sh", "known_hosts")
+# Compressée ici, une fois, l'image n'est plus recompressée par l'installateur Windows (169 s
+# sur 553 Mo de tar). Niveau 6 : 9 n'y gagne rien et coûte trois fois plus de temps.
+GZIP_LEVEL = 6
 
 
 def application_version(frontend=None):
@@ -59,13 +64,16 @@ def run(command):
 
 
 def export_container_filesystem(tag, destination):
-    """Archive la racine construite. Le conteneur ne sert qu'à l'export."""
+    """Archive la racine construite, compressée en gzip. Le conteneur ne sert qu'à l'export."""
     container = f"sdk-manager-export-{uuid.uuid4().hex[:8]}"
     run(["docker", "create", "--name", container, tag])
     try:
-        with open(destination, "wb") as archive:
-            print(f"+ docker export {container} > {destination}", flush=True)
-            subprocess.run(["docker", "export", container], stdout=archive, check=True)
+        print(f"+ docker export {container} | gzip -{GZIP_LEVEL} > {destination}", flush=True)
+        export = subprocess.Popen(["docker", "export", container], stdout=subprocess.PIPE)
+        with gzip.open(destination, "wb", compresslevel=GZIP_LEVEL) as archive:
+            shutil.copyfileobj(export.stdout, archive, 1024 * 1024)
+        if export.wait() != 0:
+            raise subprocess.CalledProcessError(export.returncode, ["docker", "export", container])
     finally:
         subprocess.run(["docker", "rm", "-f", container], check=False, stdout=subprocess.DEVNULL)
 

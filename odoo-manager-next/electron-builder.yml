@@ -49,6 +49,9 @@ nsis:
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: false
   runAfterFinish: false
+  # L'image de l'environnement Linux (.wsl) est déjà compressée en gzip par build_wsl_image.py :
+  # la recompresser en LZMA prenait 169 s pour presque rien. Liste par défaut d'electron-builder + .wsl.
+  preCompressedFileExtensions: [".avi", ".mov", ".m4v", ".mp4", ".m4p", ".qt", ".mkv", ".webm", ".vmdk", ".wsl"]
 linux:
   target: [AppImage, deb]
   icon: electron/icons/128x128@2x.png

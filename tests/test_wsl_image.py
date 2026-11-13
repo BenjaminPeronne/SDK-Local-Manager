@@ -1,9 +1,12 @@
+import gzip
 import hashlib
 import importlib.util
+import io
 import json
 import re
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +35,30 @@ class ImageNamingTests(unittest.TestCase):
             archive = Path(temporary) / "image.wsl"
             archive.write_bytes(b"rootfs" * 1000)
             self.assertEqual(hashlib.sha256(b"rootfs" * 1000).hexdigest(), MODULE.sha256_of(archive))
+
+    def test_exported_root_is_compressed_with_gzip(self):
+        tar = b"racine du systeme" * 5000
+        export = unittest.mock.Mock(stdout=io.BytesIO(tar), returncode=0)
+        export.wait.return_value = 0
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            unittest.mock.patch.object(MODULE.subprocess, "run"),
+            unittest.mock.patch.object(MODULE.subprocess, "Popen", return_value=export),
+        ):
+            archive = Path(temporary) / "image.wsl"
+            MODULE.export_container_filesystem("sdk-manager-rootfs:1.0.0", archive)
+            self.assertEqual(tar, gzip.decompress(archive.read_bytes()))
+
+    def test_failed_export_is_reported(self):
+        export = unittest.mock.Mock(stdout=io.BytesIO(b""), returncode=1)
+        export.wait.return_value = 1
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            unittest.mock.patch.object(MODULE.subprocess, "run"),
+            unittest.mock.patch.object(MODULE.subprocess, "Popen", return_value=export),
+            self.assertRaises(MODULE.subprocess.CalledProcessError),
+        ):
+            MODULE.export_container_filesystem("sdk-manager-rootfs:1.0.0", Path(temporary) / "image.wsl")
 
     def test_missing_sources_are_reported_before_building(self):
         self.assertEqual([], MODULE.missing_sources())
