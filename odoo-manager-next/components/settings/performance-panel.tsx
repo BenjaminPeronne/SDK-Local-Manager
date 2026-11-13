@@ -152,7 +152,9 @@ export function PerformancePanel({
                 value={`${formatMemory(report.host.memory)} · ${processors(report.host.cpus)}`}
               />
               <Line
-                label={report.environment === "macos" ? "Docker Desktop" : "Docker"}
+                label={
+                  report.environment === "macos" || report.environment === "linux-desktop" ? "Docker Desktop" : "Docker"
+                }
                 value={docker?.available ? `${formatMemory(docker.memory)} · ${processors(docker.cpus)}` : "arrêté"}
               />
               {recommended && (
@@ -175,6 +177,13 @@ export function PerformancePanel({
               <p className="text-sm text-muted-foreground">
                 Sous Linux, Docker utilise directement toute la mémoire et tous les processeurs de l’ordinateur : rien à
                 régler.
+              </p>
+            )}
+
+            {report.environment === "linux-desktop" && (report.status === "low" || report.status === "critical") && (
+              <p className="text-sm text-muted-foreground">
+                Docker Desktop a moins de mémoire que recommandé, ce qui ralentit les projets. Ouvre Docker Desktop,
+                puis Settings › Resources, et donne-lui la mémoire et les processeurs recommandés ci-dessus.
               </p>
             )}
 

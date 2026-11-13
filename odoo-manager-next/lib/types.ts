@@ -554,7 +554,7 @@ export type ProjectDiagnostics = {
 
 /** Mémoire et processeurs de l'ordinateur et de Docker, et ce que le gestionnaire recommande. */
 export type PerformanceReport = {
-  environment: "macos" | "windows" | "wsl" | "linux";
+  environment: "macos" | "windows" | "wsl" | "linux" | "linux-desktop";
   host: { memory: number; cpus: number };
   docker: { available: boolean; memory: number; cpus: number };
   recommended: { memory: number; cpus: number; swap: number } | null;

@@ -13,6 +13,7 @@ from odoo_manager_core.docker_api import (
     engine_endpoint,
     parse_docker_host,
     parse_http_response,
+    uses_docker_desktop_on_linux,
 )
 
 
@@ -152,3 +153,21 @@ class EngineClientTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DockerDesktopOnLinuxTests(unittest.TestCase):
+    def test_desktop_linux_context(self):
+        with mock.patch("odoo_manager_core.docker_api.current_docker_context", return_value="desktop-linux"):
+            self.assertTrue(uses_docker_desktop_on_linux(environ={}))
+
+    def test_native_engine(self):
+        with mock.patch("odoo_manager_core.docker_api.current_docker_context", return_value="default"):
+            self.assertFalse(uses_docker_desktop_on_linux(environ={}))
+
+    def test_docker_context_variable_wins(self):
+        with mock.patch("odoo_manager_core.docker_api.current_docker_context", return_value="desktop-linux"):
+            self.assertFalse(uses_docker_desktop_on_linux(environ={"DOCKER_CONTEXT": "default"}))
+
+    def test_docker_host_bypasses_the_context(self):
+        with mock.patch("odoo_manager_core.docker_api.current_docker_context", return_value="desktop-linux"):
+            self.assertFalse(uses_docker_desktop_on_linux(environ={"DOCKER_HOST": "unix:///var/run/docker.sock"}))

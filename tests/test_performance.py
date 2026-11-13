@@ -237,11 +237,28 @@ class PerformancePayloadTests(unittest.TestCase):
         with (
             patch.object(web, "platform_id", return_value="linux"),
             patch.object(performance, "running_in_wsl", return_value=False),
+            patch.object(web, "uses_docker_desktop_on_linux", return_value=False),
             patch.object(web, "project_service", return_value=service),
         ):
             payload = web.performance_payload()
 
         self.assertEqual(("linux", "ok", None), (payload["environment"], payload["status"], payload["recommended"]))
+
+    def test_linux_docker_desktop_recommends_like_macos_without_applying(self):
+        service = Mock()
+        service.docker_resources.return_value = (2 * GIB, 4)
+        with (
+            patch.object(web, "platform_id", return_value="linux"),
+            patch.object(performance, "running_in_wsl", return_value=False),
+            patch.object(web, "uses_docker_desktop_on_linux", return_value=True),
+            patch.object(web, "project_service", return_value=service),
+            patch.object(performance, "host_resources", return_value={"memory": 16 * GIB, "cpus": 8}),
+        ):
+            payload = web.performance_payload()
+
+        self.assertEqual(("linux-desktop", "critical"), (payload["environment"], payload["status"]))
+        self.assertEqual({"memory": 10 * GIB, "cpus": 6, "swap": 2 * GIB}, payload["recommended"])
+        self.assertFalse(payload["can_apply"])
 
 
 class ApplyDockerResourcesTests(unittest.TestCase):

@@ -66,6 +66,15 @@ def context_docker_host(context, home=None):
         return ""
 
 
+def uses_docker_desktop_on_linux(environ=None, home=None):
+    """Vrai quand la CLI parle à Docker Desktop pour Linux : une VM et un partage de fichiers, comme sous macOS."""
+    environ = os.environ if environ is None else environ
+    context = environ.get("DOCKER_CONTEXT", "").strip()
+    if environ.get("DOCKER_HOST", "").strip() and not context:
+        return False
+    return (context or current_docker_context(home)) == "desktop-linux"
+
+
 def local_endpoint(platform_name=None, home=None, exists=None):
     platform_name = platform_name or platform_id()
     exists = exists or os.path.exists

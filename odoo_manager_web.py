@@ -85,7 +85,7 @@ from odoo_manager_core.disk_usage import (
     trash_entry,
     unused_images,
 )
-from odoo_manager_core.docker_api import EngineUnavailable
+from odoo_manager_core.docker_api import EngineUnavailable, uses_docker_desktop_on_linux
 from odoo_manager_core.docker_events import DockerEventWatcher, docker_events_arguments
 from odoo_manager_core.events import EVENT_SUBSCRIBERS, EVENT_SUBSCRIBERS_LOCK, publish_event
 from odoo_manager_core.http_routes import Route, Router, RouteRequest
@@ -4502,7 +4502,7 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
             memory, cpus = service.docker_resources()
             server_version = service.postgres_server_version(project)
             options = database_restore.restore_session_options(server_version, memory, cpus)
-            sessions = database_restore.post_data_sessions(cpus, shared_folder=platform_id() == "macos")
+            sessions = database_restore.post_data_sessions(cpus, shared_folder=docker_shares_project_files())
             post_data_options = database_restore.restore_session_options(server_version, memory, cpus, sessions)
             load_end = 70 if filestore else 85
             job_progress.span("Chargement des données", end=load_end, expected=60 + dump.file_size / (25 * 1024 * 1024))
@@ -5514,19 +5514,28 @@ DOCKER_DESKTOP_STOP_SECONDS = 180
 DOCKER_DESKTOP_START_SECONDS = 300
 
 
-def performance_payload():
+def docker_environment():
+    """macos, windows, wsl, linux (Docker natif) ou linux-desktop (Docker Desktop : VM et partage de fichiers)."""
     system = platform_id()
-    if system == "linux" and performance.running_in_wsl():
-        environment = "wsl"
-    else:
-        environment = system if system in {"macos", "windows"} else "linux"
+    if system != "linux":
+        return system
+    if performance.running_in_wsl():
+        return "wsl"
+    return "linux-desktop" if uses_docker_desktop_on_linux() else "linux"
+
+
+def docker_shares_project_files():
+    """Les dossiers des projets passent par le partage de fichiers d'une VM Docker Desktop."""
+    return docker_environment() in {"macos", "linux-desktop"}
+
+
+def performance_payload():
+    environment = docker_environment()
     host = performance.host_resources()
     memory, cpus = project_service().docker_resources(refresh=True)
-    # Sous Linux, Docker utilise directement toute la machine : rien à lui allouer.
+    # Sous Linux sans Docker Desktop, Docker utilise directement toute la machine : rien à lui allouer.
     recommended = (
-        performance.recommended_docker_resources(host["memory"], host["cpus"])
-        if environment in {"macos", "windows", "wsl"}
-        else None
+        performance.recommended_docker_resources(host["memory"], host["cpus"]) if environment != "linux" else None
     )
     status = performance.resources_status(memory, cpus, recommended)
     if environment == "linux" and memory:

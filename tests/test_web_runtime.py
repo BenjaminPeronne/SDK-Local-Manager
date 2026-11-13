@@ -547,6 +547,7 @@ class DatabaseNameValidationTests(unittest.TestCase):
 
 class DatabaseRestoreTests(unittest.TestCase):
     platform = "linux"
+    docker_desktop = False
 
     def test_json_reader_rejects_invalid_content_lengths(self):
         from types import SimpleNamespace
@@ -679,6 +680,8 @@ class DatabaseRestoreTests(unittest.TestCase):
                 patch("odoo_manager_web.clear_project_module_cache"),
                 patch("odoo_manager_web.drop_partial_database") as drop,
                 patch("odoo_manager_web.platform_id", return_value=self.platform),
+                patch("odoo_manager_web.performance.running_in_wsl", return_value=False),
+                patch("odoo_manager_web.uses_docker_desktop_on_linux", return_value=self.docker_desktop),
             ):
                 try:
                     web.restore_database_job(job, "DEMO", path, "backup.zip", "demo_restore", True, neutralize)
@@ -744,6 +747,15 @@ class DatabaseRestoreTests(unittest.TestCase):
         loading = service.load_database_dump.call_args.kwargs
         self.assertEqual(1, loading["post_data_sessions"])
         self.assertTrue(loading["freeze"])
+
+    def test_restore_on_linux_docker_desktop_builds_indexes_with_a_single_session(self):
+        service = self.restore_service()
+        self.docker_desktop = True
+
+        _job, error, _backup_left, _arrival, _drop = self.run_restore(service)
+
+        self.assertIsNone(error)
+        self.assertEqual(1, service.load_database_dump.call_args.kwargs["post_data_sessions"])
 
     def test_restore_without_neutralization_restarts_odoo_normally(self):
         service = self.restore_service()
