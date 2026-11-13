@@ -58,6 +58,7 @@ function launchPieces(width: number, height: number) {
  */
 export function celebrateWithConfetti({ everyTime = false } = {}) {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (document.documentElement.dataset.effects === "reduced") return;
   if (!everyTime && !claimToday()) return;
 
   const canvas = document.createElement("canvas");

@@ -368,8 +368,17 @@ class Backend {
   }
 }
 
+/**
+ * Vrai quand Chromium compose la fenêtre sans carte graphique (`disabled_software`, `unavailable_off`…) :
+ * fréquent sous Linux (pilote écarté, machine virtuelle, Wayland). Animations et flou y coûtent du processeur.
+ */
+function reducedEffects(featureStatus) {
+  return !String(featureStatus?.gpu_compositing || "").startsWith("enabled");
+}
+
 module.exports = {
   APP_ORIGIN,
+  reducedEffects,
   API_TOKEN_HEADER,
   Backend,
   apiTokenPath,

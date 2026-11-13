@@ -20,6 +20,7 @@ const {
   API_TOKEN_HEADER,
   Backend,
   configPath,
+  reducedEffects,
   externalUrl,
   staticPath,
   contentPolicy,
@@ -38,6 +39,7 @@ const {
 } = require("./wsl.cjs");
 
 app.setName("SDK Local Manager");
+
 app.setAppUserModelId("com.sudokeys.odoo-manager");
 protocol.registerSchemesAsPrivileged([
   {
@@ -57,6 +59,18 @@ if (smokePath && !process.env.ODOO_MANAGER_CONFIG_DIR) throw new Error("Le smoke
 if (smokePath) app.setPath("userData", path.join(process.env.ODOO_MANAGER_CONFIG_DIR, "electron"));
 let window;
 let backend;
+
+// Effets allégés quand la fenêtre est dessinée sans carte graphique. Inconnu (null) tant que le processus
+// graphique n'a pas répondu : avant, Electron annonce « disabled_software » sur toutes les machines.
+let reducedGraphicsEffects = null;
+app.on("gpu-info-update", () => {
+  const status = app.getGPUFeatureStatus();
+  const reduced = reducedEffects(status);
+  if (reduced === reducedGraphicsEffects) return;
+  reducedGraphicsEffects = reduced;
+  backend?.log(`Accélération graphique : ${status.gpu_compositing}${reduced ? " (effets allégés)" : ""}`);
+  window?.webContents.send("sdk:reduced-effects", reduced);
+});
 let wsl;
 let updater;
 // Motif lisible quand l'environnement Linux a échoué et que le backend Windows a pris le relais.
@@ -204,6 +218,7 @@ function installHandlers() {
       return callback(...args);
     });
   handle("version", () => app.getVersion());
+  handle("reduced-effects", () => reducedGraphicsEffects);
   handle("backend-endpoint", () => backend.endpoint);
   handle("backend-diagnostics", () => backend.diagnostics());
   handle("open-external", (url) => shell.openExternal(externalUrl(url)));

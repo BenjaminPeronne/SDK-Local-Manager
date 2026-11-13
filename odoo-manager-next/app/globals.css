@@ -704,6 +704,19 @@ textarea {
   }
 }
 
+/* Sans carte graphique, le processeur dessine chaque image : ni animations décoratives, ni flou. */
+:root[data-effects="reduced"] .sdk-shell[data-season] .sdk-brand::after {
+  animation: none;
+}
+:root[data-effects="reduced"] :is(.sdk-snowfall, .sdk-easter-eggs, .sdk-bats) {
+  display: none;
+}
+:root[data-effects="reduced"] *,
+:root[data-effects="reduced"] *::before,
+:root[data-effects="reduced"] *::after {
+  backdrop-filter: none !important;
+}
+
 /* Un tableau délimité distingue les bases des autres sections de la page. */
 .sdk-database-list-row {
   display: grid;

@@ -23,6 +23,21 @@ const wslCapabilities =
         },
       };
 
+// Sans carte graphique (fréquent sous Linux), l'interface coupe ses animations et son flou. L'état
+// arrive après le premier dessin ; il est aussi redemandé au chargement, s'il était déjà connu.
+function applyReducedEffects(reduced) {
+  if (reduced) document.documentElement.dataset.effects = "reduced";
+  else delete document.documentElement.dataset.effects;
+}
+if (typeof window !== "undefined") {
+  ipcRenderer.on("sdk:reduced-effects", (_event, reduced) => applyReducedEffects(reduced === true));
+  window.addEventListener("DOMContentLoaded", () => {
+    void ipcRenderer.invoke("sdk:reduced-effects").then((reduced) => {
+      if (typeof reduced === "boolean") applyReducedEffects(reduced);
+    });
+  });
+}
+
 // Expose capabilities individually; the renderer never receives raw IPC or Node access.
 contextBridge.exposeInMainWorld(
   "sdkDesktop",

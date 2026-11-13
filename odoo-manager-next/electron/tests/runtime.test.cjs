@@ -8,6 +8,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const {
   Backend,
+  reducedEffects,
   apiTokenPath,
   configPath,
   mergeWslenv,
@@ -301,4 +302,12 @@ test("the backend stops by itself when the application is killed", async (t) => 
   for (let i = 0; i < 50 && alive(); i++) await new Promise((resolve) => setTimeout(resolve, 100));
   if (alive()) process.kill(pid, "SIGKILL");
   assert.equal(alive(), false, "le backend ne doit pas survivre à l'application");
+});
+
+test("effects are reduced only when the window is composed without a graphics card", () => {
+  assert.equal(reducedEffects({ gpu_compositing: "enabled" }), false);
+  assert.equal(reducedEffects({ gpu_compositing: "enabled_on" }), false);
+  assert.equal(reducedEffects({ gpu_compositing: "disabled_software" }), true);
+  assert.equal(reducedEffects({ gpu_compositing: "unavailable_off" }), true);
+  assert.equal(reducedEffects({}), true);
 });

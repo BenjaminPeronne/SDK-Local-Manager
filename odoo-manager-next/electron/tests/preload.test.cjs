@@ -58,3 +58,38 @@ test("the rest of the bridge is identical on every system", () => {
   assert.deepEqual(Object.keys(exposedApi("darwin")), windows);
   assert.ok(windows.includes("backendEndpoint") && windows.includes("stopLegacyTraefik"));
 });
+
+test("the page follows the graphics acceleration reported by the application", async () => {
+  const listeners = {};
+  const channels = {};
+  const documentElement = { dataset: {} };
+  global.window = { addEventListener: (name, callback) => (listeners[name] = callback) };
+  global.document = { documentElement };
+  const load = Module._load;
+  Module._load = (request, ...rest) =>
+    request === "electron"
+      ? {
+          contextBridge: { exposeInMainWorld: () => {} },
+          ipcRenderer: {
+            invoke: (channel) => Promise.resolve(channel === "sdk:reduced-effects" ? true : undefined),
+            on: (channel, callback) => (channels[channel] = callback),
+          },
+        }
+      : load(request, ...rest);
+  try {
+    delete require.cache[PRELOAD];
+    require(PRELOAD);
+    listeners.DOMContentLoaded();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(documentElement.dataset.effects, "reduced");
+    channels["sdk:reduced-effects"]({}, false);
+    assert.equal(documentElement.dataset.effects, undefined);
+    channels["sdk:reduced-effects"]({}, true);
+    assert.equal(documentElement.dataset.effects, "reduced");
+  } finally {
+    Module._load = load;
+    delete require.cache[PRELOAD];
+    delete global.window;
+    delete global.document;
+  }
+});
