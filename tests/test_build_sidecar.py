@@ -43,3 +43,18 @@ class SidecarCacheTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LinuxPyInstallerVersionTests(unittest.TestCase):
+    """PyInstaller 6.22 casse le démarrage depuis l'AppImage : la construction Linux doit le refuser."""
+
+    def test_refuses_6_22_and_later_on_linux(self):
+        for version in ("6.22.0", "6.22.3", "7.0"):
+            with self.subTest(version=version), self.assertRaisesRegex(SystemExit, "AppImage"):
+                MODULE.check_pyinstaller_version(version, "Linux")
+
+    def test_accepts_the_pinned_version_and_other_systems(self):
+        MODULE.check_pyinstaller_version("6.21.0", "Linux")
+        MODULE.check_pyinstaller_version("6.22.3", "Darwin")
+        MODULE.check_pyinstaller_version("6.22.3", "Windows")
+        MODULE.check_pyinstaller_version("", "Linux")
