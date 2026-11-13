@@ -3506,3 +3506,44 @@ class RemoteBackupRestoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContainerFolderSizeTests(unittest.TestCase):
+    """Sous Linux, les dossiers des conteneurs ne sont lisibles que depuis un conteneur."""
+
+    def test_replaces_unreadable_folders_with_the_container_measure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            (project / "postgresql_data").mkdir()
+            (project / "odoo_data").mkdir()
+            sizes = {str(project): 10_000, str(project / "postgresql_data"): 4096, str(project / "odoo_data"): 1000}
+            measured = {"postgresql_data": 900_000, "odoo_data": None}
+
+            web.measure_container_folders(
+                project, sizes, "pgvector/pgvector:pg16", lambda path, _image: measured[path.name]
+            )
+
+            self.assertEqual(900_000, sizes[str(project / "postgresql_data")])
+            self.assertEqual(1000, sizes[str(project / "odoo_data")])
+            self.assertEqual(10_000 - 4096 + 900_000, sizes[str(project)])
+
+    def test_reads_the_size_printed_by_du_in_the_container(self):
+        with patch.object(web, "run_capture", return_value=(0, "123\t/measured\n")) as run:
+            self.assertEqual(123 * 1024, web.container_directory_size(Path("/w/demo/postgresql_data"), "pg:16"))
+        command = run.call_args.args[0]
+        self.assertIn("/w/demo/postgresql_data:/measured:ro", command)
+        self.assertEqual(["never"], command[command.index("--pull") + 1 : command.index("--pull") + 2])
+
+    def test_no_size_when_docker_fails(self):
+        with patch.object(web, "run_capture", return_value=(125, "Unable to find image")):
+            self.assertIsNone(web.container_directory_size(Path("/w/demo/postgresql_data"), "pg:16"))
+
+    def test_finds_the_postgres_image_of_the_project(self):
+        compose = (
+            "services:\n  db:\n    image: pgvector/pgvector:pg16\n  odoo:\n    image: sudokeys/docker-odoo-local:19.0\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "docker-compose.yml"
+            path.write_text(compose, encoding="utf-8")
+            with patch.object(web, "compose_file", return_value=path):
+                self.assertEqual("pgvector/pgvector:pg16", web.postgres_image_of("demo"))

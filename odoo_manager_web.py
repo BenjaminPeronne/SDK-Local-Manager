@@ -5217,6 +5217,49 @@ def directory_size(path):
     return directory_sizes(path).get(str(Path(path)), 0)
 
 
+# Dossiers écrits par les conteneurs : sous Linux, ils appartiennent aux comptes PostgreSQL et Odoo
+# du conteneur et `du` ne peut pas y entrer (une base de plusieurs Go s'affichait à 4 Ko).
+CONTAINER_DATA_FOLDERS = ("postgresql_data", "odoo_data")
+
+
+def container_measurement_needed():
+    return platform_id() == "linux" and os.geteuid() != 0
+
+
+def postgres_image_of(project):
+    compose = compose_file(project)
+    try:
+        text = compose.read_text(encoding="utf-8", errors="ignore") if compose else ""
+    except OSError:
+        return None
+    return next((ref for ref in sorted(compose_image_references(text)) if "postgres" in ref or "pgvector" in ref), None)
+
+
+def container_directory_size(path, image):
+    """Taille de `path` mesurée par `du` dans `image` (déjà présente), ou None si Docker ne la donne pas."""
+    code, output = run_capture(
+        docker_command(
+            SETTINGS,
+            *("run", "--rm", "--pull", "never", "--network", "none", "--entrypoint", "du"),
+            *("-v", f"{path}:/measured:ro", image, "-sk", "/measured"),
+        ),
+        timeout=DU_TIMEOUT_SECONDS,
+    )
+    return parse_du_output(output).get("/measured") if code == 0 else None
+
+
+def measure_container_folders(path, sizes, image, measure=container_directory_size):
+    """Remplace dans `sizes` la taille des dossiers des conteneurs par celle mesurée dans un conteneur."""
+    for name in CONTAINER_DATA_FOLDERS:
+        folder = path / name
+        measured = measure(folder, image) if folder.is_dir() else None
+        if measured is None:
+            continue
+        sizes[str(path)] = sizes.get(str(path), 0) - sizes.get(str(folder), 0) + measured
+        sizes[str(folder)] = measured
+    return sizes
+
+
 def apparent_directory_size(path):
     """Taille des fichiers, stockés ou non sur ce disque : iCloud peut n'en garder qu'une partie.
 
@@ -5332,6 +5375,9 @@ def scan_disk_usage_job(job):
         advance(f"Projet {project}")
         path = WORKSPACE / project
         sizes = directory_sizes(path, depth=1)
+        image = postgres_image_of(project) if container_measurement_needed() else None
+        if image:
+            measure_container_folders(path, sizes, image)
         project_rows.append(
             {
                 "name": project,
