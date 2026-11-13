@@ -5455,8 +5455,39 @@ def update_disk_usage_report(update):
             update(DISK_USAGE["report"])
 
 
+def remove_tree_in_container(path):
+    """Vide `path` depuis un conteneur, qui peut effacer les fichiers des comptes PostgreSQL et Odoo, puis le retire.
+
+    Sous Linux seulement, avec une image PostgreSQL déjà présente. Faux si Docker n'a pas pu.
+    """
+    if platform_id() != "linux":
+        return False
+    image = postgres_image_of(path) or next(
+        (found for project in project_dirs() if (found := postgres_image_of(WORKSPACE / project))), None
+    )
+    if not image:
+        return False
+    code, _output = run_capture(
+        docker_command(
+            SETTINGS,
+            *("run", "--rm", "--pull", "never", "--network", "none", "--entrypoint", "find"),
+            *("-v", f"{path}:/removed", image, "/removed", "-mindepth", "1", "-delete"),
+        ),
+        timeout=DU_TIMEOUT_SECONDS,
+    )
+    if code != 0:
+        return False
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    return True
+
+
 def remove_tree(job, path):
-    """Supprime un dossier ; les données PostgreSQL d'un autre utilisateur passent par sudo -n."""
+    """Supprime un dossier ; les données des conteneurs passent par un conteneur, sinon par sudo -n."""
     try:
         shutil.rmtree(path)
         return
@@ -5464,6 +5495,9 @@ def remove_tree(job, path):
         return
     except PermissionError:
         pass
+    if remove_tree_in_container(path):
+        job.add(f"Données des bases supprimées sans droits administrateur : {path}")
+        return
     prefix = privileged_prefix()
     if not prefix:
         raise RuntimeError(

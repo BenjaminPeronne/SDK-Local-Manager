@@ -3575,3 +3575,45 @@ class ContainerFolderSizeTests(unittest.TestCase):
             measure.assert_called_once_with(project / "postgresql_data", "postgres:16")
             apparent.assert_not_called()
             self.assertEqual((8192 - 4096 + 500_000_000, 8192 - 4096 + 500_000_000), (row["bytes"], row["apparent_bytes"]))
+
+
+class RemoveTreeTests(unittest.TestCase):
+    """Sous Linux, les données des bases appartiennent au compte du conteneur."""
+
+    def test_container_empties_the_folder_before_sudo(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "20261113_120000_demo"
+            path.mkdir()
+            (path / "docker-compose.yml").write_text("services:\n  db:\n    image: postgres:16\n", encoding="utf-8")
+            job = Mock()
+            with (
+                patch.object(web, "platform_id", return_value="linux"),
+                patch.object(web.shutil, "rmtree", side_effect=[PermissionError(13, "denied"), None]),
+                patch.object(web, "run_capture", return_value=(0, "")) as run,
+                patch.object(web, "privileged_prefix") as sudo,
+            ):
+                web.remove_tree(job, path)
+
+        command = run.call_args.args[0]
+        self.assertIn(f"{path}:/removed", command)
+        self.assertEqual(["postgres:16", "/removed", "-mindepth", "1", "-delete"], command[-5:])
+        sudo.assert_not_called()
+
+    def test_falls_back_to_sudo_when_docker_cannot(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "20261113_120000_demo"
+            path.mkdir()
+            (path / "docker-compose.yml").write_text("services:\n  db:\n    image: postgres:16\n", encoding="utf-8")
+            with (
+                patch.object(web, "platform_id", return_value="linux"),
+                patch.object(web.shutil, "rmtree", side_effect=PermissionError(13, "denied")),
+                patch.object(web, "run_capture", return_value=(125, "Unable to find image")),
+                patch.object(web, "privileged_prefix", return_value=[]),
+                self.assertRaisesRegex(RuntimeError, "Droits insuffisants"),
+            ):
+                web.remove_tree(Mock(), path)
+
+    def test_never_used_outside_linux(self):
+        with patch.object(web, "platform_id", return_value="macos"), patch.object(web, "run_capture") as run:
+            self.assertFalse(web.remove_tree_in_container(Path("/w/demo")))
+        run.assert_not_called()
