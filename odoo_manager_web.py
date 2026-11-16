@@ -6531,7 +6531,7 @@ def install_socle_job(job, project, db_name, presets):
     module_command_job(job, "--install-module", project, db_name, ",".join(pending))
 
 
-def module_command_job(job, flag, project, db_name, modules, overwrite_translations=False):
+def module_command_job(job, flag, project, db_name, modules, overwrite_translations=False, restart=True):
     project = validate_project(project)
     db_name = validate_odoo_db(db_name)
     module_names = [name.strip() for name in validate_modules(modules).split(",") if name.strip()]
@@ -6572,6 +6572,7 @@ def module_command_job(job, flag, project, db_name, modules, overwrite_translati
                 option="-i" if flag == "--install-module" else "-u",
                 log=log,
                 overwrite_translations=overwrite_translations,
+                restart=restart,
             )
             # Un lien au nom refusé par Odoo a pu être renommé : la liste des modules est relue.
             clear_project_module_cache(project)
@@ -6686,7 +6687,13 @@ def update_imported_modules_job(job, project, db_name, modules):
     to_install = [name for name in requested if name not in to_update]
     if to_install:
         job.add("Nouveaux modules à installer : " + ", ".join(to_install))
-        module_command_job(job, "--install-module", project, db_name, ",".join(to_install))
+        # Une mise à jour suit : Odoo ne redémarre qu'après elle (un échec d'installation l'arrête là, sans la suite).
+        try:
+            module_command_job(job, "--install-module", project, db_name, ",".join(to_install), restart=not to_update)
+        except BaseException:
+            if to_update:
+                project_service().restart_odoo_server_after_failure(project, log=job.add)
+            raise
     if to_update:
         job.add("Modules existants à mettre à jour : " + ", ".join(to_update))
         module_command_job(job, "--update-module", project, db_name, ",".join(to_update))
@@ -7952,14 +7959,24 @@ def update_repository_databases(job, project, modules):
         job.add("Aucune base du projet n'utilise les modules de ce dépôt : rien à mettre à jour.")
         return []
     failures = []
-    for index, (db_name, names) in enumerate(databases.items(), start=1):
-        job.add("")
-        job.add(f"Base {index}/{len(databases)} : mise à jour de {db_name} ({', '.join(names)})")
-        try:
-            module_command_job(job, "--update-module", project, db_name, ",".join(names))
-        except Exception as exc:
-            failures.append(f"{db_name} ({exc})")
-            job.add(f"Mise à jour de {db_name} impossible : {exc}")
+    service = project_service()
+    # Odoo reste arrêté d'une base à l'autre : le relancer puis l'attendre entre deux bases coûtait
+    # 15 à 50 s chacune, pour l'arrêter aussitôt. Il redémarre une fois, même après un échec ou un arrêt.
+    try:
+        for index, (db_name, names) in enumerate(databases.items(), start=1):
+            job.add("")
+            job.add(f"Base {index}/{len(databases)} : mise à jour de {db_name} ({', '.join(names)})")
+            try:
+                module_command_job(job, "--update-module", project, db_name, ",".join(names), restart=False)
+            except Exception as exc:
+                failures.append(f"{db_name} ({exc})")
+                job.add(f"Mise à jour de {db_name} impossible : {exc}")
+    except BaseException:
+        service.restart_odoo_server_after_failure(project, log=job.add)
+        raise
+    job.add("Redémarrage du serveur Odoo...")
+    service.start_odoo_server(project, log=job.add)
+    service.wait_project_http(project, log=job.add)
     if failures:
         raise RuntimeError(
             f"Branche changée, mais {len(failures)} base(s) sur {len(databases)} n'ont pas pu être mises à jour : "

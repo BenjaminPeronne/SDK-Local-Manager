@@ -635,7 +635,9 @@ class RepositoryModulesTests(ModuleLayoutTests):
     def test_base_updates_go_on_after_a_failure_and_report_it(self):
         updated = []
 
-        def update(job, flag, project, db_name, modules):
+        def update(job, flag, project, db_name, modules, restart=True):
+            # Odoo reste arrêté entre deux bases : il ne redémarre qu'une fois, après la dernière.
+            self.assertFalse(restart)
             updated.append((flag, db_name, modules))
             if db_name == "prod":
                 raise RuntimeError("module en erreur")
@@ -658,6 +660,8 @@ class RepositoryModulesTests(ModuleLayoutTests):
             [("--update-module", "prod", "alpha,beta"), ("--update-module", "test", "beta")],
             updated,
         )
+        service.return_value.start_odoo_server.assert_called_once_with(self.project, log=job.add)
+        service.return_value.wait_project_http.assert_called_once_with(self.project, log=job.add)
 
     def test_no_base_to_update_after_a_branch_switch(self):
         job = DummyJob()

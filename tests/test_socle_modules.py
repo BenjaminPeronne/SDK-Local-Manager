@@ -230,8 +230,8 @@ class SocleModulesTests(ModuleLayoutTests):
         beta = self.create_enterprise_module("beta")
         calls = []
 
-        def record_command(job, flag, project, db_name, modules):
-            calls.append((flag, modules))
+        def record_command(job, flag, project, db_name, modules, restart=True):
+            calls.append((flag, modules, restart))
 
         job = DummyJob()
         with (
@@ -249,7 +249,8 @@ class SocleModulesTests(ModuleLayoutTests):
         ):
             web.update_imported_modules_job(job, self.project, "test_db", "alpha,beta")
 
-        self.assertEqual(calls, [("--install-module", "beta"), ("--update-module", "alpha")])
+        # Odoo ne redémarre qu'après la mise à jour qui suit l'installation.
+        self.assertEqual(calls, [("--install-module", "beta", False), ("--update-module", "alpha", True)])
         self.assertEqual(job.result, {"kind": "module_update", "scope": "imported", "modules": ["alpha", "beta"]})
 
     def test_socle_job_logs_dependencies_and_rejects_missing_ones(self):

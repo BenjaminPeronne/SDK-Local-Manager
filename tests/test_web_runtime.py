@@ -3323,6 +3323,7 @@ class DatabaseNeutralizationTests(unittest.TestCase):
             # Journal relayé vers l'action en gardant les lignes de la commande (collisions de données).
             log=ANY,
             overwrite_translations=True,
+            restart=True,
         )
 
     @patch("odoo_manager_web.list_databases_for", return_value=["postgres", "demo"])

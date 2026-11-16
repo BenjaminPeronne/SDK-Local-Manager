@@ -3263,7 +3263,11 @@ class ProjectService:
         else:
             self.wait_for_odoo_container_initialization(container, log=log)
 
-    def run_odoo_module_command(self, project, db_name, modules, option="-u", log=None, overwrite_translations=False):
+    def run_odoo_module_command(
+        self, project, db_name, modules, option="-u", log=None, overwrite_translations=False, restart=True
+    ):
+        """`restart=False` laisse Odoo arrêté, même en cas d'échec : l'appelant enchaîne d'autres bases
+        et le redémarre une seule fois à la fin."""
         if option not in {"-i", "-u"}:
             raise ValueError("Option module Odoo invalide.")
         container = f"odoo-{project}"
@@ -3401,8 +3405,12 @@ class ProjectService:
                 self.log(log, "La base était neutralisée: nouvelle passe après l'opération module...")
                 self._execute_database_neutralization(project, db_name, log=log)
         except BaseException:
-            self.restart_odoo_server_after_failure(project, log=log)
+            if restart:
+                self.restart_odoo_server_after_failure(project, log=log)
             raise
+        if not restart:
+            self.log(log, "Opération module terminée.")
+            return
         job_progress.span("Redémarrage d'Odoo", share=0.8, expected=20)
         self.log(log, "Redémarrage du serveur Odoo...")
         self.start_odoo_server(project, log=log)

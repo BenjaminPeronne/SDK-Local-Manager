@@ -1151,6 +1151,21 @@ class ProjectServiceTests(unittest.TestCase):
         )
         self.assertTrue(any("Redémarrage du serveur Odoo" in line for line in logs))
 
+    def test_module_update_without_restart_leaves_odoo_stopped_even_on_failure(self):
+        # Plusieurs bases enchaînées : l'appelant redémarre Odoo une seule fois, après la dernière.
+        self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
+        self.runner.odoo_server_running = False
+        self.runner.odoo_port_ready = True
+        logs = []
+
+        self.service.run_odoo_module_command("DEMO", "demo", "sale_custom", log=logs.append, restart=False)
+        self.runner.stream_codes = [255]
+        with self.assertRaises(RuntimeError):
+            self.service.run_odoo_module_command("DEMO", "demo", "sale_custom", log=logs.append, restart=False)
+
+        self.assertFalse(any("Démarrage du serveur Odoo" in line for line in logs))
+        self.assertFalse(any("Redémarrage du serveur Odoo" in line for line in logs))
+
     def test_module_update_failure_reports_odoo_error_after_restart(self):
         self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
         self.runner.odoo_server_running = False
