@@ -5866,7 +5866,7 @@ def stop_odoo_server_job(job, project):
     project_service().stop_odoo_server(project, log=job.add)
     with OVERVIEW_ODOO_SERVERS_CACHE_LOCK:
         OVERVIEW_ODOO_SERVERS_CACHE.pop(project, None)
-    job.add("Odoo ne répond plus : teste le mode hors ligne, puis utilise Rétablir Odoo dans le menu Outils.")
+    job.add("Odoo ne répond plus : teste le mode hors ligne, puis utilise Repasser en ligne dans le menu Outils.")
 
 
 def addon_links_wsl_distribution(*directories, creating=False):

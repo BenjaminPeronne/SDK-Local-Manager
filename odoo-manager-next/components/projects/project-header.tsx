@@ -372,16 +372,20 @@ export function ProjectHeader({
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Separator />
-            <DropdownMenu.Label>Tester le mode hors ligne</DropdownMenu.Label>
+            <DropdownMenu.Label>Mode hors ligne</DropdownMenu.Label>
             {selectedOdooServerStopped ? (
               <DropdownMenu.Item disabled={loading} onSelect={requestStartProject}>
                 <Wifi className="h-4 w-4" />
-                Rétablir Odoo
+                Repasser en ligne
               </DropdownMenu.Item>
             ) : (
-              <DropdownMenu.Item disabled={loading} onSelect={() => void requestCutOdoo()}>
+              <DropdownMenu.Item
+                disabled={loading}
+                title="Arrête Odoo sans fermer les pages ouvertes. Une page passe hors ligne à sa prochaine demande au serveur (un clic qui charge des données). Avant Odoo 20, seule la caisse a un mode hors ligne : les autres écrans affichent « Connexion perdue »."
+                onSelect={() => void requestCutOdoo()}
+              >
                 <WifiOff className="h-4 w-4" />
-                Couper Odoo sans fermer les pages ouvertes
+                Passer hors ligne
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Separator />

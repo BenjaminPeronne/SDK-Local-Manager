@@ -435,9 +435,9 @@ Le bouton téléphone de chaque base, ou **Outils > Sur mobile (QR code)** pour 
 
 Les échanges ne sont pas chiffrés : mots de passe et données restent lisibles sur le réseau, à n'ouvrir que sur un Wi-Fi de confiance. Si le téléphone n'arrive pas à se connecter, vérifie le pare-feu du poste.
 
-### Tester le mode hors ligne
+### Mode hors ligne
 
-Le menu **Outils** d'un projet démarré propose **Couper Odoo sans fermer les pages ouvertes** : le serveur Odoo s'arrête, mais les conteneurs et les bases restent démarrés. Les pages Odoo déjà ouvertes (caisse, code-barres…) perdent le serveur comme lors d'une vraie coupure. **Rétablir Odoo**, au même endroit, le relance ; **Ouvrir Odoo** aussi. Les données ne sont pas touchées.
+Le menu **Outils** d'un projet démarré propose **Mode hors ligne › Passer hors ligne** : le serveur Odoo s'arrête, mais les conteneurs et les bases restent démarrés. Les pages Odoo déjà ouvertes (caisse, code-barres…) perdent le serveur comme lors d'une vraie coupure. **Repasser en ligne**, au même endroit, le relance ; **Ouvrir Odoo** aussi. Les données ne sont pas touchées. Une page ouverte passe hors ligne à sa prochaine demande au serveur. Le mode hors ligne de tout Odoo n'existe qu'à partir de la 20.0 : avant, seule la caisse en a un, les autres écrans affichent « Connexion perdue ».
 
 ### IoT Box virtuelle
 
