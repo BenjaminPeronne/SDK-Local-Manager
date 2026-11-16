@@ -263,9 +263,9 @@ class RestoreSqlTests(unittest.TestCase):
 
         self.assertIn("SET value = 'http://dev.client.localhost'", sql)
         self.assertIn("WHERE NOT EXISTS (SELECT 1 FROM ir_config_parameter WHERE key = 'web.base.url')", sql)
-        # report.url n'est corrigé que s'il existe : sans lui, Odoo prend web.base.url.
+        # report.url est créé s'il manque : sans lui, wkhtmltopdf prend web.base.url, injoignable du conteneur.
         self.assertIn("SET value = 'http://127.0.0.1:8069'", sql)
-        self.assertNotIn("SELECT 'report.url'", sql)
+        self.assertIn("SELECT 'report.url', 'http://127.0.0.1:8069'", sql)
 
     def test_local_urls_only_replace_unreachable_addresses(self):
         sql = database_restore.local_urls_sql("http://dev.client_v19.localhost:8080")
@@ -275,6 +275,8 @@ class RestoreSqlTests(unittest.TestCase):
         self.assertIn(r"value ~* '^https?://dev\.client_v19\.localhost(:[0-9]+)?/?$'", sql)
         self.assertIn("to_regclass('public.ir_config_parameter') IS NULL", sql)
         self.assertIn("value !~ ':8069/?$'", sql)
+        self.assertIn("SELECT 'report.url', 'http://127.0.0.1:8069', 1", sql)
+        self.assertIn("WHERE NOT EXISTS (SELECT 1 FROM ir_config_parameter WHERE key = 'report.url')", sql)
         self.assertTrue(sql.rstrip().endswith("FROM sdk_local_urls ORDER BY key;"))
 
     def test_empty_database_matches_odoo_and_quotes_names(self):

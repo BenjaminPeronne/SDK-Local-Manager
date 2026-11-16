@@ -4753,6 +4753,10 @@ def create_database_job(job, project, db_name, master_pwd, login, password, lang
         databases = set(list_databases_for(project))
         if db_name in databases:
             job.add(f"Base créée : {db_name}")
+            # Avant la première édition : Odoo garde ces paramètres en mémoire une fois lus.
+            service.run_postgres_sql(
+                project, db_name, database_restore.restored_urls_sql(service.project_url(project).rstrip("/"))
+            )
             remember_database_arrival(job, project, db_name, "created")
             clear_project_module_cache(project)
             job.result = {"kind": "database_creation", "database": db_name}

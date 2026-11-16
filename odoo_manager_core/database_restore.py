@@ -319,21 +319,17 @@ def restored_urls_sql(base_url):
 
     web.base.url sert aux liens des e-mails (invitation au portail, réinitialisation du mot de
     passe…) : celle de la production ou http://localhost:8069 mènent ailleurs ou nulle part.
-    report.url, s'il existe, vise le serveur de production : les PDF perdraient leur mise en page.
+    report.url vise le serveur de production, ou manque : wkhtmltopdf prend alors web.base.url, que le
+    conteneur ne sait pas joindre (HostNotFoundError), et les PDF perdent leur mise en page.
     """
-    return (
-        parameters_sql({"web.base.url": base_url})
-        + "\n"
-        + f"UPDATE ir_config_parameter SET value = {sql_literal(LOCAL_REPORT_URL)}, write_uid = 1, "
-        "write_date = now() AT TIME ZONE 'UTC' WHERE key = 'report.url';"
-    )
+    return parameters_sql({"web.base.url": base_url, "report.url": LOCAL_REPORT_URL})
 
 
 def local_urls_sql(base_url):
     """SQL qui corrige, dans la base courante, les adresses injoignables depuis ce poste.
 
     Ne touche que l'adresse par défaut d'Odoo ou une ancienne adresse du projet (port de Traefik
-    changé) pour web.base.url, et une adresse locale sur un autre port qu'Odoo pour report.url :
+    changé) pour web.base.url, et une adresse locale sur un autre port qu'Odoo pour report.url, créé s'il manque :
     une adresse choisie à la main (tunnel vers un téléphone…) est gardée. Sans effet sur une base
     qui n'est pas une base Odoo ; renvoie une ligne « base|paramètre » par valeur corrigée.
     """
@@ -358,6 +354,14 @@ BEGIN
   WITH changed AS (
     UPDATE ir_config_parameter SET value = {report_url}, write_uid = 1, write_date = now() AT TIME ZONE 'UTC'
     WHERE key = 'report.url' AND value ~* {sql_literal(LOCAL_REPORT_URL_RE)} AND value !~ ':8069/?$'
+    RETURNING key
+  )
+  INSERT INTO sdk_local_urls SELECT key FROM changed;
+  -- Base créée ici : sans report.url, wkhtmltopdf lit les styles par web.base.url, injoignable du conteneur.
+  WITH changed AS (
+    INSERT INTO ir_config_parameter (key, value, create_uid, create_date, write_uid, write_date)
+    SELECT 'report.url', {report_url}, 1, now() AT TIME ZONE 'UTC', 1, now() AT TIME ZONE 'UTC'
+    WHERE NOT EXISTS (SELECT 1 FROM ir_config_parameter WHERE key = 'report.url')
     RETURNING key
   )
   INSERT INTO sdk_local_urls SELECT key FROM changed;

@@ -3195,11 +3195,16 @@ class DatabaseNeutralizationTests(unittest.TestCase):
     @patch("odoo_manager_web.list_databases_for", side_effect=[["postgres"], ["postgres", "test_v20"]] * 2)
     @patch("odoo_manager_web.validate_project", return_value="DEMO")
     def test_create_database_sends_demo_only_when_enabled(
-        self, _validate_project, _list_databases, _service, _project_url, post_form, _clear_cache, _sleep
+        self, _validate_project, _list_databases, service, _project_url, post_form, _clear_cache, _sleep
     ):
+        service.return_value.project_url.return_value = "http://dev.demo.localhost/"
         # Odoo 20 lit « demo » avec str2bool : une valeur vide y est refusée en HTTP 422.
         web.create_database_job(Mock(), "DEMO", "test_v20", "secret", "admin", "admin", "fr_FR", "FR", False)
         self.assertNotIn("demo", post_form.call_args.args[1])
+        # Base neuve : sans report.url, wkhtmltopdf ne joint pas l'adresse du projet depuis le conteneur.
+        service.return_value.run_postgres_sql.assert_called_once_with(
+            "DEMO", "test_v20", database_restore.restored_urls_sql("http://dev.demo.localhost")
+        )
 
         web.create_database_job(Mock(), "DEMO", "test_v20", "secret", "admin", "admin", "fr_FR", "FR", True)
         self.assertEqual(post_form.call_args.args[1]["demo"], "on")
