@@ -1777,6 +1777,7 @@ export default function Home() {
                 mailpit={systemStatus?.mailpit}
                 iotbox={systemStatus?.iotbox}
                 mobile={systemStatus?.mobile}
+                offlineTest={systemStatus?.offline_test}
                 openingOdoo={openingOdoo}
                 pendingSelectedProjectArrival={pendingSelectedProjectArrival}
                 projectHeaderCompact={projectHeaderCompact}

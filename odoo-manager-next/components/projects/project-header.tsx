@@ -27,6 +27,7 @@ import type {
   Job,
   MailpitStatus,
   MobileAccessStatus,
+  OfflineTestStatus,
   OdooServerState,
   Project,
   Toast,
@@ -43,6 +44,7 @@ type ProjectHeaderProps = {
   mailpit: MailpitStatus | undefined;
   iotbox: IotBoxStatus | undefined;
   mobile: MobileAccessStatus | undefined;
+  offlineTest: OfflineTestStatus | undefined;
   openingOdoo: boolean;
   pendingSelectedProjectArrival: Job | undefined;
   projectHeaderCompact: boolean;
@@ -69,6 +71,7 @@ export function ProjectHeader({
   mailpit,
   iotbox,
   mobile,
+  offlineTest,
   openingOdoo,
   pendingSelectedProjectArrival,
   projectHeaderCompact,
@@ -127,10 +130,14 @@ export function ProjectHeader({
   }
   const [mobileOpen, setMobileOpen] = useState(false);
   const mobileHere = Boolean(mobile?.running && mobile.project === selectedProject?.name);
-  async function requestCutOdoo() {
-    if (!selectedProject) return;
-    const job = await createJob("stop_odoo_server", { project: selectedProject.name });
-    if (job) schedule(refreshOverview, 2000);
+  const offlineTestHere = Boolean(offlineTest?.open && offlineTest.project === selectedProject?.name);
+  async function requestOfflineTest(action: "start_offline_test" | "stop_offline_test" | "set_offline" | "set_online") {
+    const job = await createJob(action, { project: selectedProject?.name });
+    if (job) schedule(refreshSystemStatus, 2000);
+  }
+  async function requestOpenOfflineTest() {
+    const url = odooAccessUrl(selectedProject && { ...selectedProject, url: offlineTest?.url ?? "" }, selectedDb);
+    if (!(await openExternalUrl(url))) pushToast("error", "Impossible d'ouvrir l'adresse de test.");
   }
   // Relit l'état du serveur Odoo juste avant d'ouvrir : l'aperçu peut dater de quelques secondes.
   async function ensureOdooServer(project: Project): Promise<"ready" | "restarted" | "failed"> {
@@ -373,19 +380,45 @@ export function ProjectHeader({
             )}
             <DropdownMenu.Separator />
             <DropdownMenu.Label>Mode hors ligne</DropdownMenu.Label>
-            {selectedOdooServerStopped ? (
-              <DropdownMenu.Item disabled={loading} onSelect={requestStartProject}>
-                <Wifi className="h-4 w-4" />
-                Repasser en ligne
-              </DropdownMenu.Item>
+            {offlineTestHere ? (
+              <>
+                <DropdownMenu.Label className="h-auto break-all font-mono text-xs select-text">
+                  {offlineTest?.url}
+                </DropdownMenu.Label>
+                {offlineTest?.online ? (
+                  <>
+                    <DropdownMenu.Item onSelect={() => void requestOpenOfflineTest()}>
+                      <ExternalLink className="h-4 w-4" />
+                      Ouvrir l&apos;adresse de test
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                      disabled={loading}
+                      title="Coupe le réseau des pages ouvertes sur l'adresse de test et sur mobile, comme une vraie coupure. Odoo reste démarré."
+                      onSelect={() => void requestOfflineTest("set_offline")}
+                    >
+                      <WifiOff className="h-4 w-4" />
+                      Passer hors ligne
+                    </DropdownMenu.Item>
+                  </>
+                ) : (
+                  <DropdownMenu.Item disabled={loading} onSelect={() => void requestOfflineTest("set_online")}>
+                    <Wifi className="h-4 w-4" />
+                    Repasser en ligne
+                  </DropdownMenu.Item>
+                )}
+                <DropdownMenu.Item disabled={loading} onSelect={() => void requestOfflineTest("stop_offline_test")}>
+                  <Square className="h-4 w-4" />
+                  Fermer l&apos;adresse de test
+                </DropdownMenu.Item>
+              </>
             ) : (
               <DropdownMenu.Item
                 disabled={loading}
-                title="Arrête Odoo sans fermer les pages ouvertes. Une page passe hors ligne à sa prochaine demande au serveur (un clic qui charge des données). Avant Odoo 20, seule la caisse a un mode hors ligne : les autres écrans affichent « Connexion perdue »."
-                onSelect={() => void requestCutOdoo()}
+                title="Ouvre Odoo sur une adresse à part, réservée à ce poste. Les pages ouvertes dessus perdent vraiment le réseau quand tu passes hors ligne."
+                onSelect={() => void requestOfflineTest("start_offline_test")}
               >
                 <WifiOff className="h-4 w-4" />
-                Passer hors ligne
+                Préparer une adresse de test
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Separator />

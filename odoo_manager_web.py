@@ -313,12 +313,15 @@ API_ACTIONS = (
     "start_iotbox",
     "start_mailpit",
     "start_mobile_access",
+    "start_offline_test",
     "start_project",
     "stop_iotbox",
     "stop_mailpit",
     "stop_mobile_access",
-    "stop_odoo_server",
+    "stop_offline_test",
     "stop_project",
+    "set_offline",
+    "set_online",
     "switch_repository_branch",
     "uninstall_module",
     "update_all",
@@ -1063,10 +1066,10 @@ def iotbox_status(docker, traefik):
     }
 
 
-def mobile_access_owner():
-    """(projet, adresse, recette) de l'accès mobile ouvert, relus sur son conteneur."""
+def mobile_access_owner(name=mobile_access.MOBILE_CONTAINER):
+    """(projet, adresse, recette) d'un relais (accès mobile ou adresse de test), relus sur son conteneur."""
     code, output = run_capture(
-        docker_command(SETTINGS, "inspect", "--format", mobile_access.OWNER_FORMAT, mobile_access.MOBILE_CONTAINER),
+        docker_command(SETTINGS, "inspect", "--format", mobile_access.OWNER_FORMAT, name),
         timeout=5,
         stdout_only=True,
     )
@@ -1078,6 +1081,14 @@ def mobile_access_status(docker):
     running = docker["running"] and container_status(mobile_access.MOBILE_CONTAINER) == "running"
     project, url, _recipe = mobile_access_owner() if running else ("", "", "")
     return {"running": running, "project": project, "url": url, "can_start": docker["running"]}
+
+
+def offline_test_status(docker):
+    """Adresse de test du mode hors ligne : `online` faux tant que « Passer hors ligne » l'a coupée."""
+    state = container_status(mobile_access.OFFLINE_CONTAINER) if docker["running"] else "absent"
+    owner = mobile_access_owner(mobile_access.OFFLINE_CONTAINER) if state != "absent" else ("", "", "")
+    project, url, _recipe = owner
+    return {"open": state != "absent", "online": state == "running", "project": project, "url": url}
 
 
 def abandoned_staging_snapshot():
@@ -1099,6 +1110,7 @@ def system_status_snapshot(docker=None):
         "mailpit": mailpit_status(docker, traefik),
         "iotbox": iotbox_status(docker, traefik),
         "mobile": mobile_access_status(docker),
+        "offline_test": offline_test_status(docker),
         "workspace": str(WORKSPACE),
         "workspace_exists": safe_path_is_dir(WORKSPACE),
         # Bases clients copiées chez Apple : signalé en permanence, pas seulement après une analyse du disque.
@@ -3380,7 +3392,8 @@ JOB_CANCEL_POLICIES = {
         "Les conteneurs et le serveur Odoo démarrés par cette action sont arrêtés ; ce qui tournait déjà reste démarré.",
     ),
     "stop_project_job": (True, "L'arrêt est interrompu : les conteneurs déjà arrêtés le restent."),
-    "stop_odoo_server_job": (False, "arrêt court du serveur Odoo."),
+    "set_offline_job": (False, "arrêt court d'un conteneur."),
+    "set_online_job": (False, "démarrage court d'un conteneur."),
     "update_project_job": (
         True,
         "Le téléchargement en cours est interrompu. Un git pull commencé va d'abord à son terme.",
@@ -3471,6 +3484,8 @@ JOB_CANCEL_POLICIES = {
     "stop_mailpit_job": (False, "arrêt court d'un conteneur."),
     "start_mobile_access_job": (True, "Le téléchargement de l'image s'arrête ; relance l'action pour la reprendre."),
     "stop_mobile_access_job": (False, "arrêt court d'un conteneur."),
+    "start_offline_test_job": (True, "Le téléchargement de l'image s'arrête ; relance l'action pour la reprendre."),
+    "stop_offline_test_job": (False, "arrêt court d'un conteneur."),
     "start_iotbox_job": (True, "La préparation de la box s'arrête ; relance l'action pour la reprendre."),
     "stop_iotbox_job": (False, "arrêt court d'un conteneur."),
     "link_iotbox_job": (True, "La connexion s'arrête ; une installation du module IoT déjà lancée va à son terme."),
@@ -3499,7 +3514,8 @@ def refresh_after_job():
 JOB_EXPECTED_DURATIONS = {
     "start_project_job": 40,
     "stop_project_job": 15,
-    "stop_odoo_server_job": 5,
+    "set_offline_job": 5,
+    "set_online_job": 5,
     "update_project_job": 60,
     "update_all_projects_job": 180,
     "neutralize_database_job": 60,
@@ -3515,6 +3531,8 @@ JOB_EXPECTED_DURATIONS = {
     "stop_mailpit_job": 10,
     "start_mobile_access_job": 15,
     "stop_mobile_access_job": 5,
+    "start_offline_test_job": 15,
+    "stop_offline_test_job": 5,
     "start_iotbox_job": 30,
     "stop_iotbox_job": 10,
     "link_iotbox_job": 90,
@@ -3997,6 +4015,65 @@ def stop_mobile_access_job(job):
         return
     if run_stream(job, docker_command(SETTINGS, "rm", "--force", mobile_access.MOBILE_CONTAINER)) != 0:
         raise RuntimeError("Docker n'a pas pu fermer l'accès mobile.")
+
+
+def start_offline_test_job(job, project):
+    project = validate_project(project)
+    if not docker_status(SETTINGS)["running"]:
+        raise RuntimeError("Docker doit être démarré pour ouvrir l'adresse de test.")
+    if container_status(f"odoo-{project}") != "running":
+        raise RuntimeError(f"Démarre {project} avant d'ouvrir l'adresse de test.")
+    name, port = mobile_access.OFFLINE_CONTAINER, mobile_access.OFFLINE_PORT
+    state = container_status(name)
+    if state == "running" and mobile_access_owner(name) == (project, mobile_access.OFFLINE_URL, mobile_access.RECIPE):
+        job.add(f"L'adresse de test est déjà ouverte : {mobile_access.OFFLINE_URL}")
+        return
+    if state != "absent" and run_stream(job, docker_command(SETTINGS, "rm", "--force", name)) != 0:
+        raise RuntimeError("Docker n'a pas pu fermer l'adresse de test précédente.")
+    if host_port_in_use(port, host=mobile_access.OFFLINE_HOST):
+        raise RuntimeError(f"Le port {port} est déjà utilisé sur ce poste : ferme le programme qui l'occupe.")
+    command = docker_command(
+        SETTINGS,
+        *mobile_access.run_arguments(
+            project, mobile_access.OFFLINE_HOST, TRAEFIK_NETWORK, name, port, mobile_access.OFFLINE_URL
+        ),
+    )
+    if run_stream(job, command) != 0:
+        raise RuntimeError("Docker n'a pas pu ouvrir l'adresse de test.")
+    job.add(f"Odoo est ouvert sur {mobile_access.OFFLINE_URL} : connecte-toi, puis utilise Passer hors ligne.")
+
+
+def stop_offline_test_job(job):
+    name = mobile_access.OFFLINE_CONTAINER
+    if container_status(name) != "absent" and run_stream(job, docker_command(SETTINGS, "rm", "--force", name)) != 0:
+        raise RuntimeError("Docker n'a pas pu fermer l'adresse de test.")
+
+
+def project_relays(project, states):
+    """Relais (adresse de test, accès mobile) ouverts pour ce projet et dans l'un de ces états Docker."""
+    names = (mobile_access.OFFLINE_CONTAINER, mobile_access.MOBILE_CONTAINER)
+    return [name for name in names if container_status(name) in states and mobile_access_owner(name)[0] == project]
+
+
+def set_offline_job(job, project):
+    """Vraie coupure réseau pour les pages ouvertes via les relais ; Odoo et ses bases restent démarrés."""
+    project = validate_project(project)
+    relays = project_relays(project, {"running"})
+    if not relays:
+        raise RuntimeError("Ouvre d'abord l'adresse de test, et ouvre Odoo dessus.")
+    if run_stream(job, docker_command(SETTINGS, "stop", "--time", "0", *relays)) != 0:
+        raise RuntimeError("Docker n'a pas pu couper l'accès à Odoo.")
+    job.add("Les pages ouvertes sur l'adresse de test (et sur mobile) n'ont plus de réseau. Odoo reste démarré.")
+
+
+def set_online_job(job, project):
+    project = validate_project(project)
+    relays = project_relays(project, {"exited", "created"})
+    if not relays:
+        job.add("Rien à rétablir : l'adresse de test n'est pas coupée.")
+        return
+    if run_stream(job, docker_command(SETTINGS, "start", *relays)) != 0:
+        raise RuntimeError("Docker n'a pas pu rétablir l'accès à Odoo.")
 
 
 def start_iotbox_job(job, project):
@@ -5862,15 +5939,6 @@ def delete_module_file_entry(job, project, module_name):
 def stop_project_job(job, project):
     project = validate_project(project)
     project_service().stop_project(project, log=job.add)
-
-
-def stop_odoo_server_job(job, project):
-    """Coupure simulée : conteneurs et bases restent démarrés, les navigateurs reçoivent une erreur de connexion."""
-    project = validate_project(project)
-    project_service().stop_odoo_server(project, log=job.add)
-    with OVERVIEW_ODOO_SERVERS_CACHE_LOCK:
-        OVERVIEW_ODOO_SERVERS_CACHE.pop(project, None)
-    job.add("Odoo ne répond plus : teste le mode hors ligne, puis utilise Repasser en ligne dans le menu Outils.")
 
 
 def addon_links_wsl_distribution(*directories, creating=False):
@@ -9481,7 +9549,18 @@ JOB_ACTIONS = {
     "switch_repository_branch": switch_repository_branch_action,
     "start_project": project_job("Démarrer {project}", start_project_job),
     "stop_project": project_job("Arrêter {project}", stop_project_job),
-    "stop_odoo_server": project_job("Couper Odoo sur {project}", stop_odoo_server_job),
+    "set_offline": lambda payload: Job(
+        f"Passer {payload_project(payload)} hors ligne",
+        set_offline_job,
+        (payload_project(payload),),
+        resources={"mobile"},
+    ),
+    "set_online": lambda payload: Job(
+        f"Repasser {payload_project(payload)} en ligne",
+        set_online_job,
+        (payload_project(payload),),
+        resources={"mobile"},
+    ),
     "update_project": project_job("MAJ projet {project}", update_project_job),
     "update_all": lambda _payload: Job("MAJ tous les projets", update_all_projects_job, resources={"*"}),
     "update_all_modules": update_all_modules_action,
@@ -9540,6 +9619,13 @@ JOB_ACTIONS = {
         resources={"mobile"},
     ),
     "stop_mobile_access": lambda _payload: Job("Fermer l'accès mobile", stop_mobile_access_job, resources={"mobile"}),
+    "start_offline_test": lambda payload: Job(
+        f"Ouvrir l'adresse de test de {payload_project(payload)}",
+        start_offline_test_job,
+        (payload_project(payload),),
+        resources={"mobile"},
+    ),
+    "stop_offline_test": lambda _payload: Job("Fermer l'adresse de test", stop_offline_test_job, resources={"mobile"}),
     "start_iotbox": lambda payload: Job(
         "Démarrer l'IoT Box", start_iotbox_job, (str(payload.get("project", "")),), resources={"iotbox"}
     ),

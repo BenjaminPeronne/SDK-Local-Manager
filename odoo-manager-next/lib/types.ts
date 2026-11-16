@@ -120,12 +120,20 @@ export type MobileAccessStatus = {
   can_start: boolean;
 };
 
+export type OfflineTestStatus = {
+  open: boolean;
+  online: boolean;
+  project: string;
+  url: string;
+};
+
 export type SystemStatus = {
   docker: DockerStatus;
   traefik?: TraefikStatus;
   mailpit?: MailpitStatus;
   iotbox?: IotBoxStatus;
   mobile?: MobileAccessStatus;
+  offline_test?: OfflineTestStatus;
   workspace: string;
   workspace_exists: boolean;
   /** Dossier des projets synchronisé par iCloud (macOS) : les bases des clients partent en ligne. */

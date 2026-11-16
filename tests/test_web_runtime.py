@@ -1243,7 +1243,9 @@ class EventWatchCostTests(unittest.TestCase):
         with (
             patch.object(web, "validate_project", return_value="DEMO"),
             patch.object(web, "docker_status", return_value={"running": True}),
-            patch.object(web, "container_status", side_effect=lambda name: "running" if name == "odoo-DEMO" else "absent"),
+            patch.object(
+                web, "container_status", side_effect=lambda name: "running" if name == "odoo-DEMO" else "absent"
+            ),
             patch.object(web.iot_box, "local_ip", return_value="192.168.1.20"),
             patch.object(web, "host_port_in_use", return_value=False) as port_in_use,
             patch.object(web, "docker_command", side_effect=lambda _settings, *args: list(args)),
@@ -1256,7 +1258,8 @@ class EventWatchCostTests(unittest.TestCase):
         command = run_stream.call_args.args[1]
         self.assertIn("192.168.1.20:8069:8069", command)
         self.assertIn("MOBILE_NGINX_CONF", command[command.index("--env") + 1])
-        self.assertIn("--rm", command)
+        # Gardé à l'arrêt pour « Repasser en ligne », mais jamais relancé seul.
+        self.assertNotIn("--rm", command)
         self.assertNotIn("--restart", command)
 
     def test_a_relay_from_an_older_version_is_replaced(self):
@@ -1287,18 +1290,48 @@ class EventWatchCostTests(unittest.TestCase):
                 web.start_mobile_access_job(Mock(), "DEMO")
         run_stream.assert_not_called()
 
-    def test_cutting_odoo_stops_only_the_server_and_forgets_its_cached_state(self):
-        service = Mock()
-        job = Mock()
-        web.OVERVIEW_ODOO_SERVERS_CACHE["DEMO"] = (0, "running")
-        with patch.object(web, "project_service", return_value=service), patch.object(
-            web, "validate_project", return_value="DEMO"
+    def test_offline_test_address_is_published_on_this_machine_only(self):
+        with (
+            patch.object(web, "validate_project", return_value="DEMO"),
+            patch.object(web, "docker_status", return_value={"running": True}),
+            patch.object(
+                web, "container_status", side_effect=lambda name: "running" if name == "odoo-DEMO" else "absent"
+            ),
+            patch.object(web, "host_port_in_use", return_value=False),
+            patch.object(web, "docker_command", side_effect=lambda _settings, *args: list(args)),
+            patch.object(web, "run_stream", return_value=0) as run_stream,
         ):
-            web.stop_odoo_server_job(job, "DEMO")
+            web.start_offline_test_job(Mock(), "DEMO")
 
-        service.stop_odoo_server.assert_called_once_with("DEMO", log=job.add)
-        service.stop_project.assert_not_called()
-        self.assertNotIn("DEMO", web.OVERVIEW_ODOO_SERVERS_CACHE)
+        command = run_stream.call_args.args[1]
+        self.assertIn("127.0.0.1:8070:8069", command)
+        self.assertIn("odoo-manager.mobile.url=http://localhost:8070/", command)
+
+    def test_going_offline_stops_only_this_project_relays_and_leaves_odoo_running(self):
+        owners = {"offline-test": ("DEMO", "", ""), "mobile-access": ("OTHER", "", "")}
+        with (
+            patch.object(web, "validate_project", return_value="DEMO"),
+            patch.object(web, "container_status", return_value="running"),
+            patch.object(web, "mobile_access_owner", side_effect=owners.get),
+            patch.object(web, "docker_command", side_effect=lambda _settings, *args: list(args)),
+            patch.object(web, "run_stream", return_value=0) as run_stream,
+        ):
+            web.set_offline_job(Mock(), "DEMO")
+
+        run_stream.assert_called_once()
+        self.assertEqual(["stop", "--time", "0", "offline-test"], run_stream.call_args.args[1])
+
+    def test_going_back_online_restarts_the_stopped_relays(self):
+        with (
+            patch.object(web, "validate_project", return_value="DEMO"),
+            patch.object(web, "container_status", return_value="exited"),
+            patch.object(web, "mobile_access_owner", return_value=("DEMO", "", "")),
+            patch.object(web, "docker_command", side_effect=lambda _settings, *args: list(args)),
+            patch.object(web, "run_stream", return_value=0) as run_stream,
+        ):
+            web.set_online_job(Mock(), "DEMO")
+
+        self.assertEqual(["start", "offline-test", "mobile-access"], run_stream.call_args.args[1])
 
     def test_odoo_server_state_is_cached_but_an_unanswered_docker_is_retried(self):
         web.invalidate_overview_odoo_servers()

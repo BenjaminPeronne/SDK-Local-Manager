@@ -13,6 +13,12 @@ MOBILE_PORT = 8069
 MOBILE_PROJECT_LABEL = "odoo-manager.mobile.project"
 MOBILE_URL_LABEL = "odoo-manager.mobile.url"
 MOBILE_RECIPE_LABEL = "odoo-manager.mobile.recipe"
+# Même relais réservé à ce poste pour tester le mode hors ligne : l'arrêter coupe vraiment le réseau des pages
+# ouvertes dessus (connexion refusée), là où Traefik répond toujours « Bad Gateway ».
+OFFLINE_CONTAINER = "offline-test"
+OFFLINE_HOST = "127.0.0.1"
+OFFLINE_PORT = 8070
+OFFLINE_URL = f"http://localhost:{OFFLINE_PORT}/"
 
 # Le Wi-Fi n'est pas ce poste : la gestion des bases d'Odoo (sauvegarde, suppression, duplication) et ses
 # API par programme restent fermées, son mot de passe maître étant souvent celui par défaut. Le QR code
@@ -62,22 +68,24 @@ def nginx_conf(project):
     return NGINX_CONF.replace("MOBILE_PORT", str(MOBILE_PORT)).replace("PROJECT", project)
 
 
-def run_arguments(project, ip, network):
-    """`docker run` d'un relais publié sur la seule adresse Wi-Fi du poste, vers le conteneur Odoo du projet."""
+def run_arguments(project, ip, network, name=MOBILE_CONTAINER, port=MOBILE_PORT, url=None):
+    """`docker run` d'un relais publié sur la seule adresse `ip` du poste, vers le conteneur Odoo du projet.
+
+    Sans --rm : « Passer hors ligne » l'arrête et « Repasser en ligne » le relance tel quel.
+    """
     return [
         "run",
         "--detach",
-        "--rm",
         "--name",
-        MOBILE_CONTAINER,
+        name,
         "--network",
         network,
         "--publish",
-        f"{ip}:{MOBILE_PORT}:{MOBILE_PORT}",
+        f"{ip}:{port}:{MOBILE_PORT}",
         "--label",
         f"{MOBILE_PROJECT_LABEL}={project}",
         "--label",
-        f"{MOBILE_URL_LABEL}={access_url(ip)}",
+        f"{MOBILE_URL_LABEL}={url or access_url(ip)}",
         "--label",
         f"{MOBILE_RECIPE_LABEL}={RECIPE}",
         "--env",

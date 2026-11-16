@@ -437,7 +437,9 @@ Les échanges ne sont pas chiffrés : mots de passe et données restent lisibles
 
 ### Mode hors ligne
 
-Le menu **Outils** d'un projet démarré propose **Mode hors ligne › Passer hors ligne** : le serveur Odoo s'arrête, mais les conteneurs et les bases restent démarrés. Les pages Odoo déjà ouvertes (caisse, code-barres…) perdent le serveur comme lors d'une vraie coupure. **Repasser en ligne**, au même endroit, le relance ; **Ouvrir Odoo** aussi. Les données ne sont pas touchées. Une page ouverte passe hors ligne à sa prochaine demande au serveur. Le mode hors ligne de tout Odoo n'existe qu'à partir de la 20.0 : avant, seule la caisse en a un, les autres écrans affichent « Connexion perdue ».
+Traefik répond toujours, même quand Odoo est coupé (« Bad Gateway ») : une page ouverte sur `dev.<projet>.localhost` ne perd donc jamais vraiment le réseau. Pour tester le mode hors ligne d'Odoo, le menu **Outils** d'un projet démarré propose **Préparer une adresse de test** : Odoo s'ouvre aussi sur `http://localhost:8070/`, réservée à ce poste (il faut s'y reconnecter une fois). **Passer hors ligne** coupe cette adresse, et l'accès mobile du projet s'il est ouvert : les pages ouvertes dessus perdent vraiment le réseau (connexion refusée), alors qu'Odoo et ses bases restent démarrés. **Repasser en ligne** rétablit l'accès, **Fermer l'adresse de test** la retire. Les données ne sont pas touchées.
+
+Une page passe hors ligne à sa prochaine demande au serveur. Le mode hors ligne de tout Odoo n'existe qu'à partir de la 20.0 : avant, seule la caisse en a un, les autres écrans affichent « Connexion perdue ».
 
 ### IoT Box virtuelle
 
