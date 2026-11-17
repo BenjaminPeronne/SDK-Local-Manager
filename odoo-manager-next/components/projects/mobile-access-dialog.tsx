@@ -84,7 +84,9 @@ function MobileAccessContent({
 
   async function closeAccess() {
     setClosing(true);
-    await desktopBridge()?.wslLanRelayStop?.().catch(() => undefined);
+    await desktopBridge()
+      ?.wslLanRelayStop?.()
+      .catch(() => undefined);
     if (await runJob("stop_mobile_access")) onClose();
     setClosing(false);
   }
@@ -113,7 +115,8 @@ function MobileAccessContent({
           {/* Le poste ne voit pas ce qui bloque le téléphone : ces trois causes se règlent de son côté. */}
           <p className="text-center text-xs text-muted-foreground">
             La page ne s&apos;ouvre pas sur le téléphone ? Vérifie qu&apos;il est sur le même Wi-Fi que ce poste, coupe
-            le VPN de ce poste s&apos;il y en a un, et autorise cette application et Docker dans le pare-feu de ce poste.
+            le VPN de ce poste s&apos;il y en a un, et autorise cette application et Docker dans le pare-feu de ce
+            poste.
           </p>
         </div>
       ) : (
