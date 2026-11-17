@@ -13,6 +13,8 @@ const WSL_CAPABILITIES = [
   "wslOpenEditor",
   "wslOpenExplorer",
   "wslApplyResources",
+  "wslLanRelay",
+  "wslLanRelayStop",
   "onWslProgress",
 ];
 

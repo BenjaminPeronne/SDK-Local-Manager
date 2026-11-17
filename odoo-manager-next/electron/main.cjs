@@ -28,6 +28,7 @@ const {
 const { CredentialStore } = require("./credentials.cjs");
 const { diskEncryptionStatus } = require("./disk-encryption.cjs");
 const { GitLabClient } = require("./gitlab.cjs");
+const { LanRelay } = require("./lan-relay.cjs");
 const { AppUpdater } = require("./updater.cjs");
 const {
   LINUX_WORKSPACE,
@@ -77,6 +78,7 @@ let updater;
 let degradedBackend = "";
 let quitting = false;
 const notifications = new Set();
+const lanRelay = new LanRelay();
 
 function wslResources() {
   const root = app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), "electron/binaries");
@@ -264,6 +266,15 @@ function installHandlers() {
   handle(
     "wsl-legacy-workspace",
     onWindows(() => windowsWorkspaceSeenFromWsl()),
+  );
+  // Backend Windows : Docker Desktop publie déjà sur l'adresse Wi-Fi, le relais est inutile.
+  handle(
+    "wsl-lan-relay",
+    onWindows((url) => (backend.command ? lanRelay.start(url) : url)),
+  );
+  handle(
+    "wsl-lan-relay-stop",
+    onWindows(() => lanRelay.stop()),
   );
   handle(
     "wsl-apply-resources",

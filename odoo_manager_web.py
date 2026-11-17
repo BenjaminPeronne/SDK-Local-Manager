@@ -924,33 +924,6 @@ def running_in_wsl():
     return hasattr(os, "uname") and "microsoft" in os.uname().release.lower()
 
 
-# Même choix d'interface que iot_box.local_ip(), fait par Windows.
-WINDOWS_LAN_IP_SCRIPT = (
-    "(Find-NetRoute -RemoteIPAddress 192.0.2.1 | Where-Object IPAddress | Select-Object -First 1).IPAddress"
-)
-
-
-def lan_ip():
-    """Adresse du poste sur le Wi-Fi, "" sans réseau.
-
-    Sous WSL, l'adresse vue de Linux est celle de la VM (172.x), injoignable depuis un téléphone :
-    on demande à Windows la sienne, et on garde celle de Linux si Windows ne répond pas.
-    """
-    if running_in_wsl():
-        try:
-            result = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_LAN_IP_SCRIPT],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            if result.returncode == 0 and re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", result.stdout.strip()):
-                return result.stdout.strip()
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-    return iot_box.local_ip()
-
-
 def local_port_listening(port, tables=("/proc/net/tcp", "/proc/net/tcp6")):
     """Vrai si un processus écoute déjà sur ce port TCP, lu sans droits dans /proc.
 
@@ -4010,7 +3983,8 @@ def start_mobile_access_job(job, project):
         raise RuntimeError("Docker doit être démarré pour ouvrir l'accès mobile.")
     if container_status(f"odoo-{project}") != "running":
         raise RuntimeError(f"Démarre {project} avant d'ouvrir l'accès mobile.")
-    ip = lan_ip()
+    # Sous WSL, c'est l'adresse de la VM : l'application Windows la relaie depuis son Wi-Fi (electron/lan-relay.cjs).
+    ip = iot_box.local_ip()
     if not ip:
         raise RuntimeError("Ce poste n'est relié à aucun réseau : connecte-le au Wi-Fi, puis réessaie.")
     url = mobile_access.access_url(ip)
@@ -4171,7 +4145,7 @@ def start_iotbox_job(job, project):
     job.add("Les appareils USB ne sont pas visibles depuis la box : utilise des appareils reliés au réseau.")
     port = iot_box.IOTBOX_TERMINAL_PORT
     if terminal_port:
-        job.add(f"Terminaux de paiement Ingenico : indique-leur l'adresse {lan_ip()}, port {port}.")
+        job.add(f"Terminaux de paiement Ingenico : indique-leur l'adresse {iot_box.local_ip()}, port {port}.")
     else:
         job.add(f"Le port {port} est déjà pris sur cette machine : les terminaux de paiement Ingenico ne joindront pas")
         job.add("la box. Libère-le puis redémarre l'IoT Box.")

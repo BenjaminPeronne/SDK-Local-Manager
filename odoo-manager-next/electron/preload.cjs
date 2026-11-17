@@ -15,6 +15,8 @@ const wslCapabilities =
         wslOpenEditor: (project) => ipcRenderer.invoke("sdk:wsl-open-editor", project),
         wslOpenExplorer: (project) => ipcRenderer.invoke("sdk:wsl-open-explorer", project),
         wslApplyResources: (resources) => ipcRenderer.invoke("sdk:wsl-apply-resources", resources),
+        wslLanRelay: (url) => ipcRenderer.invoke("sdk:wsl-lan-relay", url),
+        wslLanRelayStop: () => ipcRenderer.invoke("sdk:wsl-lan-relay-stop"),
         // Avancement de la préparation. Seule la charge utile passe au rendu, jamais l'événement IPC.
         onWslProgress: (callback) => {
           const listener = (_event, step) => callback(step);

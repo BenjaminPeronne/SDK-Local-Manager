@@ -1278,21 +1278,6 @@ class EventWatchCostTests(unittest.TestCase):
         self.assertEqual(["rm", "--force", "mobile-access"], run_stream.call_args_list[0].args[1])
         self.assertEqual("run", run_stream.call_args_list[1].args[1][0])
 
-    def test_lan_ip_asks_windows_for_its_wifi_address_under_wsl(self):
-        windows = Mock(returncode=0, stdout="192.168.1.42\r\n")
-        with (
-            patch.object(web, "running_in_wsl", return_value=True),
-            patch.object(web.subprocess, "run", return_value=windows),
-            patch.object(web.iot_box, "local_ip", return_value="172.20.0.5"),
-        ):
-            self.assertEqual("192.168.1.42", web.lan_ip())
-        with (
-            patch.object(web, "running_in_wsl", return_value=True),
-            patch.object(web.subprocess, "run", side_effect=OSError),
-            patch.object(web.iot_box, "local_ip", return_value="172.20.0.5"),
-        ):
-            self.assertEqual("172.20.0.5", web.lan_ip())
-
     def test_mobile_access_explains_a_machine_without_network(self):
         with (
             patch.object(web, "validate_project", return_value="DEMO"),

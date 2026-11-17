@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, Square } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { waitForJob } from "@/lib/api";
+import { desktopBridge, desktopErrorMessage } from "@/lib/desktop";
 import { odooAccessUrl } from "@/lib/projects";
 import type { Job, MobileAccessStatus, Project } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,10 @@ function MobileAccessContent({
   const [closing, setClosing] = useState(false);
   const started = useRef(false);
   const ready = Boolean(project && mobile?.running && mobile.project === project.name);
+  // Sous Windows, l'adresse donnée au téléphone est celle du relais Wi-Fi de l'application.
+  const relay = desktopBridge()?.wslLanRelay;
+  const [relayBase, setRelayBase] = useState("");
+  const phoneBase = relay ? relayBase : (mobile?.url ?? "");
 
   async function runJob(action: string, payload?: Record<string, unknown>) {
     try {
@@ -64,13 +69,27 @@ function MobileAccessContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- une seule ouverture par affichage de la fenêtre.
   }, [ready, project]);
 
+  useEffect(() => {
+    const base = ready ? (mobile?.url ?? "") : "";
+    if (!base || !relay) return;
+    let current = true;
+    relay(base).then(
+      (address) => current && setRelayBase(address),
+      (err) => current && setError(desktopErrorMessage(err, "Le Wi-Fi de ce poste n'a pas pu être ouvert.")),
+    );
+    return () => {
+      current = false;
+    };
+  }, [ready, mobile?.url, relay]);
+
   async function closeAccess() {
     setClosing(true);
+    await desktopBridge()?.wslLanRelayStop?.().catch(() => undefined);
     if (await runJob("stop_mobile_access")) onClose();
     setClosing(false);
   }
 
-  const url = ready && project ? odooAccessUrl({ ...project, url: mobile?.url ?? "" }, db) : "";
+  const url = ready && project && phoneBase ? odooAccessUrl({ ...project, url: phoneBase }, db) : "";
 
   return (
     <>
@@ -94,7 +113,7 @@ function MobileAccessContent({
           {/* Le poste ne voit pas ce qui bloque le téléphone : ces trois causes se règlent de son côté. */}
           <p className="text-center text-xs text-muted-foreground">
             La page ne s&apos;ouvre pas sur le téléphone ? Vérifie qu&apos;il est sur le même Wi-Fi que ce poste, coupe
-            le VPN de ce poste s&apos;il y en a un, et autorise Docker dans le pare-feu de ce poste.
+            le VPN de ce poste s&apos;il y en a un, et autorise cette application et Docker dans le pare-feu de ce poste.
           </p>
         </div>
       ) : (

@@ -39,6 +39,9 @@ export interface DesktopBridge {
   wslOpenExplorer?(project: string): Promise<void>;
   /** Donne ces ressources à WSL, donc à Docker, puis relance l'application. */
   wslApplyResources?(resources: { memory: number; cpus: number; swap: number }): Promise<void>;
+  /** Relaie l'adresse Wi-Fi de Windows vers l'accès mobile ouvert dans WSL ; rend l'adresse pour le téléphone. */
+  wslLanRelay?(url: string): Promise<string>;
+  wslLanRelayStop?(): Promise<void>;
   /** S'abonne à l'avancement de la préparation ; la fonction rendue se désabonne. */
   onWslProgress?(callback: (step: WslPrepareStep) => void): () => void;
   // Mise à jour en un clic.
