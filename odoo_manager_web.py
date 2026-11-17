@@ -173,7 +173,14 @@ from odoo_manager_core.project_service import (
     project_folders_from_containers,
 )
 from odoo_manager_core.project_service import terminate_active_processes as terminate_project_processes
-from odoo_manager_core.releases import RELEASES_PAGE, RELEASES_REPOSITORY, release_check_error, release_update
+from odoo_manager_core.release_notes import RELEASE_NOTES, parse_release_notes, release_notes_payload
+from odoo_manager_core.releases import (
+    RELEASES_PAGE,
+    RELEASES_REPOSITORY,
+    release_check_error,
+    release_update,
+    version_key,
+)
 from odoo_manager_core.repositories import (
     REPOSITORY_COMMIT_RE,
     REPOSITORY_GIT_OPTIONS,
@@ -217,6 +224,7 @@ API_ENDPOINTS = {
         "/api/bootstrap",
         "/api/overview",
         "/api/app-update",
+        "/api/app-update/notes",
         "/api/disk-usage",
         "/api/performance",
         "/api/settings",
@@ -3286,6 +3294,76 @@ APP_UPDATE_RETRY_SECONDS = 30 * 60
 APP_UPDATE_FORCE_MIN_SECONDS = 10
 APP_UPDATE_LOCK = threading.Lock()
 APP_UPDATE = {"checked_at": None, "value": None}
+
+
+# Nouveautés d'une version publiée, lues dans son tag : un seul fichier, sans télécharger le reste.
+RELEASE_NOTES_PATH = "odoo_manager_core/release_notes.py"
+REMOTE_NOTES_LOCK = threading.Lock()
+REMOTE_NOTES = {}
+
+
+def remote_release_notes(tag):
+    """Nouveautés publiées sous `tag` sur GitLab ; None si elles n'ont pas pu être lues.
+
+    `--filter=blob:none` ne rapatrie que l'arborescence ; `git show` va ensuite chercher
+    le seul fichier des nouveautés (~120 Ko et quelques secondes en tout). Il est lu sans
+    être exécuté. Une lecture réussie est gardée pour la durée du service.
+    """
+    with REMOTE_NOTES_LOCK:
+        if tag in REMOTE_NOTES:
+            return REMOTE_NOTES[tag]
+        cache = SETTINGS_STORE.path.with_name("release-notes-cache")
+        cache.mkdir(parents=True, exist_ok=True)
+        service = project_service()
+        if not (cache / "HEAD").exists():
+            service.capture(service.git("init", "-q", "--bare", "."), cwd=cache, timeout=20)
+        code, _output = service.capture(
+            service.git(
+                "--git-dir=.",
+                "fetch",
+                "-q",
+                "--depth",
+                "1",
+                "--filter=blob:none",
+                RELEASES_REPOSITORY,
+                f"refs/tags/{tag}",
+            ),
+            cwd=cache,
+            timeout=60,
+        )
+        if code != 0:
+            return None
+        code, output = service.capture(
+            service.git("--git-dir=.", "show", f"FETCH_HEAD:{RELEASE_NOTES_PATH}"),
+            cwd=cache,
+            timeout=60,
+            stdout_only=True,
+        )
+        # Version publiée avant l'arrivée des nouveautés : rien à montrer, mais pas une erreur.
+        notes = parse_release_notes(output) if code == 0 else ()
+        REMOTE_NOTES[tag] = notes
+        return notes
+
+
+def app_update_notes_payload():
+    """Nouveautés de la version installée et des précédentes, puis celles de la mise à jour proposée."""
+    current = version_key(APP_VERSION)
+    installed = [entry for entry in RELEASE_NOTES if version_key(entry[0]) <= current]
+    update = app_update_payload()
+    upcoming, error = [], ""
+    if update.get("update_available") and update.get("tag"):
+        notes = remote_release_notes(update["tag"])
+        if notes is None:
+            error = "Les nouveautés de la mise à jour n'ont pas pu être lues : réessaie plus tard."
+        else:
+            latest = version_key(update["latest"])
+            upcoming = [entry for entry in notes if current < version_key(entry[0]) <= latest]
+    return {
+        "current": APP_VERSION,
+        "installed": release_notes_payload(installed),
+        "upcoming": release_notes_payload(upcoming),
+        "upcoming_error": error,
+    }
 
 
 def app_update_payload(force=False):
@@ -9787,6 +9865,7 @@ ROUTER = Router(
         api_route("GET", "/favicon.ico", serve_favicon),
         api_route("GET", "/api/version", payload_view(api_version_payload)),
         api_route("GET", "/api/app-update", app_update_view),
+        api_route("GET", "/api/app-update/notes", payload_view(app_update_notes_payload)),
         api_route("GET", "/api/disk-usage", payload_view(disk_usage_payload)),
         api_route("GET", "/api/performance", payload_view(performance_payload)),
         api_route("GET", "/api/capabilities", payload_view(api_capabilities_payload)),

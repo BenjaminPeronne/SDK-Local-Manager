@@ -115,6 +115,7 @@ import { ProjectSettingsTab } from "@/components/projects/project-settings-tab";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import type { SettingsSectionId } from "@/components/settings/settings-section";
 import { AboutDialog } from "@/components/shell/about-dialog";
+import { ReleaseNotesAfterUpdate } from "@/components/shell/release-notes";
 import { AppSidebar } from "@/components/shell/app-sidebar";
 import { LoadingScreen } from "@/components/shell/loading-screen";
 import { WelcomeScreen } from "@/components/welcome/welcome-screen";
@@ -2215,6 +2216,7 @@ export default function Home() {
         wslBackend={wslBackend}
       />
 
+      <ReleaseNotesAfterUpdate />
       <AboutDialog
         appVersion={appVersion}
         hasRunningJobs={hasRunningJobs}

@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Square } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatBytes, formatDuration } from "@/lib/format";
 import type { Job, ResourcesReport } from "@/lib/types";
-import { Button } from "@/components/ui/button";
+import { StopProjectButton } from "@/components/shell/stop-project-button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 // Relecture pendant que la fenêtre est ouverte : `docker stats` met déjà 1 à 2 s à répondre.
@@ -155,15 +155,7 @@ export function ResourcesDialog({
                             aria-label={`En cours : ${busy.title}`}
                           />
                         ) : (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            aria-label={`Arrêter ${project.name}`}
-                            onClick={() => void stopProject(project.name)}
-                          >
-                            <Square className="h-3 w-3 fill-current" aria-hidden="true" />
-                            Arrêter
-                          </Button>
+                          <StopProjectButton name={project.name} onStop={stopProject} className="ml-auto" />
                         )}
                       </td>
                     </tr>

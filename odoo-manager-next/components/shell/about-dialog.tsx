@@ -8,6 +8,7 @@ import type { AppUpdate, ManagerSettings, Toast } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { UpdateActions } from "@/components/shell/update-actions";
+import { ReleaseNotesLink } from "@/components/shell/release-notes";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { REFINED_LABEL } from "@/components/common/refined-layout";
 import approvedByChouab from "./approved-by-chouab.png";
@@ -146,6 +147,7 @@ export function AboutDialog({
             {checkedAt && !updateChecking && (
               <p className="mt-1 text-xs text-muted-foreground">Dernière vérification : {checkedAt}</p>
             )}
+            <ReleaseNotesLink className="mt-2" label="Voir les nouveautés de chaque version" />
             {update?.update_available && !updateChecking && (
               <div className="max-w-xs">
                 <UpdateActions

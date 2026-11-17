@@ -118,6 +118,19 @@ export type IotBoxStatus = {
 };
 
 // Dernière version publiée sur GitLab. `checked` est faux quand GitLab n'a pas pu être lu.
+/** Changements d'une version, en phrases simples. */
+export type ReleaseNotesEntry = { version: string; date: string; items: string[] };
+
+export type ReleaseNotes = {
+  current: string;
+  /** Version installée et précédentes, la plus récente en tête. */
+  installed: ReleaseNotesEntry[];
+  /** Versions qu'apporte la mise à jour proposée ; vide sans mise à jour. */
+  upcoming: ReleaseNotesEntry[];
+  /** Pourquoi les nouveautés de la mise à jour manquent, en clair ; vide sinon. */
+  upcoming_error: string;
+};
+
 export type AppUpdate = {
   current: string;
   latest: string;

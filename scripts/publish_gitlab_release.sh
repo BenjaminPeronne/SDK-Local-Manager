@@ -12,7 +12,7 @@ PACKAGE_NAME="sdk-local-manager"
 
 TAG=""
 SOURCE_DIR=""
-DESCRIPTION="Installateurs macOS/Windows/Linux compilés via GitHub Actions."
+DESCRIPTION=""
 HEADER_FILE=""
 MANIFEST_FILE=""
 SIGNATURE_FILE=""
@@ -28,7 +28,8 @@ Options:
   --tag NOM          Tag à publier, par exemple app-v0.8.0-build3 (requis).
   --dir CHEMIN        Dossier contenant les installateurs, sous-dossiers inclus.
                        Par défaut : dist/all-platforms/<tag> (sortie de build_all_platforms.sh).
-  --description TEXTE Description de la Release (par défaut : phrase générique).
+  --description TEXTE Description de la Release (par défaut : nouveautés de la version,
+                       lues dans odoo_manager_core/release_notes.py au commit du tag).
   -h, --help           Affiche cette aide.
 
 Pré-requis:
@@ -217,6 +218,21 @@ ref=""
 if ! git -C "$ROOT" ls-remote --exit-code --tags "$REMOTE" "refs/tags/$TAG" >/dev/null 2>&1; then
   ref=$(git -C "$ROOT" rev-list -n 1 "$TAG" 2>/dev/null || true)
   [ -n "$ref" ] || die "le tag $TAG est introuvable en local comme sur le remote '$REMOTE'"
+fi
+
+# Description par défaut : les nouveautés de la version, telles qu'elles sont au commit du tag.
+if [ -z "$DESCRIPTION" ]; then
+  version=$(printf '%s' "$TAG" | sed -n 's/^app-v\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p')
+  DESCRIPTION=$(git -C "$ROOT" show "$TAG:odoo_manager_core/release_notes.py" 2>/dev/null | python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+from odoo_manager_core.release_notes import parse_release_notes, release_notes_markdown
+try:
+    print(release_notes_markdown(sys.argv[2], parse_release_notes(sys.stdin.read())))
+except KeyError:
+    pass
+' "$ROOT" "$version" || true)
+  [ -n "$DESCRIPTION" ] || DESCRIPTION="Installateurs macOS/Windows/Linux compilés via GitHub Actions."
 fi
 
 release_payload=$(python3 - "$TAG" "$DESCRIPTION" "$ref" <<'PY'

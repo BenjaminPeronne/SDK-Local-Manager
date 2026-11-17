@@ -49,7 +49,10 @@ def main() -> None:
     args = parser.parse_args()
     set_app_version(ROOT, args.version)
     print(f"Version Odoo Manager synchronisée: {args.version}")
-    print("Committe ces manifestes avant de lancer scripts/build_all_platforms.sh.")
+    print(
+        "Ajoute les nouveautés de cette version en tête de odoo_manager_core/release_notes.py "
+        "(un test l'exige), puis committe avant de lancer scripts/build_all_platforms.sh."
+    )
 
 
 if __name__ == "__main__":

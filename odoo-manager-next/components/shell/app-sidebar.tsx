@@ -4,6 +4,7 @@ import { type Dispatch, type ReactNode, type SetStateAction, useMemo, useState }
 import {
   Activity,
   Check,
+  ChevronRight,
   Copy,
   Database,
   FolderPlus,
@@ -12,7 +13,6 @@ import {
   Play,
   Search,
   Settings,
-  Square,
   Star,
 } from "lucide-react";
 import type { StaticImageData } from "next/image";
@@ -31,6 +31,7 @@ import { WitchHat } from "@/components/seasonal/halloween";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/shell/update-banner";
 import { ResourcesDialog } from "@/components/shell/resources-dialog";
+import { StopProjectButton } from "@/components/shell/stop-project-button";
 import { GeneralActivity } from "@/components/jobs/job-activity";
 import type { UpdateInstaller } from "@/hooks/use-update-installer";
 import type { PushToast } from "@/hooks/use-toasts";
@@ -215,23 +216,25 @@ export function AppSidebar({
                 )}
               </button>
             )}
-            {(systemStatus?.docker.running ?? overview?.docker_ok) && (
+            {/* Docker allumé : la pastille ouvre les ressources ; le chemin garde toute la place. */}
+            {(systemStatus?.docker.running ?? overview?.docker_ok) ? (
               <button
                 type="button"
-                className="inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs font-medium text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                title="Processeur et mémoire pris par chaque projet sur l’ordinateur"
+                className="inline-flex shrink-0 items-center gap-1 rounded-md cursor-pointer bg-emerald-500/15 py-0.5 pl-2 pr-1.5 shadow-sm text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-500/30 transition-colors hover:bg-emerald-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-emerald-400"
+                title="Docker allumé · voir ce que chaque projet prend sur l’ordinateur"
+                aria-label="Docker allumé, voir les ressources des projets"
                 onClick={() => setResourcesOpen(true)}
               >
                 <Activity className="h-3.5 w-3.5" aria-hidden="true" />
-                Ressources
+                Docker
+                {/* Chevron : signale que la pastille ouvre un détail, comme une ligne de menu. */}
+                <ChevronRight className="-mr-0.5 h-3.5 w-3.5 opacity-70" aria-hidden="true" />
               </button>
+            ) : (
+              <Badge className="shrink-0" variant="destructive">
+                Docker off
+              </Badge>
             )}
-            <Badge
-              className="shrink-0"
-              variant={(systemStatus?.docker.running ?? overview?.docker_ok) ? "success" : "destructive"}
-            >
-              {(systemStatus?.docker.running ?? overview?.docker_ok) ? "Docker" : "Docker off"}
-            </Badge>
           </div>
           <div className="relative mt-4">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -361,16 +364,11 @@ export function AppSidebar({
                       </button>
                     )}
                     {canStop && (
-                      <button
-                        type="button"
-                        // Même forme que le bouton Démarrer, en rouge : on distingue allumer d'éteindre d'un coup d'œil.
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-destructive text-destructive-foreground opacity-0 shadow-sm transition-opacity hover:bg-destructive/90 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100"
-                        title={`Arrêter ${project.name}`}
-                        aria-label={`Arrêter ${project.name}`}
-                        onClick={() => void stopProject(project.name)}
-                      >
-                        <Square className="h-3 w-3 fill-current" aria-hidden="true" />
-                      </button>
+                      <StopProjectButton
+                        name={project.name}
+                        onStop={stopProject}
+                        className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                      />
                     )}
                     {busyJob && (
                       <Loader2

@@ -4,6 +4,7 @@ import { Download, X } from "lucide-react";
 import type { UpdateInstaller } from "@/hooks/use-update-installer";
 import type { AppUpdate } from "@/lib/types";
 import { UpdateActions } from "@/components/shell/update-actions";
+import { ReleaseNotesLink } from "@/components/shell/release-notes";
 
 type UpdateBannerProps = {
   update: AppUpdate;
@@ -21,6 +22,7 @@ export function UpdateBanner({ update, installer, hasRunningJobs, onDismiss, ope
       <div className="min-w-0 flex-1">
         <div className="font-medium">Version {update.latest} disponible</div>
         <div className="text-xs text-muted-foreground">Version installée : {update.current}</div>
+        <ReleaseNotesLink className="mt-1" />
         <UpdateActions update={update} installer={installer} hasRunningJobs={hasRunningJobs} openUrl={openUrl} />
       </div>
       {!installer.busy && (
