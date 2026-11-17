@@ -120,7 +120,12 @@ export function SshKeyDialog({
               />
               <p className="text-xs text-muted-foreground">Ce texte sert à identifier la clé sur cet ordinateur.</p>
             </div>
-            <Button className="w-full" onClick={() => requestSshKeyGeneration()} disabled={generatingSshKey}>
+            <Button
+              data-dialog-submit
+              className="w-full"
+              onClick={() => requestSshKeyGeneration()}
+              disabled={generatingSshKey}
+            >
               {generatingSshKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
               Générer une clé Ed25519
             </Button>
@@ -168,6 +173,7 @@ export function SshKeyDialog({
                 Annuler
               </Button>
               <Button
+                data-dialog-submit
                 variant="destructive"
                 onClick={() => requestSshKeyGeneration(true)}
                 disabled={!sshRegenerateConfirmed || generatingSshKey}

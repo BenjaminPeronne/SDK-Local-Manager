@@ -84,7 +84,7 @@ export function TestUserDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Annuler
           </Button>
-          <Button disabled={!canUseDb || loading || !trimmedLogin} onClick={confirmTestUser}>
+          <Button data-dialog-submit disabled={!canUseDb || loading || !trimmedLogin} onClick={confirmTestUser}>
             <UserCheck className="h-4 w-4" />
             Créer l’utilisateur
           </Button>

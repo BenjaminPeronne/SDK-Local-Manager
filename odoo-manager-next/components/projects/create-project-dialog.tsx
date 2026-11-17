@@ -467,6 +467,7 @@ export function CreateProjectDialog({
               Annuler
             </Button>
             <Button
+              data-dialog-submit
               disabled={loading || !projectName || Boolean(nameTaken) || !prerequisitesReady || !sourceFieldsReady}
               onClick={() => void submitProject()}
             >

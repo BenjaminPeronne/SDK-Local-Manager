@@ -10,16 +10,39 @@ export const Dialog = RadixDialog.Root;
 function insideToasts(event: Event) {
   return event.target instanceof Element && Boolean(event.target.closest(`[${TOAST_REGION_ATTRIBUTE}]`));
 }
+// Champs où Entrée garde son sens propre (cocher, choisir un fichier…) : pas de validation.
+const ENTER_IGNORED_INPUT_TYPES = new Set(["checkbox", "radio", "button", "submit", "reset", "file"]);
+
+/**
+ * Entrée dans un champ texte valide la fenêtre : le bouton marqué `data-dialog-submit` est cliqué,
+ * seulement s'il est actif (nom de confirmation exact, champs requis remplis…). Un champ qui gère
+ * déjà Entrée (vrai formulaire, liste de suggestions qui l'intercepte) garde la main.
+ */
+function submitOnEnter(event: React.KeyboardEvent<HTMLDivElement>) {
+  if (event.key !== "Enter" || event.defaultPrevented || event.nativeEvent.isComposing) return;
+  if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || target.form || ENTER_IGNORED_INPUT_TYPES.has(target.type)) return;
+  const button = event.currentTarget.querySelector<HTMLButtonElement>("button[data-dialog-submit]");
+  if (!button || button.disabled) return;
+  event.preventDefault();
+  button.click();
+}
+
 export const DialogTrigger = RadixDialog.Trigger;
 export const DialogClose = RadixDialog.Close;
 
 export const DialogContent = React.forwardRef<
   React.ElementRef<typeof RadixDialog.Content>,
   React.ComponentPropsWithoutRef<typeof RadixDialog.Content>
->(({ className, children, onPointerDownOutside, onInteractOutside, ...props }, ref) => (
+>(({ className, children, onPointerDownOutside, onInteractOutside, onKeyDown, ...props }, ref) => (
   <RadixDialog.Content
     ref={ref}
     size="3"
+    onKeyDown={(event) => {
+      onKeyDown?.(event);
+      submitOnEnter(event);
+    }}
     onPointerDownOutside={(event) => {
       if (insideToasts(event)) event.preventDefault();
       onPointerDownOutside?.(event);

@@ -37,6 +37,7 @@ export function DeleteProjectDialog({ createJob, onOpenChange, open, selectedPro
           spellCheck={false}
         />
         <Button
+          data-dialog-submit
           variant="destructive"
           disabled={
             !selectedProject || deleteConfirm.trim().toLowerCase() !== selectedProject.name.toLowerCase() || submitting

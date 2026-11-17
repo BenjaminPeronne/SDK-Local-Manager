@@ -203,6 +203,7 @@ export function CreateDatabaseDialog({
           </p>
         )}
         <Button
+          data-dialog-submit
           disabled={!project || Boolean(nameError) || langError || countryError || accessIncomplete || submitting}
           onClick={() => void submit()}
         >

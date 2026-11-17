@@ -63,7 +63,11 @@ export function AdminPasswordDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Annuler
           </Button>
-          <Button disabled={!canUseDb || loading || !adminPassword.trim()} onClick={confirmAdminPasswordReset}>
+          <Button
+            data-dialog-submit
+            disabled={!canUseDb || loading || !adminPassword.trim()}
+            onClick={confirmAdminPasswordReset}
+          >
             <KeyRound className="h-4 w-4" />
             Réinitialiser
           </Button>

@@ -58,6 +58,7 @@ export function DropDatabaseDialog({
             Annuler
           </Button>
           <Button
+            data-dialog-submit
             variant="destructive"
             disabled={disabled || !database || confirm !== database}
             onClick={() => onSubmit()}

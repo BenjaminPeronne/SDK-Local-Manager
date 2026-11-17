@@ -265,6 +265,7 @@ export function RestoreDatabaseDialog({
           )}
 
           <Button
+            data-dialog-submit
             className="w-full"
             disabled={!project || !(source === "sudokeys" ? remoteBackup : file) || Boolean(nameError) || submitting}
             onClick={submit}

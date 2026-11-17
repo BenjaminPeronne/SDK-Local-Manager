@@ -118,6 +118,7 @@ function DuplicateDatabaseForm({
           Annuler
         </Button>
         <Button
+          data-dialog-submit
           disabled={disabled || !database || !trimmedName || trimmedName === database || nameTaken || !masterPwd}
           onClick={() => onSubmit({ newName: trimmedName, masterPwd, neutralize })}
         >
