@@ -393,7 +393,7 @@ export function ProjectHeader({
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
                       disabled={loading}
-                      title="Coupe le réseau des pages ouvertes sur l'adresse de test et sur mobile, comme une vraie coupure. Odoo reste démarré."
+                      title="Coupe le réseau des pages ouvertes sur l'adresse de test et sur mobile, comme une vraie coupure. Odoo reste démarré. Odoo ne s'en rend compte qu'au prochain clic sur un menu ou une fiche."
                       onSelect={() => void requestOfflineTest("set_offline")}
                     >
                       <WifiOff className="h-4 w-4" />

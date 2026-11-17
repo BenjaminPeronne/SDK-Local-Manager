@@ -4040,7 +4040,10 @@ def start_offline_test_job(job, project):
     )
     if run_stream(job, command) != 0:
         raise RuntimeError("Docker n'a pas pu ouvrir l'adresse de test.")
-    job.add(f"Odoo est ouvert sur {mobile_access.OFFLINE_URL} : connecte-toi, puis utilise Passer hors ligne.")
+    job.add(
+        f"Odoo est ouvert sur {mobile_access.OFFLINE_URL} : connecte-toi et ouvre les écrans à tester, "
+        "puis utilise Passer hors ligne. Hors ligne, seuls les écrans déjà ouverts restent consultables."
+    )
 
 
 def stop_offline_test_job(job):
@@ -4063,7 +4066,12 @@ def set_offline_job(job, project):
         raise RuntimeError("Ouvre d'abord l'adresse de test, et ouvre Odoo dessus.")
     if run_stream(job, docker_command(SETTINGS, "stop", "--time", "0", *relays)) != 0:
         raise RuntimeError("Docker n'a pas pu couper l'accès à Odoo.")
-    job.add("Les pages ouvertes sur l'adresse de test (et sur mobile) n'ont plus de réseau. Odoo reste démarré.")
+    # Odoo ne voit la coupure qu'à sa prochaine demande au serveur : rien ne change à l'écran avant un clic.
+    job.add(
+        "Les pages ouvertes sur l'adresse de test (et sur mobile) n'ont plus de réseau. Odoo reste démarré. "
+        "Dans Odoo, clique sur un menu ou une fiche : le bandeau « Travail hors ligne » apparaît (Odoo 20 et plus ; "
+        "avant, seule la caisse a un mode hors ligne)."
+    )
 
 
 def set_online_job(job, project):
