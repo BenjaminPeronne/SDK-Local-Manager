@@ -70,6 +70,13 @@ class DumpPrologueTests(unittest.TestCase):
         # Le gestionnaire crée le schéma avec l'extension, avant le chargement du dump.
         self.assertTrue(prologue.startswith(b"CREATE SCHEMA IF NOT EXISTS unaccent_schema;\n"))
 
+    def test_drops_the_pg_dump_17_transaction_timeout_that_older_servers_reject(self):
+        dump = b"SET statement_timeout = 0;\nSET transaction_timeout = 0;\n" + DUMP_BODY
+
+        prologue, _rest, _extensions = database_restore.split_prologue(chunked_reader(dump, 64), chunk_size=64)
+
+        self.assertEqual(b"SET statement_timeout = 0;\n", prologue)
+
     def test_returns_everything_read_when_no_table_appears_in_time(self):
         data = b"SELECT 1;\n" * 10
 

@@ -35,6 +35,8 @@ EXTENSION_STATEMENT_RE = re.compile(
 SCHEMA_STATEMENT_RE = re.compile(rb"^CREATE SCHEMA (?!IF NOT EXISTS )", re.MULTILINE)
 # Seul le propriétaire de l'extension peut la commenter : la ligne échouerait à chaque restauration.
 EXTENSION_COMMENT_RE = re.compile(rb"^COMMENT ON EXTENSION [^\n]*\n", re.MULTILINE)
+# pg_dump 17 écrit ce réglage, inconnu avant PostgreSQL 17 ; sa valeur (0) est déjà celle par défaut.
+TRANSACTION_TIMEOUT_RE = re.compile(rb"^SET transaction_timeout = [^\n]*\n", re.MULTILINE)
 PROLOGUE_END_RE = re.compile(rb"^(?:CREATE TABLE|COPY) ", re.MULTILINE)
 PROLOGUE_MAX_BYTES = 8 * MIB
 # Après les données viennent les clés, les index et les contraintes : peu d'octets, mais la plus
@@ -237,6 +239,7 @@ def split_prologue(read, max_bytes=PROLOGUE_MAX_BYTES, chunk_size=CHUNK_BYTES):
                 schema = (found.group("schema") or b"").decode("ascii")
                 extensions.setdefault(found.group("name").decode("ascii"), "" if schema == "public" else schema)
             prologue = SCHEMA_STATEMENT_RE.sub(b"CREATE SCHEMA IF NOT EXISTS ", EXTENSION_COMMENT_RE.sub(b"", prologue))
+            prologue = TRANSACTION_TIMEOUT_RE.sub(b"", prologue)
             return prologue, rest, extensions
     return b"", buffer, {}
 
