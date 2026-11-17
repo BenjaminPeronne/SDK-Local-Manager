@@ -29,6 +29,7 @@ const { CredentialStore } = require("./credentials.cjs");
 const { diskEncryptionStatus } = require("./disk-encryption.cjs");
 const { GitLabClient } = require("./gitlab.cjs");
 const { LanRelay } = require("./lan-relay.cjs");
+const { allowThroughFirewall, firewallStatus } = require("./windows-firewall.cjs");
 const { AppUpdater } = require("./updater.cjs");
 const {
   LINUX_WORKSPACE,
@@ -275,6 +276,15 @@ function installHandlers() {
   handle(
     "wsl-lan-relay-stop",
     onWindows(() => lanRelay.stop()),
+  );
+  // Le téléphone joint ce poste par le relais : c'est cette application que le pare-feu doit laisser passer.
+  handle(
+    "wsl-lan-firewall",
+    onWindows(() => (lanRelay.ip ? firewallStatus(process.execPath, lanRelay.ip) : null)),
+  );
+  handle(
+    "wsl-lan-firewall-allow",
+    onWindows(() => allowThroughFirewall(process.execPath)),
   );
   handle(
     "wsl-apply-resources",

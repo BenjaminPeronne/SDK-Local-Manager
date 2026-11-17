@@ -42,6 +42,10 @@ export interface DesktopBridge {
   /** Relaie l'adresse Wi-Fi de Windows vers l'accès mobile ouvert dans WSL ; rend l'adresse pour le téléphone. */
   wslLanRelay?(url: string): Promise<string>;
   wslLanRelayStop?(): Promise<void>;
+  /** Pare-feu de Windows pour le relais ouvert ; null sans relais. */
+  wslLanFirewall?(): Promise<{ state: "allowed" | "blocked" | "unknown" } | null>;
+  /** Laisse passer le téléphone, après la confirmation administrateur de Windows. */
+  wslLanFirewallAllow?(): Promise<void>;
   /** S'abonne à l'avancement de la préparation ; la fonction rendue se désabonne. */
   onWslProgress?(callback: (step: WslPrepareStep) => void): () => void;
   // Mise à jour en un clic.

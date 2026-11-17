@@ -15,6 +15,8 @@ const WSL_CAPABILITIES = [
   "wslApplyResources",
   "wslLanRelay",
   "wslLanRelayStop",
+  "wslLanFirewall",
+  "wslLanFirewallAllow",
   "onWslProgress",
 ];
 

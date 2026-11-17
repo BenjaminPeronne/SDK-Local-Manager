@@ -43,6 +43,8 @@ class LanRelay {
     this.listenPort = listenPort;
     this.server = null;
     this.key = "";
+    // Adresse Wi-Fi du relais ouvert : le pare-feu est lu pour ce réseau-là.
+    this.ip = "";
     this.sockets = new Set();
   }
 
@@ -79,6 +81,7 @@ class LanRelay {
     });
     this.server = server;
     this.key = key;
+    this.ip = ip;
     return `http://${ip}:${this.listenPort}/`;
   }
 
@@ -86,6 +89,7 @@ class LanRelay {
     const server = this.server;
     this.server = null;
     this.key = "";
+    this.ip = "";
     if (!server) return;
     // close() attend la fin des connexions gardées ouvertes par le navigateur du téléphone.
     const closed = new Promise((resolve) => server.close(() => resolve()));

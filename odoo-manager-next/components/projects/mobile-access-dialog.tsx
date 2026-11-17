@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Square } from "lucide-react";
+import { Loader2, ShieldCheck, Square } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { waitForJob } from "@/lib/api";
 import { desktopBridge, desktopErrorMessage } from "@/lib/desktop";
@@ -48,6 +48,9 @@ function MobileAccessContent({
   const relay = desktopBridge()?.wslLanRelay;
   const [relayBase, setRelayBase] = useState("");
   const phoneBase = relay ? relayBase : (mobile?.url ?? "");
+  // Pare-feu de Windows lu pour le relais : null tant qu'il n'est pas connu, ou hors Windows.
+  const [firewall, setFirewall] = useState<{ state: string } | null>(null);
+  const [allowing, setAllowing] = useState(false);
 
   async function runJob(action: string, payload?: Record<string, unknown>) {
     try {
@@ -82,6 +85,33 @@ function MobileAccessContent({
     };
   }, [ready, mobile?.url, relay]);
 
+  useEffect(() => {
+    const read = desktopBridge()?.wslLanFirewall;
+    if (!relayBase || !read) return;
+    let current = true;
+    // Une lecture ratée ne bloque rien : l'aide générale reste affichée.
+    read().then(
+      (status) => current && setFirewall(status),
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [relayBase]);
+
+  async function allowPhone() {
+    const bridge = desktopBridge();
+    if (!bridge?.wslLanFirewallAllow || !bridge.wslLanFirewall) return;
+    setAllowing(true);
+    try {
+      await bridge.wslLanFirewallAllow();
+      setFirewall(await bridge.wslLanFirewall());
+    } catch (err) {
+      setError(desktopErrorMessage(err, "Le pare-feu de Windows n'a pas pu être réglé."));
+    }
+    setAllowing(false);
+  }
+
   async function closeAccess() {
     setClosing(true);
     await desktopBridge()
@@ -112,6 +142,23 @@ function MobileAccessContent({
             <QRCodeSVG value={url} size={224} title={`QR code vers ${url}`} />
           </div>
           <p className="break-all text-center font-mono text-xs text-muted-foreground select-text">{url}</p>
+          {firewall && firewall.state !== "allowed" && (
+            <div
+              role="alert"
+              className="flex w-full flex-col items-center gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-center text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/45 dark:text-amber-100"
+            >
+              <p>
+                {firewall.state === "blocked"
+                  ? "Le pare-feu de Windows empêche le téléphone de joindre ce poste."
+                  : "Windows n'a pas encore autorisé le téléphone à joindre ce poste."}{" "}
+                Windows va demander une confirmation : clique sur « Oui ».
+              </p>
+              <Button size="sm" disabled={allowing} onClick={() => void allowPhone()}>
+                {allowing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                Autoriser le téléphone
+              </Button>
+            </div>
+          )}
           {/* Le poste ne voit pas ce qui bloque le téléphone : ces trois causes se règlent de son côté. */}
           <p className="text-center text-xs text-muted-foreground">
             La page ne s&apos;ouvre pas sur le téléphone ? Vérifie qu&apos;il est sur le même Wi-Fi que ce poste, coupe
