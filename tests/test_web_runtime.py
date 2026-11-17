@@ -3509,6 +3509,23 @@ class DockerEventsWiringTests(unittest.TestCase):
             web.auto_stop_projects(now=now)
         job.assert_called_once_with("Arrêter OLD", web.stop_project_job, ("OLD",), project="OLD")
 
+    def test_resources_are_shares_of_the_whole_computer_with_start_time(self):
+        service = Mock()
+        service.docker_resources.return_value = (4 * 1024**3, 4)
+        stats = "odoo-A|80%|1GiB / 4GiB\npostgresql-A|0%|1GiB / 4GiB\ntraefik|20%|1GiB / 4GiB\n"
+        with (
+            patch.object(web, "SETTINGS", ManagerSettings()),
+            patch.object(web, "run_capture", return_value=(0, stats)),
+            patch.object(web, "project_service", return_value=service),
+            patch.object(web.performance, "host_resources", return_value={"memory": 16 * 1024**3, "cpus": 8}),
+            patch.object(web, "project_dirs", return_value=["A"]),
+            patch.object(web, "running_projects_started_at", return_value={"A": 1000.0}),
+        ):
+            payload = web.project_resources_payload()
+        self.assertEqual({"name": "A", "cpu_percent": 10.0, "memory": 2 * 1024**3, "memory_percent": 12.5, "started_at": 1000.0}, payload["projects"][0])
+        self.assertEqual((12.5, 18.8), (payload["docker"]["cpu_percent"], payload["docker"]["memory_percent"]))
+        self.assertEqual(web.AUTO_STOP_AFTER_SECONDS, payload["auto_stop_after"])
+
     def test_automatic_stop_can_be_turned_off(self):
         with patch.object(web, "SETTINGS", ManagerSettings(auto_stop_projects=False)), patch.object(web, "Job") as job:
             self.assertEqual([], web.auto_stop_projects())

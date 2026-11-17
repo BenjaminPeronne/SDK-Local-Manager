@@ -337,6 +337,10 @@ class ProjectResourcesTests(unittest.TestCase):
         self.assertEqual(18.8, rows[0]["memory_percent"])
         self.assertEqual(100_000_000, rows[1]["memory"])
 
+    def test_totals_cover_every_container(self):
+        output = "odoo-A|150.00%|1GiB / 8GiB\nsime-db-1|50%|1GiB / 8GiB\nbroken line\n"
+        self.assertEqual((200.0, 2 * GIB), performance.stats_totals(output))
+
     def test_start_times_keep_the_latest_container_start(self):
         output = "/odoo-A|2026-11-17T08:00:00.5Z\n/postgresql-A|2026-11-17T07:00:00Z\n/other|2026-11-17T09:00:00Z\n"
         started = performance.projects_started_at(output, ["A"])

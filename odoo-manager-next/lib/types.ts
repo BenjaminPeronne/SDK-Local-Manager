@@ -32,17 +32,22 @@ export type Overview = {
   other_project_folders?: string[];
 };
 
-/** Ce que prend un projet allumé, en part de la mémoire et des processeurs dont dispose Docker. */
+/** Ce que prend un projet allumé, en part de l'ordinateur entier. */
 export type ProjectResources = {
   name: string;
   cpu_percent: number;
   memory: number;
   memory_percent: number;
+  /** Dernier démarrage, en secondes depuis 1970 ; nul si Docker ne l'a pas donné. */
+  started_at?: number | null;
 };
 
 export type ResourcesReport = {
-  memory: number;
-  cpus: number;
+  host: { memory: number; cpus: number };
+  /** Docker entier (projets et autres conteneurs), en part de l'ordinateur. */
+  docker: { memory: number; cpus: number; memory_used: number; cpu_percent: number; memory_percent: number };
+  /** Délai de l'arrêt automatique en secondes ; nul quand il est désactivé. */
+  auto_stop_after: number | null;
   projects: ProjectResources[];
 };
 

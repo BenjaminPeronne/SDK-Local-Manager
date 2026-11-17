@@ -55,3 +55,11 @@ export function workspaceLabel(path: string) {
   const parts = short.split("/");
   return parts.length > 3 ? `${parts[0]}/…/${parts.at(-1)}` : short;
 }
+
+/** Durée lisible : « 2 h 05 », « 12 min », « moins d’une minute ». */
+export function formatDuration(seconds: number) {
+  const minutes = Math.floor(Math.max(0, seconds) / 60);
+  if (minutes < 1) return "moins d’une minute";
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")}`;
+}

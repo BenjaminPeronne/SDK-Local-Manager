@@ -5954,25 +5954,28 @@ AUTO_STOP_AFTER_SECONDS = 8 * 60 * 60
 AUTO_STOP_CHECK_SECONDS = 10 * 60
 
 
+def running_projects_started_at(projects):
+    """Heure du dernier démarrage de chaque projet allumé ; vide si Docker ne répond pas."""
+    names = [name for project in projects for name in (f"odoo-{project}", f"postgresql-{project}")]
+    running = [name for name, state in container_statuses(names).items() if state == "running"]
+    if not running:
+        return {}
+    code, output = run_capture(
+        docker_command(SETTINGS, "inspect", "-f", "{{.Name}}|{{.State.StartedAt}}", *running), timeout=15
+    )
+    return performance.projects_started_at(output, projects) if code == 0 else {}
+
+
 def auto_stop_projects(now=None):
     """Arrête les projets allumés depuis plus de 8 heures, sauf ceux qu'une action occupe."""
     if not SETTINGS.auto_stop_projects or not docker_available()[0]:
         return []
     now = time.time() if now is None else now
-    projects = project_dirs()
-    names = [name for project in projects for name in (f"odoo-{project}", f"postgresql-{project}")]
-    running = [name for name, state in container_statuses(names).items() if state == "running"]
-    if not running:
-        return []
-    code, output = run_capture(
-        docker_command(SETTINGS, "inspect", "-f", "{{.Name}}|{{.State.StartedAt}}", *running), timeout=15
-    )
-    if code != 0:
-        return []
+    started = running_projects_started_at(project_dirs())
     with JOBS_LOCK:
         busy = {job.project for job in JOBS.values() if job.status in JOB_UNFINISHED_STATUSES}
     created = []
-    for project, started_at in performance.projects_started_at(output, projects).items():
+    for project, started_at in started.items():
         if project in busy or now - started_at < AUTO_STOP_AFTER_SECONDS:
             continue
         job = Job(f"Arrêter {project}", stop_project_job, (project,), project=project)
@@ -5998,11 +6001,27 @@ def project_resources_payload():
     )
     if code != 0:
         raise RuntimeError("Docker ne répond pas : impossible de lire ce que prennent les projets.")
-    memory, cpus = project_service().docker_resources()
+    docker_memory, docker_cpus = project_service().docker_resources()
+    host = performance.host_resources()
+    # Parts de l'ordinateur entier ; à défaut de pouvoir le lire, celles de Docker.
+    memory, cpus = host["memory"] or docker_memory, host["cpus"] or docker_cpus
+    projects = project_dirs()
+    rows = performance.project_resources(output, projects, cpus, memory)
+    started = running_projects_started_at(projects)
+    for row in rows:
+        row["started_at"] = started.get(row["name"])
+    docker_cpu, docker_used = performance.stats_totals(output)
     return {
-        "memory": memory,
-        "cpus": cpus,
-        "projects": performance.project_resources(output, project_dirs(), cpus, memory),
+        "host": {"memory": memory, "cpus": cpus},
+        "docker": {
+            "memory": docker_memory,
+            "cpus": docker_cpus,
+            "memory_used": docker_used,
+            "cpu_percent": round(docker_cpu / cpus, 1) if cpus else 0.0,
+            "memory_percent": round(docker_used * 100 / memory, 1) if memory else 0.0,
+        },
+        "auto_stop_after": AUTO_STOP_AFTER_SECONDS if SETTINGS.auto_stop_projects else None,
+        "projects": rows,
     }
 
 

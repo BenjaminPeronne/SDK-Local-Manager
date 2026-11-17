@@ -288,10 +288,10 @@ def container_project(name, projects):
 
 
 def project_resources(stats_output, projects, cpus, memory):
-    """Processeur et mémoire de chaque projet allumé, en part de ce dont dispose Docker.
+    """Processeur et mémoire de chaque projet allumé, en part de `cpus` et `memory` (l'ordinateur).
 
     `stats_output` : lignes `nom|CPUPerc|MemUsage` de `docker stats --no-stream`. Docker compte
-    le processeur cœur par cœur (200 % = deux cœurs pleins) : ramené ici au total de ses cœurs.
+    le processeur cœur par cœur (200 % = deux cœurs pleins) : ramené ici au total des cœurs.
     """
     projects = set(projects)
     totals = {}
@@ -314,6 +314,21 @@ def project_resources(stats_output, projects, cpus, memory):
         entry["cpu_percent"] = round(entry["cpu_percent"] / cpus, 1) if cpus else round(entry["cpu_percent"], 1)
         entry["memory_percent"] = round(entry["memory"] * 100 / memory, 1) if memory else 0.0
     return sorted(totals.values(), key=lambda entry: (-entry["memory"], entry["name"]))
+
+
+def stats_totals(stats_output):
+    """(processeur en % d'un cœur, mémoire en octets) de tous les conteneurs de `docker stats`."""
+    cpu, memory = 0.0, 0
+    for line in (stats_output or "").splitlines():
+        parts = line.split("|")
+        if len(parts) != 3:
+            continue
+        try:
+            cpu += float(parts[1].strip().rstrip("%") or 0)
+        except ValueError:
+            pass
+        memory += parse_size(parts[2].split("/")[0])
+    return cpu, memory
 
 
 def projects_started_at(inspect_output, projects):

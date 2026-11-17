@@ -218,12 +218,12 @@ export function AppSidebar({
             {(systemStatus?.docker.running ?? overview?.docker_ok) && (
               <button
                 type="button"
-                className="shrink-0 rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                title="Ressources des projets : processeur et mémoire pris par chacun"
-                aria-label="Ressources des projets"
+                className="inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs font-medium text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                title="Processeur et mémoire pris par chaque projet sur l’ordinateur"
                 onClick={() => setResourcesOpen(true)}
               >
                 <Activity className="h-3.5 w-3.5" aria-hidden="true" />
+                Ressources
               </button>
             )}
             <Badge
