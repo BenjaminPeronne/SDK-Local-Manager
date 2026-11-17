@@ -363,7 +363,8 @@ export function AppSidebar({
                     {canStop && (
                       <button
                         type="button"
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100"
+                        // Même forme que le bouton Démarrer, en rouge : on distingue allumer d'éteindre d'un coup d'œil.
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-destructive text-destructive-foreground opacity-0 shadow-sm transition-opacity hover:bg-destructive/90 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100"
                         title={`Arrêter ${project.name}`}
                         aria-label={`Arrêter ${project.name}`}
                         onClick={() => void stopProject(project.name)}
