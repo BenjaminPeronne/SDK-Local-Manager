@@ -26,6 +26,7 @@ export const SETTINGS_SAVED_KEYS = [
   "interface_layout",
   "seasonal_decorations",
   "tune_postgres",
+  "auto_stop_projects",
   "migration_banner_dismissed",
   "beta_interface_banner_dismissed",
 ] as const;

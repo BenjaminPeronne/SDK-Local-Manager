@@ -18,7 +18,9 @@ import ctypes
 import json
 import os
 import platform
+import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 MIB = 1024 * 1024
@@ -260,3 +262,75 @@ def write_docker_desktop_resources(memory, cpus, swap, directory=None):
 
 def format_gib(value):
     return f"{value / GIB:.0f} Go" if value >= GIB else f"{value / MIB:.0f} Mo"
+
+
+# --- Ressources prises par chaque projet (`docker stats`) -------------------------
+
+SIZE_UNITS = {"b": 1, "kb": 1000, "kib": 1024, "mb": 1000**2, "mib": MIB, "gb": 1000**3, "gib": GIB}
+
+
+def parse_size(text):
+    """« 512.3MiB » → octets ; 0 si illisible."""
+    match = re.fullmatch(r"\s*([\d.]+)\s*([a-zA-Z]+)\s*", text or "")
+    if not match:
+        return 0
+    try:
+        return int(float(match.group(1)) * SIZE_UNITS.get(match.group(2).lower(), 0))
+    except ValueError:
+        return 0
+
+
+def container_project(name, projects):
+    for prefix in ("odoo-", "postgresql-"):
+        if name.startswith(prefix) and name[len(prefix) :] in projects:
+            return name[len(prefix) :]
+    return None
+
+
+def project_resources(stats_output, projects, cpus, memory):
+    """Processeur et mémoire de chaque projet allumé, en part de ce dont dispose Docker.
+
+    `stats_output` : lignes `nom|CPUPerc|MemUsage` de `docker stats --no-stream`. Docker compte
+    le processeur cœur par cœur (200 % = deux cœurs pleins) : ramené ici au total de ses cœurs.
+    """
+    projects = set(projects)
+    totals = {}
+    for line in (stats_output or "").splitlines():
+        parts = line.split("|")
+        if len(parts) != 3:
+            continue
+        project = container_project(parts[0].strip(), projects)
+        if project is None:
+            continue
+        try:
+            cpu = float(parts[1].strip().rstrip("%") or 0)
+        except ValueError:
+            cpu = 0.0
+        used = parse_size(parts[2].split("/")[0])
+        entry = totals.setdefault(project, {"name": project, "cpu_percent": 0.0, "memory": 0})
+        entry["cpu_percent"] += cpu
+        entry["memory"] += used
+    for entry in totals.values():
+        entry["cpu_percent"] = round(entry["cpu_percent"] / cpus, 1) if cpus else round(entry["cpu_percent"], 1)
+        entry["memory_percent"] = round(entry["memory"] * 100 / memory, 1) if memory else 0.0
+    return sorted(totals.values(), key=lambda entry: (-entry["memory"], entry["name"]))
+
+
+def projects_started_at(inspect_output, projects):
+    """Dernier démarrage (secondes depuis 1970) des conteneurs de chaque projet.
+
+    `inspect_output` : lignes `/nom|2026-11-17T08:00:00.123456789Z` de `docker inspect`.
+    """
+    projects = set(projects)
+    started = {}
+    for line in (inspect_output or "").splitlines():
+        name, _, value = line.partition("|")
+        project = container_project(name.strip().lstrip("/"), projects)
+        if project is None or len(value.strip()) < 19:
+            continue
+        try:
+            moment = datetime.fromisoformat(value.strip()[:19] + "+00:00").timestamp()
+        except ValueError:
+            continue
+        started[project] = max(started.get(project, 0), moment)
+    return started

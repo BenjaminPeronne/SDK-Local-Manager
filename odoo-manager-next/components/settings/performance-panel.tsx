@@ -1,7 +1,7 @@
 "use client";
 
 import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
-import { Cpu, Database, Gauge, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
+import { Cpu, Database, Gauge, Loader2, Power, RefreshCw, TriangleAlert } from "lucide-react";
 import { api } from "@/lib/api";
 import { desktopBridge, desktopErrorMessage } from "@/lib/desktop";
 import { isJobActive } from "@/lib/jobs";
@@ -228,6 +228,22 @@ export function PerformancePanel({
             <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
               Au démarrage de chaque projet, sa base reçoit des réglages adaptés à la mémoire de Docker : restaurations,
               mises à jour et pages plus rapides. Décoché, les réglages d’origine sont rétablis au prochain démarrage.
+            </span>
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-3 text-sm">
+          <Checkbox
+            className="mt-0.5"
+            checked={settingsDraft.auto_stop_projects ?? true}
+            onCheckedChange={(checked) => setSettingsDraft({ ...settingsDraft, auto_stop_projects: checked === true })}
+          />
+          <span className="min-w-0">
+            <span className="flex items-center gap-2 font-medium">
+              <Power className="h-4 w-4 text-muted-foreground" />
+              Éteindre les projets allumés depuis plus de 8 heures
+            </span>
+            <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">
+              Un projet oublié ne continue pas à ralentir l’ordinateur. Rien n’est perdu : il suffit de le redémarrer.
             </span>
           </span>
         </label>

@@ -1016,6 +1016,14 @@ export default function Home() {
     }
   }
 
+  async function stopProjectFromSidebar(name: string) {
+    const job = await createJob("stop_project", { project: name });
+    if (job) {
+      schedule(refreshOverview, 1200);
+      schedule(refreshSystemStatus, 1600);
+    }
+  }
+
   async function startProjectFromSidebar(project: Project) {
     const job = await createJob("start_project", { project: project.name });
     if (job) {
@@ -1735,6 +1743,7 @@ export default function Home() {
           overview={overview}
           pushToast={pushToast}
           startProject={startProjectFromSidebar}
+          stopProject={stopProjectFromSidebar}
           pendingProjectArrivals={pendingProjectArrivals}
           season={season}
           selectedAppIcon={selectedAppIcon}

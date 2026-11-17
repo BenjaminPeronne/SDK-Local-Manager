@@ -1,7 +1,20 @@
 "use client";
 
 import { type Dispatch, type ReactNode, type SetStateAction, useMemo, useState } from "react";
-import { Check, Copy, Database, FolderPlus, Info, Loader2, Play, Search, Settings, Star } from "lucide-react";
+import {
+  Activity,
+  Check,
+  Copy,
+  Database,
+  FolderPlus,
+  Info,
+  Loader2,
+  Play,
+  Search,
+  Settings,
+  Square,
+  Star,
+} from "lucide-react";
 import type { StaticImageData } from "next/image";
 import { workspaceLabel } from "@/lib/format";
 import { isJobActive, isJobUnfinished, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
@@ -17,6 +30,7 @@ import { BunnyEars } from "@/components/seasonal/easter";
 import { WitchHat } from "@/components/seasonal/halloween";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/shell/update-banner";
+import { ResourcesDialog } from "@/components/shell/resources-dialog";
 import { GeneralActivity } from "@/components/jobs/job-activity";
 import type { UpdateInstaller } from "@/hooks/use-update-installer";
 import type { PushToast } from "@/hooks/use-toasts";
@@ -33,6 +47,7 @@ type AppSidebarProps = {
   overview: Overview | null;
   pushToast: PushToast;
   startProject: (project: Project) => Promise<void>;
+  stopProject: (name: string) => Promise<void>;
   pendingProjectArrivals: Job[];
   season: Season | null;
   selectedAppIcon: StaticImageData;
@@ -72,6 +87,7 @@ export function AppSidebar({
   overview,
   pushToast,
   startProject,
+  stopProject,
   pendingProjectArrivals,
   season,
   selectedAppIcon,
@@ -90,6 +106,7 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const [projectsFilter, setProjectsFilter] = useState("");
   const [workspaceCopied, setWorkspaceCopied] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
   const [preferences, setPreferences] = useState(storedSidebarPreferences);
   const workspace = overview?.workspace || "";
   const favorites = Array.isArray(preferences.favorites[workspace]) ? preferences.favorites[workspace] : NO_FAVORITES;
@@ -269,6 +286,8 @@ export function AppSidebar({
             const databaseCount = runningProjectDatabaseCount(project);
             // Bouton au survol : seulement s'il y a quelque chose à démarrer et que Docker répond.
             const canStart = !busyJob && !displayedRunning && project.odoo_status !== "docker off";
+            // Même discrétion pour éteindre : dès qu'un des deux conteneurs tourne.
+            const canStop = !busyJob && (running || project.postgres_status === "running");
 
             return (
               <div
@@ -330,6 +349,17 @@ export function AppSidebar({
                         <Play className="h-3 w-3 fill-current" aria-hidden="true" />
                       </button>
                     )}
+                    {canStop && (
+                      <button
+                        type="button"
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100"
+                        title={`Arrêter ${project.name}`}
+                        aria-label={`Arrêter ${project.name}`}
+                        onClick={() => void stopProject(project.name)}
+                      >
+                        <Square className="h-3 w-3 fill-current" aria-hidden="true" />
+                      </button>
+                    )}
                     {busyJob && (
                       <Loader2
                         className="mr-0.5 h-3.5 w-3.5 animate-spin text-primary"
@@ -382,6 +412,10 @@ export function AppSidebar({
             <FolderPlus className="h-4 w-4" />
             Nouveau projet
           </Button>
+          <Button className="col-span-2 w-full" size="sm" variant="ghost" onClick={() => setResourcesOpen(true)}>
+            <Activity className="h-4 w-4" />
+            Ressources des projets
+          </Button>
           <Button className="w-full" size="sm" variant="ghost" onClick={openSettingsDialog}>
             <Settings className="h-4 w-4" />
             Paramètres
@@ -391,6 +425,12 @@ export function AppSidebar({
           </Button>
         </div>
       </div>
+      <ResourcesDialog
+        open={resourcesOpen}
+        onOpenChange={setResourcesOpen}
+        busyJobs={projectBusyJobs}
+        stopProject={stopProject}
+      />
     </aside>
   );
 }

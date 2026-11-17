@@ -32,6 +32,20 @@ export type Overview = {
   other_project_folders?: string[];
 };
 
+/** Ce que prend un projet allumé, en part de la mémoire et des processeurs dont dispose Docker. */
+export type ProjectResources = {
+  name: string;
+  cpu_percent: number;
+  memory: number;
+  memory_percent: number;
+};
+
+export type ResourcesReport = {
+  memory: number;
+  cpus: number;
+  projects: ProjectResources[];
+};
+
 export type DockerStatus = {
   state: "missing" | "starting" | "stopped" | "ready" | string;
   installed: boolean;
@@ -220,6 +234,8 @@ export type ManagerSettings = {
   seasonal_decorations: boolean;
   /** Réglages PostgreSQL de chaque projet calculés d'après la mémoire et les processeurs de Docker. */
   tune_postgres?: boolean;
+  /** Projets allumés depuis plus de 8 heures arrêtés d'eux-mêmes. */
+  auto_stop_projects?: boolean;
   onboarding_completed: boolean;
   /** Ancien dossier de projets Windows choisi à la main ; vide : détection automatique. */
   legacy_workspace: string;

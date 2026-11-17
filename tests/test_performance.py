@@ -325,3 +325,19 @@ class ApplyDockerResourcesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProjectResourcesTests(unittest.TestCase):
+    def test_containers_are_summed_per_project_and_cpu_is_shared_over_docker_cores(self):
+        output = "odoo-A|150.00%|1GiB / 8GiB\npostgresql-A|50.00%|512MiB / 8GiB\nodoo-B|2%|100MB / 8GiB\nsime-db-1|90%|2GiB / 8GiB\n"
+        rows = performance.project_resources(output, ["A", "B"], cpus=4, memory=8 * GIB)
+        self.assertEqual(["A", "B"], [row["name"] for row in rows])
+        self.assertEqual(50.0, rows[0]["cpu_percent"])
+        self.assertEqual(GIB + 512 * performance.MIB, rows[0]["memory"])
+        self.assertEqual(18.8, rows[0]["memory_percent"])
+        self.assertEqual(100_000_000, rows[1]["memory"])
+
+    def test_start_times_keep_the_latest_container_start(self):
+        output = "/odoo-A|2026-11-17T08:00:00.5Z\n/postgresql-A|2026-11-17T07:00:00Z\n/other|2026-11-17T09:00:00Z\n"
+        started = performance.projects_started_at(output, ["A"])
+        self.assertEqual({"A": 1_794_902_400.0}, started)

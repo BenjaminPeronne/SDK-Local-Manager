@@ -227,6 +227,7 @@ API_ENDPOINTS = {
         "/api/system/status",
         "/api/system/project-creation-prerequisites",
         "/api/system/migration",
+        "/api/system/resources",
         "/api/system/ssh-keys",
         "/api/projects/{project}/modules",
         "/api/projects/{project}/addon-links",
@@ -5949,6 +5950,62 @@ def stop_project_job(job, project):
     project_service().stop_project(project, log=job.add)
 
 
+AUTO_STOP_AFTER_SECONDS = 8 * 60 * 60
+AUTO_STOP_CHECK_SECONDS = 10 * 60
+
+
+def auto_stop_projects(now=None):
+    """Arrête les projets allumés depuis plus de 8 heures, sauf ceux qu'une action occupe."""
+    if not SETTINGS.auto_stop_projects or not docker_available()[0]:
+        return []
+    now = time.time() if now is None else now
+    projects = project_dirs()
+    names = [name for project in projects for name in (f"odoo-{project}", f"postgresql-{project}")]
+    running = [name for name, state in container_statuses(names).items() if state == "running"]
+    if not running:
+        return []
+    code, output = run_capture(
+        docker_command(SETTINGS, "inspect", "-f", "{{.Name}}|{{.State.StartedAt}}", *running), timeout=15
+    )
+    if code != 0:
+        return []
+    with JOBS_LOCK:
+        busy = {job.project for job in JOBS.values() if job.status in JOB_UNFINISHED_STATUSES}
+    created = []
+    for project, started_at in performance.projects_started_at(output, projects).items():
+        if project in busy or now - started_at < AUTO_STOP_AFTER_SECONDS:
+            continue
+        job = Job(f"Arrêter {project}", stop_project_job, (project,), project=project)
+        job.add("Arrêt automatique : projet allumé depuis plus de 8 heures (réglable dans les paramètres).")
+        created.append(job)
+    return created
+
+
+def auto_stop_loop():
+    while True:
+        time.sleep(AUTO_STOP_CHECK_SECONDS)
+        try:
+            auto_stop_projects()
+        except Exception:
+            traceback.print_exc()
+
+
+def project_resources_payload():
+    """Processeur et mémoire pris par chaque projet allumé, comme l'onglet Conteneurs de Docker Desktop."""
+    code, output = run_capture(
+        docker_command(SETTINGS, "stats", "--no-stream", "--format", "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}"),
+        timeout=20,
+    )
+    if code != 0:
+        raise RuntimeError("Docker ne répond pas : impossible de lire ce que prennent les projets.")
+    memory, cpus = project_service().docker_resources()
+    return {
+        "memory": memory,
+        "cpus": cpus,
+        "projects": performance.project_resources(output, project_dirs(), cpus, memory),
+    }
+
+
 def addon_links_wsl_distribution(*directories, creating=False):
     """Distribution WSL qui porte les liens d'addons de ces dossiers, sinon None.
 
@@ -8253,10 +8310,36 @@ def docker_events_command():
     return command, options
 
 
+def start_odoo_after_external_start(line):
+    """Conteneur Odoo démarré hors du gestionnaire (Docker Desktop, `docker compose up`, API Docker).
+
+    Le conteneur ne lance pas Odoo de lui-même : sans cette relance, le projet restait affiché
+    éteint et son adresse répondait 502. Ignoré quand une action du gestionnaire tourne déjà sur
+    le projet : c'est elle qui a démarré le conteneur.
+    """
+    parts = str(line or "").split()
+    if len(parts) != 3 or parts[:2] != ["container", "start"] or not parts[2].startswith("odoo-"):
+        return None
+    project = parts[2][len("odoo-") :]
+    if project not in project_dirs():
+        return None
+    with JOBS_LOCK:
+        if any(job.project == project and job.status in JOB_UNFINISHED_STATUSES for job in JOBS.values()):
+            return None
+    job = Job(f"Démarrer {project}", start_project_job, (project,), project=project)
+    job.add("Conteneur démarré hors du gestionnaire : lancement du serveur Odoo.")
+    return job
+
+
 def on_docker_event(line):
     # Ligne vide : l'écoute s'est coupée, Docker vient peut-être de s'arrêter.
     if not line:
         EVENT_DOCKER_REFRESH.set()
+    else:
+        try:
+            start_odoo_after_external_start(line)
+        except Exception:
+            traceback.print_exc()
     # Un conteneur Odoo démarré ou arrêté hors du gestionnaire change l'état de son serveur.
     invalidate_overview_odoo_servers()
     EVENT_WAKE.set()
@@ -9699,6 +9782,7 @@ ROUTER = Router(
         api_route("GET", "/api/system/status", payload_view(system_status_snapshot)),
         api_route("GET", "/api/system/project-creation-prerequisites", payload_view(project_creation_prerequisites)),
         api_route("GET", "/api/system/migration", payload_view(migration_snapshot)),
+        api_route("GET", "/api/system/resources", payload_view(project_resources_payload)),
         api_route("GET", "/api/system/ssh-keys", payload_view(ssh_public_keys_snapshot)),
         api_route("GET", "/api/projects/{project}/modules", project_modules_payload),
         api_route("GET", "/api/projects/{project}/addon-links", project_addon_links_payload),
@@ -9807,6 +9891,7 @@ def main():
     ensure_pinned_host_keys()
     ensure_event_watch_thread_started()
     threading.Thread(target=database_retention_loop, daemon=True).start()
+    threading.Thread(target=auto_stop_loop, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

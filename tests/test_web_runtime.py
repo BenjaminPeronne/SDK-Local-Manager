@@ -3468,6 +3468,52 @@ class DockerEventsWiringTests(unittest.TestCase):
         self.assertTrue(web.EVENT_WAKE.is_set())
         self.assertTrue(web.EVENT_DOCKER_REFRESH.is_set())
 
+    def test_an_odoo_container_started_outside_the_manager_gets_its_server_launched(self):
+        with (
+            patch.object(web, "project_dirs", return_value=["DEMO"]),
+            patch.object(web, "JOBS", {}),
+            patch.object(web, "Job") as job,
+        ):
+            web.start_odoo_after_external_start("container start odoo-DEMO")
+            job.assert_called_once_with("Démarrer DEMO", web.start_project_job, ("DEMO",), project="DEMO")
+            job.reset_mock()
+            for line in ("container start postgresql-DEMO", "container die odoo-DEMO", "container start odoo-OTHER"):
+                web.start_odoo_after_external_start(line)
+            job.assert_not_called()
+
+    def test_a_container_started_by_a_manager_action_is_left_to_that_action(self):
+        running = Mock(project="DEMO", status="running")
+        with (
+            patch.object(web, "project_dirs", return_value=["DEMO"]),
+            patch.object(web, "JOBS", {1: running}),
+            patch.object(web, "Job") as job,
+        ):
+            self.assertIsNone(web.start_odoo_after_external_start("container start odoo-DEMO"))
+        job.assert_not_called()
+
+    def test_projects_on_for_more_than_eight_hours_are_stopped_unless_busy(self):
+        now = 1_800_000_000
+        old = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - 9 * 3600))
+        recent = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - 3600))
+        inspect = f"/odoo-OLD|{old}.1Z\n/postgresql-OLD|{old}.1Z\n/odoo-NEW|{recent}.1Z\n/odoo-BUSY|{old}.1Z\n"
+        statuses = {"odoo-OLD": "running", "postgresql-OLD": "running", "odoo-NEW": "running", "odoo-BUSY": "running"}
+        with (
+            patch.object(web, "SETTINGS", ManagerSettings()),
+            patch.object(web, "docker_available", return_value=(True, "")),
+            patch.object(web, "project_dirs", return_value=["OLD", "NEW", "BUSY"]),
+            patch.object(web, "container_statuses", side_effect=lambda names: {n: statuses.get(n, "exited") for n in names}),
+            patch.object(web, "run_capture", return_value=(0, inspect)),
+            patch.object(web, "JOBS", {1: Mock(project="BUSY", status="running")}),
+            patch.object(web, "Job") as job,
+        ):
+            web.auto_stop_projects(now=now)
+        job.assert_called_once_with("Arrêter OLD", web.stop_project_job, ("OLD",), project="OLD")
+
+    def test_automatic_stop_can_be_turned_off(self):
+        with patch.object(web, "SETTINGS", ManagerSettings(auto_stop_projects=False)), patch.object(web, "Job") as job:
+            self.assertEqual([], web.auto_stop_projects())
+        job.assert_not_called()
+
     def test_a_finished_action_publishes_the_new_state_without_waiting(self):
         web.refresh_after_job()
         self.assertTrue(web.EVENT_WAKE.is_set())
