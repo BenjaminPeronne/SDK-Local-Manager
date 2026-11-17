@@ -80,6 +80,8 @@ def project_folders_from_containers(output, workspace):
             continue
         folders.add(str(project.parent))
     return sorted(folders)
+
+
 # Première page Odoo servie dans le conteneur : 2xx/3xx/4xx = serveur prêt, 5xx ou exception = pas encore.
 ODOO_HTTP_READY_SCRIPT = """import http.client, sys
 connection = http.client.HTTPConnection("127.0.0.1", 8069, timeout=float(sys.argv[1]))
@@ -317,8 +319,9 @@ ODOO_STARTUP_LOG = "/home/odoo/srv/data/odoo-manager-startup.log"
 ODOO_STARTUP_STATUS = "/home/odoo/srv/data/odoo-manager-startup.status"
 ODOO_LOG_FILE = "/home/odoo/srv/data/odoo.log"
 PENDING_MODULE_STATES_SQL = "('to install','to upgrade','to remove')"
-# Nouvelle échéance d'une base expirée corrigée : Odoo n'avertit qu'à 30 jours de la date.
-DATABASE_EXPIRATION_DAYS = 365
+DATABASE_EXPIRATION_DAYS = database_restore.DATABASE_EXPIRATION_DAYS
+# Adresse qui refuse aussitôt la connexion : Odoo n'envoie plus rien à odoo.com (contrat, utilisateurs…).
+PUBLISHER_WARRANTY_OFF = "publisher_warranty_url = http://127.0.0.1:9/"
 ODOO_STATE_MARKER = "odoo-manager-state:"
 # Même choix que le démarrage du serveur : le script `odoo` de l'image peut échouer (patch
 # LOG_ATTACHMENTS qui ne s'applique pas, « /usr/bin/env: bad interpreter » sur une copie RIKA),
@@ -519,7 +522,11 @@ def odoo_module_link_name(name, module_path=None):
                     if not isinstance(asset, str):
                         continue
                     namespace, separator, _relative = asset.partition("/static/")
-                    if separator and ODOO_MODULE_NAME_RE.fullmatch(namespace) and (Path(module_path) / "static").is_dir():
+                    if (
+                        separator
+                        and ODOO_MODULE_NAME_RE.fullmatch(namespace)
+                        and (Path(module_path) / "static").is_dir()
+                    ):
                         namespaces.add(namespace)
             if len(namespaces) == 1:
                 return namespaces.pop()
@@ -2185,6 +2192,7 @@ class ProjectService:
     def start_odoo_server(self, project, log=None, disable_cron=False, sleep=None):
         sleep = sleep or jobs.sleep
         container = f"odoo-{project}"
+        self.block_odoo_pings(project, log=log)
 
         def launch():
             mode = " sans workers cron" if disable_cron else ""
@@ -3389,8 +3397,7 @@ class ProjectService:
                     for line in self._postgres_lines(
                         project,
                         db_name,
-                        "SELECT name || '|' || state FROM ir_module_module "
-                        f"WHERE name IN ({names});",
+                        f"SELECT name || '|' || state FROM ir_module_module WHERE name IN ({names});",
                     )
                     if "|" in line
                 )
@@ -3435,8 +3442,7 @@ class ProjectService:
         valid_links_by_source = {
             entry.resolve(): entry.name
             for entry in sorted(all_entries)
-            if ODOO_MODULE_NAME_RE.match(entry.name)
-            and any((entry / name).is_file() for name in MODULE_MANIFEST_NAMES)
+            if ODOO_MODULE_NAME_RE.match(entry.name) and any((entry / name).is_file() for name in MODULE_MANIFEST_NAMES)
         }
         blocked = []
         aliases = {}
@@ -3451,7 +3457,8 @@ class ProjectService:
                     entry.unlink()
                     aliases[entry.name] = canonical_name
                     self.log(
-                        log, f"Lien invalide « {entry.name} » retiré : ce module est déjà relié sous « {canonical_name} »."
+                        log,
+                        f"Lien invalide « {entry.name} » retiré : ce module est déjà relié sous « {canonical_name} ».",
                     )
                     continue
                 if entry.is_symlink() and not (target.exists() or target.is_symlink()):
@@ -3878,13 +3885,41 @@ if excluded:
         self.log(log, f"Utilisateur de recette prêt : identifiant {login}, mot de passe {login}.")
         self.log(log, f"URL Odoo: {self.project_url(project)}")
 
+    def block_odoo_pings(self, project, log=None):
+        """Ajoute à odoo.conf une adresse morte pour le contrat Odoo : aucune base ne contacte plus odoo.com.
+
+        Lu au démarrage d'Odoo ; une valeur déjà présente est gardée.
+        """
+        config = self.project_path(project) / "odoo.conf"
+        try:
+            content = config.read_text(encoding="utf-8")
+        except OSError:
+            return
+        if re.search(r"(?m)^\s*publisher_warranty_url\s*=", content):
+            return
+        updated, count = re.subn(
+            r"(?m)^\[options\][^\n]*\n", lambda m: m.group(0) + PUBLISHER_WARRANTY_OFF + "\n", content, count=1
+        )
+        if not count:
+            return
+        try:
+            config.write_text(updated, encoding="utf-8")
+        except OSError as exc:
+            self.log(log, f"Contact avec odoo.com non coupé ({exc}).")
+            return
+        self.log(log, "Contact avec odoo.com coupé dans odoo.conf (aucune base n'envoie plus d'informations).")
+
     def run_odoo_fix_expired_database(self, project, db_name, log=None):
-        """Repousse la date d'expiration et coupe la tâche qui la redemande aux serveurs d'Odoo."""
+        """Repousse la date d'expiration et coupe la tâche qui la redemande aux serveurs d'Odoo.
+
+        Les autres bases du projet sont corrigées au passage : Odoo redémarre après.
+        """
         self.ensure_odoo_containers_ready(project, log=log)
         self.log(log, "")
         self.log(log, "Correction d'une base expirée")
         self.log(log, f"Projet: {project}")
         self.log(log, f"Base: {db_name}")
+        self.align_database_urls(project, log=log)
         # La tâche planifiée « Publisher: Update Notification » interroge odoo.com chaque
         # semaine et réécrit database.expiration_date : la date seule ne tiendrait pas.
         script = f"""import datetime
@@ -4375,11 +4410,11 @@ print("ODOO_MANAGER_NEUTRALIZATION_DONE")
         if code != 0:
             self.log(log, f"Liens des bases non vérifiés : {output.strip()[-300:]}")
             return
-        fixed = sorted(
-            {line.split("|", 1)[0] for line in output.splitlines() if "|" in line and line.split("|", 1)[0] in names}
-        )
-        for name in fixed:
+        rows = [line.split("|", 1) for line in output.splitlines() if "|" in line and line.split("|", 1)[0] in names]
+        for name in sorted({name for name, key in rows if key != "database.expiration_date"}):
             self.log(log, f"Liens de la base {name} (e-mails, portail, PDF) dirigés vers {base_url}")
+        for name in sorted({name for name, key in rows if key == "database.expiration_date"}):
+            self.log(log, f"Base {name} : avertissement d'abonnement Odoo retiré (date repoussée d'un an)")
 
     def start_project(self, project, log=None):
         self.start_project_containers(project, log=log)

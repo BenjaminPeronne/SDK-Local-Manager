@@ -1296,8 +1296,7 @@ class ProjectServiceTests(unittest.TestCase):
         module = self.add_module("sudokeys-recette", "")
         (module / "static/src").mkdir(parents=True)
         (module / "__manifest__.py").write_text(
-            "{'name': 'Recette', 'assets': {'web.assets_backend': "
-            "['sudokeys_uat/static/src/**/*']}}"
+            "{'name': 'Recette', 'assets': {'web.assets_backend': ['sudokeys_uat/static/src/**/*']}}"
         )
         addons = self.project_path / "odoo/addons"
         addons.mkdir(parents=True)
@@ -1317,9 +1316,9 @@ class ProjectServiceTests(unittest.TestCase):
     def test_install_reports_module_skipped_even_when_odoo_exits_successfully(self):
         self.runner.statuses = {"odoo-DEMO": "running", "postgresql-DEMO": "running"}
         self.runner.odoo_server_running = False
-        self.runner.database_query_outputs[
-            "SELECT name || '|' || state FROM ir_module_module WHERE name IN"
-        ] = "sudokeys_uat|to install"
+        self.runner.database_query_outputs["SELECT name || '|' || state FROM ir_module_module WHERE name IN"] = (
+            "sudokeys_uat|to install"
+        )
 
         with self.assertRaisesRegex(OdooError, "sudokeys_uat \\(to install\\)"):
             self.service.run_odoo_module_command("DEMO", "demo", "sudokeys_uat", option="-i")
@@ -1665,6 +1664,21 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertIn('("model_id.model", "=", "publisher_warranty.contract")', shell[-1])
         self.assertIn('active.write({"active": False})', shell[-1])
 
+    def test_odoo_start_cuts_contact_with_odoo_com_once_and_keeps_a_chosen_address(self):
+        config = self.project_path / "odoo.conf"
+        config.write_text("[options]\nadmin_passwd = odoo\n\n[queue_job]\nchannels = root:2\n", encoding="utf-8")
+
+        self.service.block_odoo_pings("DEMO")
+        self.service.block_odoo_pings("DEMO")
+
+        self.assertEqual(
+            "[options]\npublisher_warranty_url = http://127.0.0.1:9/\nadmin_passwd = odoo\n\n[queue_job]\nchannels = root:2\n",
+            config.read_text(encoding="utf-8"),
+        )
+        config.write_text("[options]\npublisher_warranty_url = http://proxy/\n", encoding="utf-8")
+        self.service.block_odoo_pings("DEMO")
+        self.assertEqual("[options]\npublisher_warranty_url = http://proxy/\n", config.read_text(encoding="utf-8"))
+
     def test_admin_password_reset_rejects_empty_password(self):
         with self.assertRaises(ValueError):
             self.service.run_odoo_reset_admin_password("DEMO", "PROTEX_20812", "", log=lambda _line: None)
@@ -1713,25 +1727,30 @@ class ProjectServiceTests(unittest.TestCase):
     def test_neutralization_returns_the_mode_reported_by_odoo(self):
         for mode in ("native", "partial", None):
             with self.subTest(mode=mode):
+
                 def stream(_command, log=None, mode=mode):
                     if mode:
                         log(f"ODOO_MANAGER_NEUTRALIZATION_MODE={mode}")
                     return 0
 
-                with patch.object(self.service, "stream", side_effect=stream), patch.object(
-                    self.service, "run_postgres_sql"
-                ), patch.object(self.service, "verify_database_neutralization"):
+                with (
+                    patch.object(self.service, "stream", side_effect=stream),
+                    patch.object(self.service, "run_postgres_sql"),
+                    patch.object(self.service, "verify_database_neutralization"),
+                ):
                     self.assertEqual(mode, self.service._execute_database_neutralization("DEMO", "client"))
 
     def test_neutralization_restart_error_preserves_successful_mode(self):
         for failed_step in ("start_odoo_server", "wait_project_http"):
-            with self.subTest(failed_step=failed_step), patch.object(self.service, "is_running", return_value=True), patch.object(
-                self.service, "wait_for_odoo_container_initialization"
-            ), patch.object(self.service, "stop_odoo_server"), patch.object(
-                self.service, "_execute_database_neutralization", return_value="partial"
-            ), patch.object(self.service, "start_odoo_server") as start, patch.object(
-                self.service, "wait_project_http"
-            ) as wait:
+            with (
+                self.subTest(failed_step=failed_step),
+                patch.object(self.service, "is_running", return_value=True),
+                patch.object(self.service, "wait_for_odoo_container_initialization"),
+                patch.object(self.service, "stop_odoo_server"),
+                patch.object(self.service, "_execute_database_neutralization", return_value="partial"),
+                patch.object(self.service, "start_odoo_server") as start,
+                patch.object(self.service, "wait_project_http") as wait,
+            ):
                 (start if failed_step == "start_odoo_server" else wait).side_effect = RuntimeError("indisponible")
                 with self.assertRaises(NeutralizationRestartError) as raised:
                     self.service.run_odoo_neutralize_command("DEMO", "client")
@@ -2351,7 +2370,10 @@ class ProjectServiceTests(unittest.TestCase):
                 return 1, ""
             if "-Atc" in command:
                 return 0, "client_a\nclient_b"
-            return 0, "client_a|report.url\nclient_a|web.base.url\nintrus|web.base.url"
+            return (
+                0,
+                "client_a|report.url\nclient_a|web.base.url\nclient_b|database.expiration_date\nintrus|web.base.url",
+            )
 
         logs = []
         with patch.object(self.service, "capture", side_effect=capture):
@@ -2362,7 +2384,11 @@ class ProjectServiceTests(unittest.TestCase):
         self.assertEqual(4, align.count("-c"))
         self.assertIn("http://dev.DEMO.localhost", align[-1])
         self.assertEqual(
-            ["Liens de la base client_a (e-mails, portail, PDF) dirigés vers http://dev.DEMO.localhost"], logs
+            [
+                "Liens de la base client_a (e-mails, portail, PDF) dirigés vers http://dev.DEMO.localhost",
+                "Base client_b : avertissement d'abonnement Odoo retiré (date repoussée d'un an)",
+            ],
+            logs,
         )
 
     def test_database_links_check_never_blocks_the_start(self):
@@ -2672,7 +2698,9 @@ class OdooStartupRepairTests(unittest.TestCase):
             self.assertTrue(text.startswith("SET statement_timeout = 0;\nSELECT pg_catalog.set_config("))
         everything = "".join(post_data)
         self.assertIn("ADD CONSTRAINT res_partner_pkey PRIMARY KEY (id);\n\\echo ", everything)
-        self.assertLess(everything.index("res_partner_pkey"), everything.index("CREATE INDEX res_partner_user_id_index"))
+        self.assertLess(
+            everything.index("res_partner_pkey"), everything.index("CREATE INDEX res_partner_user_id_index")
+        )
         self.assertIn("REFERENCES public.res_users(id) ON DELETE SET NULL NOT VALID;", everything)
         self.assertIn("ALTER TABLE ONLY public.res_partner VALIDATE CONSTRAINT res_partner_user_id_fkey;", everything)
         self.assertNotIn("unrestrict", everything)

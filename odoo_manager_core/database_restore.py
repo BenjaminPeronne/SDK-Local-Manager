@@ -314,6 +314,29 @@ LOCAL_REPORT_URL = "http://127.0.0.1:8069"
 LOCAL_REPORT_URL_RE = r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?/?$"
 
 
+# Échéance donnée aux bases locales : Odoo n'avertit qu'à 30 jours de la date d'expiration.
+DATABASE_EXPIRATION_DAYS = 365
+
+
+def expiration_statements():
+    """UPDATE puis INSERT (sans « ; ») qui repoussent database.expiration_date si elle tombe dans les 30 jours.
+
+    Sans date, Odoo en suppose une à 30 jours et affiche déjà l'avertissement : elle est créée.
+    """
+    later = f"to_char((now() AT TIME ZONE 'UTC') + interval '{DATABASE_EXPIRATION_DAYS} days', 'YYYY-MM-DD HH24:MI:SS')"
+    soon = (
+        "CASE WHEN value ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}( [0-9:]{8})?$' "
+        "THEN value::timestamp < (now() AT TIME ZONE 'UTC') + interval '31 days' ELSE true END"
+    )
+    return (
+        f"UPDATE ir_config_parameter SET value = {later}, write_uid = 1, write_date = now() AT TIME ZONE 'UTC' "
+        f"WHERE key = 'database.expiration_date' AND {soon}",
+        "INSERT INTO ir_config_parameter (key, value, create_uid, create_date, write_uid, write_date) "
+        f"SELECT 'database.expiration_date', {later}, 1, now() AT TIME ZONE 'UTC', 1, now() AT TIME ZONE 'UTC' "
+        "WHERE NOT EXISTS (SELECT 1 FROM ir_config_parameter WHERE key = 'database.expiration_date')",
+    )
+
+
 def restored_urls_sql(base_url):
     """SQL qui fait pointer les liens d'une base restaurée vers ce poste.
 
@@ -321,8 +344,14 @@ def restored_urls_sql(base_url):
     passe…) : celle de la production ou http://localhost:8069 mènent ailleurs ou nulle part.
     report.url vise le serveur de production, ou manque : wkhtmltopdf prend alors web.base.url, que le
     conteneur ne sait pas joindre (HostNotFoundError), et les PDF perdent leur mise en page.
+    La date d'expiration est repoussée : en local, aucun avertissement d'abonnement.
     """
-    return parameters_sql({"web.base.url": base_url, "report.url": LOCAL_REPORT_URL})
+    return (
+        parameters_sql({"web.base.url": base_url, "report.url": LOCAL_REPORT_URL})
+        + "\n"
+        + ";\n".join(expiration_statements())
+        + ";"
+    )
 
 
 def local_urls_sql(base_url):
@@ -330,7 +359,8 @@ def local_urls_sql(base_url):
 
     Ne touche que l'adresse par défaut d'Odoo ou une ancienne adresse du projet (port de Traefik
     changé) pour web.base.url, et une adresse locale sur un autre port qu'Odoo pour report.url, créé s'il manque :
-    une adresse choisie à la main (tunnel vers un téléphone…) est gardée. Sans effet sur une base
+    une adresse choisie à la main (tunnel vers un téléphone…) est gardée. Repousse aussi la date
+    d'expiration proche ou passée (avertissement d'abonnement d'Odoo). Sans effet sur une base
     qui n'est pas une base Odoo ; renvoie une ligne « base|paramètre » par valeur corrigée.
     """
     host = re.match(r"^https?://([^/:]+)", base_url)
@@ -338,6 +368,7 @@ def local_urls_sql(base_url):
     defaults = ", ".join(sql_literal(url + suffix) for url in ODOO_DEFAULT_BASE_URLS for suffix in ("", "/"))
     url = sql_literal(base_url)
     report_url = sql_literal(LOCAL_REPORT_URL)
+    expire_update, expire_insert = expiration_statements()
     return f"""CREATE TEMP TABLE sdk_local_urls (key text);
 DO $sdk$
 BEGIN
@@ -364,6 +395,10 @@ BEGIN
     WHERE NOT EXISTS (SELECT 1 FROM ir_config_parameter WHERE key = 'report.url')
     RETURNING key
   )
+  INSERT INTO sdk_local_urls SELECT key FROM changed;
+  WITH changed AS ({expire_update} RETURNING key)
+  INSERT INTO sdk_local_urls SELECT key FROM changed;
+  WITH changed AS ({expire_insert} RETURNING key)
   INSERT INTO sdk_local_urls SELECT key FROM changed;
 END
 $sdk$;

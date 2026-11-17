@@ -266,6 +266,9 @@ class RestoreSqlTests(unittest.TestCase):
         # report.url est créé s'il manque : sans lui, wkhtmltopdf prend web.base.url, injoignable du conteneur.
         self.assertIn("SET value = 'http://127.0.0.1:8069'", sql)
         self.assertIn("SELECT 'report.url', 'http://127.0.0.1:8069'", sql)
+        # En local, pas d'avertissement d'abonnement : la date d'expiration proche ou passée est repoussée.
+        self.assertIn("WHERE key = 'database.expiration_date' AND CASE", sql)
+        self.assertIn("SELECT 'database.expiration_date', to_char(", sql)
 
     def test_local_urls_only_replace_unreachable_addresses(self):
         sql = database_restore.local_urls_sql("http://dev.client_v19.localhost:8080")
