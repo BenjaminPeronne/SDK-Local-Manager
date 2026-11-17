@@ -215,6 +215,17 @@ export function AppSidebar({
                 )}
               </button>
             )}
+            {(systemStatus?.docker.running ?? overview?.docker_ok) && (
+              <button
+                type="button"
+                className="shrink-0 rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                title="Ressources des projets : processeur et mémoire pris par chacun"
+                aria-label="Ressources des projets"
+                onClick={() => setResourcesOpen(true)}
+              >
+                <Activity className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            )}
             <Badge
               className="shrink-0"
               variant={(systemStatus?.docker.running ?? overview?.docker_ok) ? "success" : "destructive"}
@@ -411,10 +422,6 @@ export function AppSidebar({
           <Button className="col-span-2 w-full" onClick={openCreateProjectDialog}>
             <FolderPlus className="h-4 w-4" />
             Nouveau projet
-          </Button>
-          <Button className="col-span-2 w-full" size="sm" variant="ghost" onClick={() => setResourcesOpen(true)}>
-            <Activity className="h-4 w-4" />
-            Ressources des projets
           </Button>
           <Button className="w-full" size="sm" variant="ghost" onClick={openSettingsDialog}>
             <Settings className="h-4 w-4" />
