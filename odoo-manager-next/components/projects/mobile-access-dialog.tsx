@@ -91,6 +91,11 @@ function MobileAccessContent({
             <QRCodeSVG value={url} size={224} title={`QR code vers ${url}`} />
           </div>
           <p className="break-all text-center font-mono text-xs text-muted-foreground select-text">{url}</p>
+          {/* Le poste ne voit pas ce qui bloque le téléphone : ces trois causes se règlent de son côté. */}
+          <p className="text-center text-xs text-muted-foreground">
+            La page ne s&apos;ouvre pas sur le téléphone ? Vérifie qu&apos;il est sur le même Wi-Fi que ce poste, coupe
+            le VPN de ce poste s&apos;il y en a un, et autorise Docker dans le pare-feu de ce poste.
+          </p>
         </div>
       ) : (
         <p role="status" className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
