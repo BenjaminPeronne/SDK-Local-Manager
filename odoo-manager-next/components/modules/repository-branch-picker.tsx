@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { LocalChangesDialog, type LocalChangesChoice } from "@/components/modules/local-changes-dialog";
 
 // Lignes affichées : au-delà, la recherche sert à trouver la branche voulue.
 const VISIBLE_BRANCHES = 80;
@@ -278,6 +279,8 @@ export function RepositoryBranchPicker({
   const [databases, setDatabases] = useState<DatabaseList>({ status: "loading" });
   const [updateDatabases, setUpdateDatabases] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  // Changement en attente du choix sur les fichiers modifiés : la fenêtre de choix est ouverte.
+  const [pending, setPending] = useState<{ branch: string; updateDatabases: boolean } | null>(null);
   const current = repository.branch;
   // Odoo et Enterprise : pas de liste de branches ni de bases à mettre à jour, seulement le dernier commit.
   const locked = repositoryBranchLocked(repository);
@@ -369,23 +372,36 @@ export function RepositoryBranchPicker({
     }
   }
 
-  async function confirm() {
-    if (!chosen || submitting) return;
+  const localChanges = list.status === "ready" ? (list.result.local_changes ?? []) : [];
+
+  async function launch(branch: string, update: boolean, choice?: LocalChangesChoice) {
     setSubmitting(true);
     try {
-      // Aucune base n'utilise le dépôt : le changement reste seul. Sinon, le serveur retrouve lui-même
-      // les bases à mettre à jour, y compris quand la liste n'a pas pu être lue ici.
-      const nothingToUpdate = databases.status === "ready" && databases.running && databases.databases.length === 0;
       const job = await createJob("switch_repository_branch", {
         project: projectName,
         repository: repository.id,
-        branch: chosen,
-        update_databases: updateDatabases && !nothingToUpdate && !locked,
+        branch,
+        update_databases: update,
+        local_changes: choice,
       });
-      if (job) changeOpen(false);
+      if (job) {
+        changeOpen(false);
+        setPending(null);
+      }
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function confirm() {
+    if (!chosen || submitting) return;
+    // Aucune base n'utilise le dépôt : le changement reste seul. Sinon, le serveur retrouve lui-même
+    // les bases à mettre à jour, y compris quand la liste n'a pas pu être lue ici.
+    const nothingToUpdate = databases.status === "ready" && databases.running && databases.databases.length === 0;
+    const update = updateDatabases && !nothingToUpdate && !locked;
+    if (!localChanges.length) return void launch(chosen, update);
+    setPending({ branch: chosen, updateDatabases: update });
+    changeOpen(false);
   }
 
   return (
@@ -456,7 +472,7 @@ export function RepositoryBranchPicker({
               <Button type="button" size="sm" variant="ghost" onClick={() => setChosen("")}>
                 Retour
               </Button>
-              <Button type="button" size="sm" disabled={submitting} onClick={() => void confirm()}>
+              <Button type="button" size="sm" disabled={submitting} onClick={confirm}>
                 {submitting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : updating ? (
@@ -494,6 +510,14 @@ export function RepositoryBranchPicker({
           </div>
         )}
       </Popover.Content>
+      <LocalChangesDialog
+        open={Boolean(pending)}
+        onOpenChange={(next) => !next && setPending(null)}
+        repositoryName={repository.name}
+        files={localChanges}
+        submitting={submitting}
+        onChoose={(choice) => pending && void launch(pending.branch, pending.updateDatabases, choice)}
+      />
     </Popover.Root>
   );
 }

@@ -696,8 +696,8 @@ class RepositoryModulesTests(ModuleLayoutTests):
             plain = web.switch_repository_branch_action(payload)
             updating = web.switch_repository_branch_action({**payload, "update_databases": True})
 
-        self.assertFalse(plain.args[-1])
-        self.assertTrue(updating.args[-1])
+        self.assertFalse(plain.args[-2])
+        self.assertTrue(updating.args[-2])
         self.assertIn("mettre à jour les bases", updating.title)
         with mock.patch.object(web, "validate_project", return_value=self.project):
             same = web.switch_repository_branch_action({**payload, "branch": "18.0"})
@@ -776,10 +776,13 @@ class RepositoryModulesTests(ModuleLayoutTests):
         with self.assertRaisesRegex(RuntimeError, r"non enregistrés dans Git \(1\) : alpha/__manifest__\.py\."):
             web.switch_repository_branch_job(DummyJob(), self.project, repository, "feature")
         self.assertEqual("master", web.git_checkouts.read_checkout(clone)["branch"])
-        git("checkout", "--", "alpha", cwd=clone)
+        self.assertEqual(["alpha/__manifest__.py"], web.repository_branches(self.project, repository)["local_changes"])
 
+        # Choix « mettre de côté » : la modification part dans git stash, récupérable.
         job = DummyJob()
-        web.switch_repository_branch_job(job, self.project, repository, "feature")
+        web.switch_repository_branch_job(job, self.project, repository, "feature", local_changes="stash")
+        stashes = subprocess.run(["git", "-C", str(clone), "stash", "list"], capture_output=True, text=True, check=True)
+        self.assertIn("avant la branche feature", stashes.stdout)
 
         self.assertEqual("feature", web.git_checkouts.read_checkout(clone)["branch"])
         self.assertTrue((self.project_root / "odoo/addons/gamma/__manifest__.py").is_file())
@@ -794,8 +797,10 @@ class RepositoryModulesTests(ModuleLayoutTests):
         )
         self.assertEqual("origin/feature", upstream.stdout.strip())
 
-        # Revenir sur master réutilise la branche locale.
-        web.switch_repository_branch_job(DummyJob(), self.project, repository, "master")
+        # Revenir sur master réutilise la branche locale ; choix « effacer » : la modification disparaît.
+        (clone / "alpha/__manifest__.py").write_text("{'name': 'thrown away'}")
+        web.switch_repository_branch_job(DummyJob(), self.project, repository, "master", local_changes="discard")
+        self.assertNotIn("thrown away", (clone / "alpha/__manifest__.py").read_text())
         self.assertEqual("master", web.git_checkouts.read_checkout(clone)["branch"])
         self.assertTrue((clone / "beta/__manifest__.py").is_file())
 

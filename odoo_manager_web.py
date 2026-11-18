@@ -7820,6 +7820,10 @@ def repository_branches(project, repository_id):
         if target["kind"] == "git" and target["commit"]
         else {"commit_date": "", "commit_subject": ""}
     )
+    try:
+        local_changes = checkout_local_changes(creator, target["root"]) if target["kind"] == "git" else []
+    except RuntimeError:
+        local_changes = []
     return {
         "current": target["branch"],
         "kind": target["kind"],
@@ -7830,6 +7834,8 @@ def repository_branches(project, repository_id):
         # Odoo et Enterprise : branche liée à la version du projet, seule sa mise à jour est proposée.
         "core": target["core"],
         "tracked_by": enclosing_project_repository(project, target["root"]) if target["core"] else "",
+        # Fichiers modifiés non enregistrés : l'interface demande quoi en faire avant le changement.
+        "local_changes": local_changes,
         **details,
     }
 
@@ -7965,21 +7971,46 @@ def repository_module_names(creator, root):
         return set()
 
 
-def switch_checkout_branch(job, creator, root, branch):
-    """Passe un clone Git sur `branch`, ou y récupère les nouveaux commits, sans jamais écraser une
-    modification non enregistrée."""
-
-    def git(*arguments, timeout=60):
-        return checkout_git(creator, root, *arguments, timeout=timeout)
-
-    code, changes = git("status", "--porcelain", "--untracked-files=no")
+def checkout_local_changes(creator, root):
+    """Fichiers suivis par Git et modifiés dans le clone `root`, pas encore enregistrés (commit)."""
+    code, changes = checkout_git(creator, root, "status", "--porcelain", "--untracked-files=no", timeout=60)
     if code:
         raise RuntimeError(f"Lecture de l'état du dépôt {root.name} impossible.")
     # La capture retire l'espace de tête de la première ligne (« ␣M fichier » pour un fichier modifié non
     # indexé) : couper à l'espace suivant le code d'état, pas à la colonne 3, qui mangerait une lettre.
     # Git met entre guillemets les chemins contenant des espaces, le découpage ne les coupe donc pas.
-    changed = [line.split(maxsplit=1)[-1] for line in changes.splitlines() if line.strip()]
-    if changed:
+    return [line.split(maxsplit=1)[-1] for line in changes.splitlines() if line.strip()]
+
+
+# Que faire des modifications non enregistrées avant de changer de branche : choix de l'utilisateur.
+LOCAL_CHANGES_CHOICES = ("stash", "discard")
+
+
+def switch_checkout_branch(job, creator, root, branch, local_changes=""):
+    """Passe un clone Git sur `branch`, ou y récupère les nouveaux commits.
+
+    Une modification non enregistrée bloque, sauf choix explicite : `stash` la met de côté (git stash,
+    récupérable), `discard` l'efface.
+    """
+
+    def git(*arguments, timeout=60):
+        return checkout_git(creator, root, *arguments, timeout=timeout)
+
+    changed = checkout_local_changes(creator, root)
+    if changed and local_changes == "stash":
+        code, output = git("stash", "push", "--message", f"Odoo Manager : avant la branche {branch}")
+        if code:
+            raise RuntimeError(f"Mise de côté des modifications de {root.name} impossible : {output.strip()[-400:]}")
+        job.add(
+            f"{len(changed)} fichier(s) modifié(s) de {root.name} mis de côté. "
+            "Pour les retrouver plus tard dans ce dossier : git stash pop."
+        )
+    elif changed and local_changes == "discard":
+        code, output = git("reset", "--hard", "-q")
+        if code:
+            raise RuntimeError(f"Effacement des modifications de {root.name} impossible : {output.strip()[-400:]}")
+        job.add(f"{len(changed)} fichier(s) modifié(s) de {root.name} remis comme au dernier commit.")
+    elif changed:
         raise RuntimeError(
             f"{root.name} contient des fichiers modifiés et non enregistrés dans Git ({len(changed)}) : "
             + ", ".join(changed[:8])
@@ -8076,7 +8107,7 @@ def replace_with_staged_checkout(job, project, root, checkout):
     job.add(f"Ancien dossier mis de côté : {backup}")
 
 
-def refresh_core_repository_job(job, project, target, branch):
+def refresh_core_repository_job(job, project, target, branch, local_changes=""):
     """Récupère le dernier commit de la branche d'Odoo ou d'Enterprise, puis relance Odoo s'il tournait."""
     name, root = target["name"], target["root"]
     if branch != target["branch"]:
@@ -8088,7 +8119,7 @@ def refresh_core_repository_job(job, project, target, branch):
     creator = ProjectCreator(SETTINGS, WORKSPACE, project_service())
     try:
         if target["kind"] == "git":
-            switch_checkout_branch(job, creator, root, branch)
+            switch_checkout_branch(job, creator, root, branch, local_changes)
         else:
             refresh_core_archive(job, creator, project, root, target["url"], branch)
         if name in ENTERPRISE_REPOSITORY_NAMES:
@@ -8118,7 +8149,7 @@ def refresh_core_repository_job(job, project, target, branch):
     job.add("Odoo a redémarré avec ce code.")
 
 
-def switch_repository_branch_job(job, project, repository_id, branch, update_databases=False):
+def switch_repository_branch_job(job, project, repository_id, branch, update_databases=False, local_changes=""):
     """Change la branche d'un dépôt de modules du projet, selon sa nature (voir switchable_repository).
 
     La branche déjà chargée est mise à jour : son dernier commit est récupéré du serveur.
@@ -8128,7 +8159,7 @@ def switch_repository_branch_job(job, project, repository_id, branch, update_dat
     target = switchable_repository(project, repository_id)
     project = validate_project(project)
     if target["core"]:
-        refresh_core_repository_job(job, project, target, branch)
+        refresh_core_repository_job(job, project, target, branch, local_changes)
         return
     name, previous, previous_commit = target["name"], target["branch"], target["commit"]
     if target["kind"] == "import":
@@ -8145,7 +8176,7 @@ def switch_repository_branch_job(job, project, repository_id, branch, update_dat
         before = repository_module_names(creator, root)
         try:
             if target["kind"] == "git":
-                switch_checkout_branch(job, creator, root, branch)
+                switch_checkout_branch(job, creator, root, branch, local_changes)
             else:
                 replace_archive_with_clone(job, creator, project, root, target["url"], branch)
             # Les modules apparus sur la nouvelle branche sont reliés comme à la création du projet ;
@@ -9440,6 +9471,9 @@ def switch_repository_branch_action(payload):
     branch = validate_git_ref(payload.get("branch"))
     target = switchable_repository(project, payload.get("repository"))
     update_databases = truthy(payload.get("update_databases"))
+    local_changes = str(payload.get("local_changes") or "")
+    if local_changes and local_changes not in LOCAL_CHANGES_CHOICES:
+        raise ValueError("Choix inconnu pour les fichiers modifiés.")
     return Job(
         (
             f"Mettre à jour le dépôt · {target['name']} ({branch})"
@@ -9448,7 +9482,7 @@ def switch_repository_branch_action(payload):
         )
         + (" et mettre à jour les bases" if update_databases else ""),
         switch_repository_branch_job,
-        (project, str(payload.get("repository")), branch, update_databases),
+        (project, str(payload.get("repository")), branch, update_databases, local_changes),
         project=project,
     )
 

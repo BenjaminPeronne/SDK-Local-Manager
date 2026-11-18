@@ -137,6 +137,8 @@ export type RepositoryBranches = {
   core?: boolean;
   /** Dépôt du projet (dépôt de production rangé dans odoo/) qui suit aussi ces fichiers ; vide sinon. */
   tracked_by?: string;
+  /** Fichiers modifiés dans le clone et pas encore enregistrés : un choix est demandé avant le changement. */
+  local_changes?: string[];
 };
 
 /** Date d'un commit, à l'heure de l'ordinateur : « 12 octobre 2026 à 14:05 » ; vide si illisible. */
