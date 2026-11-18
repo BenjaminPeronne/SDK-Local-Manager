@@ -13,6 +13,18 @@ import sys
 
 RELEASE_NOTES = (
     (
+        "0.53.1",
+        "2026-11-18",
+        (
+            "L’application interroge moins souvent l’ordinateur quand tout est à jour : elle reste plus légère "
+            "lorsqu’elle est ouverte longtemps.",
+            "L’IoT Box reste reliée à sa base après l’ouverture d’Odoo dans le navigateur : avant, elle cherchait "
+            "la base à une adresse qu’elle ne pouvait pas joindre et les appareils ne répondaient plus.",
+            "Sous Windows, quand un autre programme répond déjà à l’adresse des projets, l’application en choisit "
+            "une autre toute seule : avant, l’ouverture du projet échouait en accusant sa configuration.",
+        ),
+    ),
+    (
         "0.53.0",
         "2026-11-18",
         (
