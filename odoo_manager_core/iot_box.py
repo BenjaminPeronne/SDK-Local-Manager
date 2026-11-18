@@ -16,6 +16,8 @@ import socket
 from pathlib import Path
 from urllib.parse import urlencode
 
+from .database_restore import sql_literal
+
 IOTBOX_CONTAINER = "iotbox"
 IOTBOX_IMAGE = "odoo-manager-iotbox"
 IOTBOX_HOST = "iot.localhost"
@@ -487,4 +489,4 @@ def connect_failure(output):
 def box_identifiers(networks, serial):
     """Valeurs SQL des identifiants possibles de la box, tirées de sa sortie `docker inspect` et de son volume."""
     found = {*re.findall(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}", networks.lower()), *re.findall(r"SDK[0-9a-f]+", serial)}
-    return ", ".join(f"'{value}'" for value in sorted(found)) or "''"
+    return ", ".join(sql_literal(value) for value in sorted(found)) or "''"

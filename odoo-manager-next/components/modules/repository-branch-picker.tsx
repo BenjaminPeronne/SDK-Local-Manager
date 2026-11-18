@@ -410,7 +410,7 @@ export function RepositoryBranchPicker({
         <button
           type="button"
           className="inline-flex h-6 max-w-full shrink-0 items-center gap-1 rounded-md border bg-background px-1.5 font-mono text-xs font-medium transition-colors hover:border-primary/50 hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-primary/60 data-[state=open]:bg-hover"
-          title={`Branche ${current || "inconnue"}${repository.commit ? ` · commit ${repository.commit}` : ""} — cliquer pour vérifier les mises à jour${locked ? "" : " ou changer de branche"}`}
+          title={`Branche ${current || "inconnue"}${repository.commit ? ` · commit ${repository.commit}` : ""} - cliquer pour vérifier les mises à jour${locked ? "" : " ou changer de branche"}`}
           aria-label={`Branche ${current || "inconnue"}${repository.commit ? `, commit ${shortCommit(repository.commit)}` : ""} de ${repository.name} : vérifier les mises à jour${locked ? "" : " ou changer de branche"}`}
         >
           <GitBranch className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -427,7 +427,7 @@ export function RepositoryBranchPicker({
         <button
           type="button"
           className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-300"
-          title={`Un commit plus récent (${shortCommit(check.remote_commit)}) est sur le serveur pour la branche ${current} — cliquer pour le voir et mettre à jour`}
+          title={`Un commit plus récent (${shortCommit(check.remote_commit)}) est sur le serveur pour la branche ${current} - cliquer pour le voir et mettre à jour`}
           aria-label={`Mise à jour disponible pour ${repository.name} : commit ${shortCommit(check.remote_commit)} sur le serveur`}
           onClick={() => changeOpen(true)}
         >

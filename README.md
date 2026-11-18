@@ -586,8 +586,8 @@ Le journal des erreurs de l'application regroupe les erreurs de l'interface, de 
 
 ## Documentation complémentaire
 
-- [docs/api-locale.md](docs/api-locale.md) : API locale pour les intégrateurs — version, contrat publié, lancement et suivi des actions.
-- [docs/electron.md](docs/electron.md) : application de bureau Electron — sécurité, backend embarqué, construction et distribution.
+- [docs/api-locale.md](docs/api-locale.md) : API locale pour les intégrateurs : version, contrat publié, lancement et suivi des actions.
+- [docs/electron.md](docs/electron.md) : application de bureau Electron : sécurité, backend embarqué, construction et distribution.
 - [wsl/README.md](wsl/README.md) : environnement Linux « SDK-Manager » sous Windows et migration des projets.
 - [archive/cli/README.md](archive/cli/README.md) : ancien menu en ligne de commande, archivé.
 

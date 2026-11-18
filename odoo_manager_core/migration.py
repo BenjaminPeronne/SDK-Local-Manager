@@ -68,7 +68,7 @@ def project_status(path, prefix=None, run=subprocess.run, container_state=None):
     """(arrêté, confirmé par un moteur) pour un projet candidat à la migration.
 
     Docker tranche quand il connaît le conteneur du projet : `postmaster.pid` survit à un
-    conteneur tué — arrêt de Docker Desktop, distribution coupée — parce que PostgreSQL ne
+    conteneur tué (arrêt de Docker Desktop, distribution coupée) parce que PostgreSQL ne
     l'efface qu'en s'arrêtant proprement. Pris seul, ce verrou laissait des projets marqués
     « en cours d'exécution » pour toujours, donc impossibles à migrer et impossibles à
     arrêter puisqu'ils ne tournaient plus.

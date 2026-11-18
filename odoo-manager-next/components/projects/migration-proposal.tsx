@@ -53,7 +53,7 @@ export function MigrationProposal({
             {formatNameList(unsure.map((candidate) => candidate.name))}{" "}
             {unsure.length > 1 ? "se sont mal arrêtés" : "s’est mal arrêté"} la dernière fois : il en reste une trace,
             mais plus rien ne tourne. Vérifie que personne ne {unsure.length > 1 ? "les" : "l’"}utilise, puis lance la
-            copie — le dossier d’origine n’est pas modifié.
+            copie : le dossier d’origine n’est pas modifié.
           </span>
         </div>
       )}

@@ -56,6 +56,21 @@ class CorsTests(unittest.TestCase):
         handler.send_header.assert_not_called()
 
 
+class FileVersionTests(unittest.TestCase):
+    def test_version_is_reread_only_when_the_file_changes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            release = Path(temp) / "release.py"
+            pattern = r"version_info\s*=\s*\((\d+),\s*(\d+)"
+            release.write_text("version_info = (18, 0, 0)", encoding="utf-8")
+            self.assertEqual(web.file_version(release, pattern), "18.0")
+            with patch.object(Path, "read_text", side_effect=AssertionError("read again")):
+                self.assertEqual(web.file_version(release, pattern), "18.0")
+            release.write_text("version_info = (19, 0, 0)", encoding="utf-8")
+            os.utime(release, ns=(1, 1))
+            self.assertEqual(web.file_version(release, pattern), "19.0")
+            self.assertEqual(web.file_version(Path(temp) / "absent.py", pattern), "")
+
+
 class PathIsRelativeToTests(unittest.TestCase):
     def test_matches_pathlib_for_windows_and_posix_paths(self):
         cases = [
@@ -2168,7 +2183,7 @@ class ModuleFailureHintTests(unittest.TestCase):
     PARSE_ERROR = (
         "La commande Odoo a échoué avec le code 255. Dernière erreur Odoo : odoo.tools.convert.ParseError: "
         "while parsing /home/odoo/srv/server/addons/sudokeys_project_tracking/views/res_config_settings_views.xml:3 "
-        "— Le champ `payslip_generate_and_send_trigger` n'existe pas"
+        "- Le champ `payslip_generate_and_send_trigger` n'existe pas"
     )
 
     @patch("odoo_manager_web.ignored_missing_modules", return_value={"old_excluded"})
@@ -2378,7 +2393,7 @@ class AutomaticPythonDependencyTests(unittest.TestCase):
     REPORT_DUPLICATE_ERROR = (
         "La commande Odoo a échoué avec le code 255. Dernière erreur Odoo : odoo.tools.convert.ParseError: "
         "while parsing /home/odoo/srv/server/odoo/addons/l10n_fr/data/tax_report_data.xml:3, somewhere inside "
-        "— cause d'origine : psycopg2.errors.UniqueViolation: duplicate key value violates unique constraint "
+        "- cause d'origine : psycopg2.errors.UniqueViolation: duplicate key value violates unique constraint "
         '"account_report_expression_line_label_uniq"'
     )
 

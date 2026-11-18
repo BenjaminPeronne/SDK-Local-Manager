@@ -96,7 +96,7 @@ MISSING_CODE_ERROR_RE = re.compile(
 # Un module Python manquant se voit de deux façons : Odoo le détecte lui-même via
 # external_dependencies (quand le manifeste le déclare) et le dit en clair, ou il n'est
 # déclaré nulle part et casse au premier import réel, en français ou en anglais selon
-# le point d'échec — les deux formes portent le nom d'import, pas forcément le nom pip.
+# le point d'échec : les deux formes portent le nom d'import, pas forcément le nom pip.
 MISSING_PYTHON_IMPORT_RE = re.compile(
     r"d[ée]pendance externe non trouv[ée]e\s*:\s*(?P<name1>[\w.\-]+)"
     r"|external dependenc\w* (?:is |are )?not (?:met|found)\s*:\s*(?P<name2>[\w.\-]+)"

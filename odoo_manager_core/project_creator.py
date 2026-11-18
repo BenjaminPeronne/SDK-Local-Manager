@@ -42,7 +42,7 @@ ENTERPRISE_REPOSITORY = "ssh://git@gitlab.sudokeys.com:10022/sudokeys/odoo_entre
 LOCAL_TEMPLATE_REPOSITORY = "ssh://git@gitlab.sudokeys.com:10022/devops/docker-odoo-local.git"
 
 # Minuscules uniquement : la casse d'origine se retrouvait telle quelle dans le lien Traefik
-# généré à la création (dev.{project}.localhost), et le conteneur/dossier créés avec elle —
+# généré à la création (dev.{project}.localhost), et le conteneur/dossier créés avec elle :
 # un nom mixte cassait ensuite les comparaisons de casse strictes en aval.
 PROJECT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")
 GIT_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")

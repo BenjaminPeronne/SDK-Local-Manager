@@ -1,4 +1,4 @@
-# Mesures de performance — 30 octobre 2026
+# Mesures de performance - 30 octobre 2026
 
 Ces mesures sont synthétiques, réalisées sur le poste de développement, et ne représentent pas la latence Docker, l'interface réelle ou le réseau. Elles ne modifient pas de projets. Commandes : `python3 scripts/benchmark_overview.py` et `node scripts/benchmark_overview_compare.cjs`.
 

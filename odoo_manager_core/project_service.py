@@ -601,7 +601,7 @@ class TracebackChain:
         """Suffixe « cause d'origine » si la cause diffère de l'exception finale."""
         if not self.root or self.root == final_exception:
             return ""
-        return f" — cause d'origine : {self.root[:250]}"
+        return f" - cause d'origine : {self.root[:250]}"
 
 
 class OdooError(RuntimeError):
@@ -996,8 +996,6 @@ class ProjectService:
             return None
         db_user = user_match.group(1)
         db_password = password_match.group(1)
-        quoted_user = db_user.replace('"', '""')
-        quoted_password = db_password.replace("'", "''")
 
         self.log(log, "Docker Desktop macOS a interrompu l'initialisation PostgreSQL sur le montage local.")
         self.log(log, "Reprise contrôlée du cluster neuf et création du rôle Odoo manquant...")
@@ -1009,13 +1007,9 @@ class ProjectService:
         except RuntimeError:
             return 1
         role_sql = (
-            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '"
-            + db_user.replace("'", "''")
-            + "') THEN CREATE ROLE \""
-            + quoted_user
-            + "\" LOGIN ENCRYPTED PASSWORD '"
-            + quoted_password
-            + "' CREATEDB; END IF; END $$;"
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = "
+            f"{database_restore.sql_literal(db_user)}) THEN CREATE ROLE {database_restore.sql_identifier(db_user)} "
+            f"LOGIN ENCRYPTED PASSWORD {database_restore.sql_literal(db_password)} CREATEDB; END IF; END $$;"
         )
         role_code, role_output = self.capture(
             self.docker(
@@ -3506,7 +3500,7 @@ class ProjectService:
             if line.startswith(("View error context", "Contexte d'erreur")) or re.match(r"\d{4}-\d\d-\d\d ", line):
                 break
             if explanation.search(line) and not line.startswith("<"):
-                return f" — {line[:250]}"
+                return f" - {line[:250]}"
         return ""
 
     def missing_imported_file_reason(self, container, reason):

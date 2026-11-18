@@ -156,12 +156,12 @@ export function CreateDatabaseDialog({
                     langError ? "text-xs font-normal text-destructive" : "text-xs font-normal text-muted-foreground"
                   }
                 >
-                  {langError ? "Utilise un code comme fr_FR." : "Exemple : Français — fr_FR."}
+                  {langError ? "Utilise un code comme fr_FR." : "Exemple : Français - fr_FR."}
                 </span>
                 <datalist id="create-db-languages">
-                  <option value="fr_FR">Français — fr_FR</option>
-                  <option value="en_US">Anglais — en_US</option>
-                  <option value="es_ES">Espagnol — es_ES</option>
+                  <option value="fr_FR">Français - fr_FR</option>
+                  <option value="en_US">Anglais - en_US</option>
+                  <option value="es_ES">Espagnol - es_ES</option>
                 </datalist>
               </label>
               <label className="grid gap-1.5 text-sm font-medium">
@@ -182,12 +182,12 @@ export function CreateDatabaseDialog({
                 >
                   {countryError
                     ? "Utilise un code de deux lettres, comme FR."
-                    : "Exemple : France — FR. Le pays peut être vide."}
+                    : "Exemple : France - FR. Le pays peut être vide."}
                 </span>
                 <datalist id="create-db-countries">
-                  <option value="FR">France — FR</option>
-                  <option value="GP">Guadeloupe — GP</option>
-                  <option value="MQ">Martinique — MQ</option>
+                  <option value="FR">France - FR</option>
+                  <option value="GP">Guadeloupe - GP</option>
+                  <option value="MQ">Martinique - MQ</option>
                 </datalist>
               </label>
             </div>

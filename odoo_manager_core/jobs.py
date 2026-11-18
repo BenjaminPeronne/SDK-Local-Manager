@@ -18,6 +18,7 @@ import shlex
 import subprocess
 import threading
 import time
+import traceback
 import uuid
 
 from .platform import executable_search_path, hidden_process_kwargs
@@ -154,7 +155,8 @@ class JobControl:
             try:
                 interrupt()
             except Exception:
-                pass
+                # l'arrêt continue pour les autres, l'échec reste dans le journal du backend
+                traceback.print_exc()
         if containers:
             threading.Thread(target=self.kill_container_processes, args=(containers, token), daemon=True).start()
 

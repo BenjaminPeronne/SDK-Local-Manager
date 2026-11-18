@@ -710,7 +710,7 @@ class ProjectServiceTests(unittest.TestCase):
 
         self.assertTrue(
             reason.endswith(
-                "res_config_settings_views.xml:3 — Le champ `payslip_generate_and_send_trigger` n'existe pas"
+                "res_config_settings_views.xml:3 - Le champ `payslip_generate_and_send_trigger` n'existe pas"
             )
         )
 

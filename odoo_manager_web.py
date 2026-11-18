@@ -1691,27 +1691,36 @@ def project_url(project, traefik_port=None):
     return url_with_port(f"http://dev.{project}.localhost/", traefik_port)
 
 
+# Version lue dans un fichier, gardée tant que sa date de modification ne change pas : l'état général
+# repasse sur chaque projet toutes les quelques secondes.
+FILE_VERSION_CACHE = {}
+
+
+def file_version(path, pattern):
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return ""
+    key = (str(path), pattern)
+    cached = FILE_VERSION_CACHE.get(key)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        match = re.search(pattern, path.read_text(encoding="utf-8", errors="ignore"))
+    except OSError:
+        return ""
+    version = ".".join(match.groups()) if match else ""
+    FILE_VERSION_CACHE[key] = (mtime, version)
+    return version
+
+
 def project_odoo_version(project):
     release_file = WORKSPACE / project / "odoo" / "odoo" / "odoo" / "release.py"
-    if safe_path_exists(release_file):
-        try:
-            text = release_file.read_text(encoding="utf-8", errors="ignore")
-            match = re.search(r"version_info\s*=\s*\((\d+),\s*(\d+)", text)
-            if match:
-                return f"{match.group(1)}.{match.group(2)}"
-        except OSError:
-            pass
-
+    version = file_version(release_file, r"version_info\s*=\s*\((\d+),\s*(\d+)")
+    if version:
+        return version
     compose = compose_file(project)
-    if compose:
-        try:
-            text = compose.read_text(encoding="utf-8", errors="ignore")
-            match = re.search(r"docker-odoo-local:(\d+\.\d+)", text)
-            if match:
-                return match.group(1)
-        except OSError:
-            pass
-    return ""
+    return file_version(compose, r"docker-odoo-local:(\d+\.\d+)") if compose else ""
 
 
 def psql_capture(project, query, db_name=None, timeout=12):
@@ -3760,7 +3769,7 @@ def cancel_missing_module_operations_job(job, project, db_name, modules):
         set(candidates)
         | {name for name in automatic_exclusions if states.get(name, {}).get("state") in TRANSIENT_MODULE_STATES}
     )
-    quoted = ",".join(f"'{name}'" for name in reset_modules)
+    quoted = ",".join(database_restore.sql_literal(name) for name in reset_modules)
     query = (
         "begin; "
         "lock table ir_module_module in row exclusive mode; "
@@ -4289,7 +4298,7 @@ def link_iotbox_job(job, project, db_name):
     code, output = psql_capture(
         project,
         "insert into ir_config_parameter (key, value, create_date, write_date) "
-        f"values ('{parameter}', '{token}', now() at time zone 'utc', now() at time zone 'utc') "
+        f"values ({database_restore.sql_literal(parameter)}, {database_restore.sql_literal(token)}, now() at time zone 'utc', now() at time zone 'utc') "
         "on conflict (key) do update set value = excluded.value, write_date = excluded.write_date;",
         db_name,
     )
@@ -4624,7 +4633,7 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
     try:
         validation_started = time.monotonic()
         details = validate_odoo_backup_archive(backup_path)
-        job.add(f"Mesure — validation de l'archive : {time.monotonic() - validation_started:.2f} s.")
+        job.add(f"Mesure - validation de l'archive : {time.monotonic() - validation_started:.2f} s.")
         size_mb = backup_path.stat().st_size / (1024 * 1024)
         job.add(f"Restauration de {db_name} dans {project}")
         job.add(f"Sauvegarde: {filename} ({size_mb:.1f} Mo)")
@@ -4680,7 +4689,7 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
             def post_data():
                 nonlocal index_started
                 index_started = time.monotonic()
-                job.add(f"Mesure — chargement SQL avant index : {index_started - started:.2f} s.")
+                job.add(f"Mesure - chargement SQL avant index : {index_started - started:.2f} s.")
                 job.add(
                     "Données chargées. Création des index et des contraintes : étape la plus longue pour une grosse base."
                 )
@@ -4701,15 +4710,15 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
                 )
                 loaded_at = time.monotonic()
                 if index_started is not None:
-                    job.add(f"Mesure — index et contraintes : {loaded_at - index_started:.2f} s.")
+                    job.add(f"Mesure - index et contraintes : {loaded_at - index_started:.2f} s.")
                 else:
-                    job.add(f"Mesure — chargement SQL et index : {loaded_at - started:.2f} s (phases non séparées).")
+                    job.add(f"Mesure - chargement SQL et index : {loaded_at - started:.2f} s (phases non séparées).")
                 if filestore:
                     job_progress.span("Copie du filestore", end=85, expected=30 + filestore_bytes / (40 * 1024 * 1024))
                     filestore_started = time.monotonic()
                     service.restore_filestore(project, db_name, archive, filestore, log=job.add)
                     job.add(
-                        f"Mesure — copie du filestore : {time.monotonic() - filestore_started:.2f} s, {filestore_bytes} octets décompressés."
+                        f"Mesure - copie du filestore : {time.monotonic() - filestore_started:.2f} s, {filestore_bytes} octets décompressés."
                     )
             except Exception:
                 job.add(f"Restauration incomplète : suppression de la base {db_name}...")
@@ -4781,7 +4790,7 @@ def restore_database_job(job, project, backup_path, filename, db_name, copy=True
                 job.result = {"kind": "database_restore", "database": db_name, "neutralization": "failed"}
                 raise
             finally:
-                job.add(f"Mesure — neutralisation et contrôles : {time.monotonic() - neutralization_started:.2f} s.")
+                job.add(f"Mesure - neutralisation et contrôles : {time.monotonic() - neutralization_started:.2f} s.")
         else:
             job_progress.span("Redémarrage et vérifications", end=99, expected=40)
             service.start_odoo_server(project, log=job.add)
@@ -4850,7 +4859,7 @@ def restore_remote_backup_job(job, project, backup, db_name, neutralize=True):
         destination.unlink(missing_ok=True)
         raise
     elapsed = time.monotonic() - started
-    job.add(f"Mesure — téléchargement : {elapsed:.2f} s, {backup.size} octets annoncés.")
+    job.add(f"Mesure - téléchargement : {elapsed:.2f} s, {backup.size} octets annoncés.")
     # La restauration devient propriétaire du fichier et le supprime à la fin, réussie ou non.
     restore_database_job(job, project, destination, filename, db_name, copy=True, neutralize=neutralize)
 
