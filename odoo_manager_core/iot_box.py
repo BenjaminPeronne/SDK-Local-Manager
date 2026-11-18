@@ -175,6 +175,23 @@ pathlib.Path.open = _redirect(pathlib.Path.open)
 _open = builtins.open
 builtins.open = lambda file, *args, **kwargs: _open(_PI_FILES.get(file, file), *args, **kwargs)
 
+# La base envoie à la box son adresse vue du navigateur (message server_update, en *.localhost), que le
+# conteneur ne résout pas : la box garde celle de l'appairage, qui passe par le réseau Docker.
+import configparser as _configparser
+import urllib.parse as _urlparse
+
+_conf_set = _configparser.RawConfigParser.set
+
+
+def _set_keeping_docker_server(self, section, option, value=None):
+    host = _urlparse.urlsplit(value or "").hostname or ""
+    if section == "iot.box" and option == "remote_server" and host.split(".")[-1] == "localhost":
+        return
+    _conf_set(self, section, option, value)
+
+
+_configparser.RawConfigParser.set = _set_keeping_docker_server
+
 
 # Odoo 17/18 ne choisit la base d'une requête que par la session (ou s'il n'y en a qu'une), et leur box
 # n'en envoie pas : chaque appel vers la base reliée porte une session ouverte sur elle. La box 19

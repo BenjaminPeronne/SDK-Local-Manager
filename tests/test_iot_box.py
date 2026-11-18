@@ -1,3 +1,5 @@
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -67,6 +69,24 @@ class IotBoxPairingTests(unittest.TestCase):
     def test_box_python_files_compile(self):
         compile(iot_box.SITECUSTOMIZE, "sitecustomize.py", "exec")
         compile(iot_box.LAN_SCAN, "lan_scan.py", "exec")
+
+    def test_box_keeps_the_docker_server_when_the_base_sends_its_localhost_url(self):
+        check = (
+            "import configparser\n"
+            "conf = configparser.RawConfigParser()\n"
+            "conf.add_section('iot.box')\n"
+            "conf.set('iot.box', 'remote_server', 'http://odoo-demo:8069')\n"
+            "conf.set('iot.box', 'remote_server', 'http://dev.demo.localhost')\n"
+            "print(conf.get('iot.box', 'remote_server'))\n"
+        )
+        # Le patch change Python pour tout le processus : il tourne à part.
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", iot_box.SITECUSTOMIZE + "\n" + check],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(result.stdout.strip(), "http://odoo-demo:8069")
 
     def test_pairing_token_targets_the_project_container_and_database(self):
         token = iot_box.pairing_token("demo", "base a", "abc", "uuid", "")
