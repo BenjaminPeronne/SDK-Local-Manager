@@ -2006,7 +2006,13 @@ class ProjectService:
                 path,
                 headers={"Host": host_header, "User-Agent": "Odoo-Manager/readiness"},
             )
-            return connection.getresponse().status, ""
+            response = connection.getresponse()
+            server = response.getheader("Server") or ""
+            # Le 404 de Traefik n'a pas d'en-tête Server, celui d'Odoo dit Werkzeug : tout autre serveur
+            # (Microsoft-HTTPAPI de Windows, IIS, Apache...) répond à la place de Traefik sur ce port.
+            if response.status == 404 and server and not server.startswith("Werkzeug"):
+                return 404, "foreign"
+            return response.status, ""
         except ConnectionRefusedError:
             return 0, "refused"
         except (ConnectionResetError, http.client.RemoteDisconnected):
@@ -2030,6 +2036,12 @@ class ProjectService:
                 f"Rien n'écoute sur le port {port} de cette machine (conteneur {name} : {traefik}). "
                 f"Traefik est arrêté, ou le port {port} est occupé par un autre service "
                 "(sous Windows : IIS, service HTTP « System », Skype...). Odoo, lui, fonctionne."
+            )
+        if reason == "foreign":
+            return (
+                f"Un autre programme que Traefik répond sur le port {port} de cette machine "
+                "(sous Windows : IIS ou le service HTTP « System »). Arrête ce programme ou libère le port "
+                f"{port}, puis relance le projet. Odoo, lui, fonctionne."
             )
         if status == 404:
             if problems is None:
@@ -2134,6 +2146,7 @@ class ProjectService:
         route_diagnosed = False
         port_rechecked = False
         traefik_restarted = False
+        traefik_moved = False
         problems = None
         while waited <= max_wait:
             result = self.http_probe(url) if self.http_probe else self.http_probe_result(url)
@@ -2156,7 +2169,19 @@ class ProjectService:
                     # la redirection de Docker Desktop peut encore revenir : on continue d'attendre.
                     certain_failure = self.container_status(self.traefik_container_name()) != "running"
                     certain_failure = certain_failure or self.traefik_http_port(refresh=True) != port
-            if status == 404 and waited >= TRAEFIK_ROUTE_DIAGNOSIS_SECONDS and not route_diagnosed:
+            if reason == "foreign" and not traefik_moved:
+                # Traefik garde les ports qu'il publie déjà : arrêté, il verra le port pris et en choisira un libre.
+                traefik_moved = certain_failure = True
+                instance = self.traefik_instance(refresh=True)
+                if instance and instance.running and self.is_managed_traefik(instance):
+                    self.log(
+                        log,
+                        f"Un autre programme que Traefik répond sur le port {port} de cette machine : "
+                        "Traefik est redémarré sur un port libre.",
+                    )
+                    self.stream(self.docker("stop", instance.name), log=log)
+                    self.start_traefik(log=log)
+            elif status == 404 and waited >= TRAEFIK_ROUTE_DIAGNOSIS_SECONDS and not route_diagnosed:
                 route_diagnosed = True
                 problems = self.traefik_route_problems(project, port)
                 certain_failure = bool(problems)

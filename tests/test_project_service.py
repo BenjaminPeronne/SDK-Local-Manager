@@ -347,6 +347,57 @@ class ProjectServiceTests(unittest.TestCase):
         connection_class.return_value.request.side_effect = TimeoutError()
         self.assertEqual((0, "timeout"), ProjectService.http_probe_result("http://dev.demo.localhost/web/login"))
 
+    @patch("odoo_manager_core.project_service.http.client.HTTPConnection")
+    def test_http_probe_tells_traefik_404_from_another_web_server(self, connection_class):
+        response = connection_class.return_value.getresponse.return_value
+        response.status = 404
+        for server, expected in (("", ""), ("Werkzeug/3.1.6 Python/3.12", ""), ("Microsoft-HTTPAPI/2.0", "foreign")):
+            with self.subTest(server=server):
+                response.getheader.return_value = server
+                self.assertEqual(
+                    (404, expected), ProjectService.http_probe_result("http://dev.demo.localhost/web/login")
+                )
+
+    def test_other_web_server_on_traefik_port_moves_traefik_to_a_free_port(self):
+        service, traefik = self.make_busy_port_service({80})
+        self.runner.statuses = {"traefik": "running"}
+        self.runner.traefik_containers = [traefik_container(ports="0.0.0.0:80->80/tcp", working_dir=str(traefik))]
+        self.runner.traefik_containers_after_up = [
+            traefik_container(ports="127.0.0.1:8080->80/tcp", working_dir=str(traefik))
+        ]
+        stream = self.runner.stream
+
+        def stream_with_stop(command, cwd=None, log=None):
+            if command[-2:] == ["stop", "traefik"]:
+                self.runner.traefik_containers = [
+                    traefik_container(state="exited", ports="", working_dir=str(traefik))
+                ]
+            return stream(command, cwd=cwd, log=log)
+
+        self.runner.stream = stream_with_stop
+        urls = []
+
+        def probe(url):
+            urls.append(url)
+            return (303, "") if ":8080/" in url else (404, "foreign")
+
+        service.http_probe = probe
+        logs = []
+        service.wait_project_http("DEMO", log=logs.append, sleep=lambda _seconds: None)
+
+        self.assertEqual("http://dev.DEMO.localhost:8080/web/login", urls[-1])
+        self.assertTrue(any("Traefik utilise le port 8080 à la place" in line for line in logs))
+
+    def test_other_web_server_on_port_is_named_when_traefik_cannot_move(self):
+        service = ProjectService(
+            self.settings, self.root, runner=self.runner, http_probe=lambda _url: (404, "foreign")
+        )
+
+        with self.assertRaises(RuntimeError) as raised:
+            service.wait_project_http("DEMO", log=lambda _line: None, sleep=lambda _seconds: None)
+
+        self.assertIn("Un autre programme que Traefik répond sur le port 80", str(raised.exception))
+
     def test_traefik_failures_name_the_real_cause(self):
         self.runner.traefik_containers = [traefik_container()]
         cases = (
