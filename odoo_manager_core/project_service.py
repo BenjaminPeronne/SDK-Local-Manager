@@ -2561,8 +2561,9 @@ class ProjectService:
             packages.append(package)
         return packages
 
-    def _postgres_lines(self, project, db_name, query, timeout=30):
-        code, output = self.capture(
+    def _psql(self, project, db_name, query, timeout):
+        """(code, résultat) d'une requête dans une base du projet ; arrêt à la première erreur."""
+        return self.capture(
             self.docker(
                 "exec",
                 f"postgresql-{project}",
@@ -2580,6 +2581,9 @@ class ProjectService:
             timeout=timeout,
             stdout_only=True,
         )
+
+    def _postgres_lines(self, project, db_name, query, timeout=30):
+        code, output = self._psql(project, db_name, query, timeout)
         if code != 0:
             raise RuntimeError(output.strip()[-500:] or f"Requête PostgreSQL refusée sur {db_name}.")
         return [line.strip() for line in output.splitlines() if line.strip()]
@@ -4123,24 +4127,7 @@ print("Désinstallation terminée.")
         self.log(log, f"URL Odoo: {self.project_url(project)}")
 
     def _database_scalar(self, project, db_name, query, timeout=20):
-        code, output = self.capture(
-            self.docker(
-                "exec",
-                f"postgresql-{project}",
-                "psql",
-                "-X",
-                "-v",
-                "ON_ERROR_STOP=1",
-                "-U",
-                "postgres",
-                "-d",
-                db_name,
-                "-Atc",
-                query,
-            ),
-            timeout=timeout,
-            stdout_only=True,
-        )
+        code, output = self._psql(project, db_name, query, timeout)
         if code != 0:
             raise RuntimeError(output or "Le contrôle PostgreSQL de la neutralisation a échoué.")
         return output.strip()
