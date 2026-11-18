@@ -13,6 +13,15 @@ import sys
 
 RELEASE_NOTES = (
     (
+        "0.53.0",
+        "2026-11-18",
+        (
+            "Les projets se rangent dans des sections que l’on peut replier, trier et remplir en les glissant.",
+            "Avant de changer de branche ou de mettre à jour un dépôt, l’application demande s’il faut mettre "
+            "de côté ou abandonner les fichiers modifiés.",
+        ),
+    ),
+    (
         "0.52.0",
         "2026-11-17",
         (
