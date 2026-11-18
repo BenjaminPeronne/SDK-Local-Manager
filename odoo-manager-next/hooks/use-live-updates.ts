@@ -33,7 +33,7 @@ export function useLiveUpdates({
   applyOverview,
   commitSystemStatus,
 }: UseLiveUpdatesOptions) {
-  const [jobsStreamConnected, setJobsStreamConnected] = useState(false);
+  const [streamConnected, setStreamConnected] = useState(false);
 
   useEffect(() => {
     if (initializing) return;
@@ -41,14 +41,14 @@ export function useLiveUpdates({
       if (document.visibilityState === "visible") void refreshJobs();
     };
     // Flux connecté, le signal jobs_changed suffit : la lecture périodique ne sert que de filet.
-    const interval = jobsRefreshInterval(jobsStreamConnected, hasRunningJobs);
+    const interval = jobsRefreshInterval(streamConnected, hasRunningJobs);
     const timer = window.setInterval(refreshWhenVisible, interval);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [hasRunningJobs, initializing, jobsStreamConnected, refreshJobs]);
+  }, [hasRunningJobs, initializing, streamConnected, refreshJobs]);
 
   useEffect(() => {
     if (initializing) return;
@@ -56,30 +56,30 @@ export function useLiveUpdates({
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void refreshOverview();
     };
-    const timer = window.setInterval(refreshWhenVisible, overviewRefreshInterval(hasRunningJobs));
+    const timer = window.setInterval(refreshWhenVisible, overviewRefreshInterval(streamConnected, hasRunningJobs));
     return () => window.clearInterval(timer);
-  }, [hasRunningJobs, initializing, refreshOverview]);
+  }, [hasRunningJobs, initializing, refreshOverview, streamConnected]);
 
   useEffect(() => {
     if (initializing) return;
     // Safety-net fallback only: /api/stream (below) pushes system status changes live.
-    const interval = systemRefreshInterval(dockerPollInterval);
+    const interval = systemRefreshInterval(streamConnected, dockerPollInterval);
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void refreshSystemStatus();
     };
     const timer = window.setInterval(refreshWhenVisible, interval);
     return () => window.clearInterval(timer);
-  }, [initializing, refreshSystemStatus, dockerPollInterval]);
+  }, [initializing, refreshSystemStatus, dockerPollInterval, streamConnected]);
 
   useEffect(() => {
     if (initializing || typeof EventSource === "undefined") return;
     const source = new EventSource(withApiToken(`${API_BASE}/api/stream`));
     source.onopen = () => {
-      setJobsStreamConnected(true);
+      setStreamConnected(true);
       // Les signaux perdus pendant une coupure sont rattrapés en une lecture.
       void refreshJobs();
     };
-    source.onerror = () => setJobsStreamConnected(false);
+    source.onerror = () => setStreamConnected(false);
     source.addEventListener("jobs_changed", () => {
       if (document.visibilityState === "visible") void refreshJobs();
     });
@@ -104,7 +104,7 @@ export function useLiveUpdates({
     });
     return () => {
       source.close();
-      setJobsStreamConnected(false);
+      setStreamConnected(false);
     };
   }, [applyOverview, commitSystemStatus, initializing, refreshJobs, refreshOverview]);
 }

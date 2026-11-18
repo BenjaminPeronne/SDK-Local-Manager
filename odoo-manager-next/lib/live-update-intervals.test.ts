@@ -6,8 +6,13 @@ test("fallback intervals preserve the existing connected and disconnected behavi
   assert.equal(jobsRefreshInterval(true, true), 10000);
   assert.equal(jobsRefreshInterval(false, true), 1200);
   assert.equal(jobsRefreshInterval(false, false), 10000);
-  assert.equal(overviewRefreshInterval(true), 15000);
-  assert.equal(overviewRefreshInterval(false), 45000);
-  assert.equal(systemRefreshInterval(undefined), 30000);
-  assert.equal(systemRefreshInterval(1), 9000);
+  assert.equal(overviewRefreshInterval(false, true), 15000);
+  assert.equal(overviewRefreshInterval(false, false), 45000);
+  assert.equal(systemRefreshInterval(false, undefined), 30000);
+  assert.equal(systemRefreshInterval(false, 1), 9000);
+});
+
+test("a connected stream spaces the overview and system safety-net reads", () => {
+  assert.equal(overviewRefreshInterval(true, true), 120000);
+  assert.equal(systemRefreshInterval(true, 1), 120000);
 });
