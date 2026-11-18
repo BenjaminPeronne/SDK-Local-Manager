@@ -1,24 +1,37 @@
 "use client";
 
-import { type Dispatch, type ReactNode, type SetStateAction, useMemo, useState } from "react";
+import { type Dispatch, type DragEvent, type ReactNode, type SetStateAction, useMemo, useState } from "react";
 import {
   Activity,
   Check,
+  ChevronDown,
   ChevronRight,
   Copy,
   Database,
+  FolderInput,
   FolderPlus,
   Info,
+  ListPlus,
   Loader2,
+  Pencil,
   Play,
   Search,
   Settings,
   Star,
+  Trash2,
 } from "lucide-react";
+import { DropdownMenu } from "@radix-ui/themes";
 import type { StaticImageData } from "next/image";
 import { workspaceLabel } from "@/lib/format";
 import { isJobActive, isJobUnfinished, MIGRATION_JOB_PREFIX } from "@/lib/jobs";
-import { odooServerStopped, projectListRank, runningProjectDatabaseCount } from "@/lib/projects";
+import {
+  groupProjectsBySection,
+  moveProjectToSection,
+  odooServerStopped,
+  type ProjectSection,
+  projectListRank,
+  runningProjectDatabaseCount,
+} from "@/lib/projects";
 import type { Season } from "@/lib/seasonal";
 import type { AppUpdate, ExternalLogView, Job, ManagerSettings, Overview, Project, SystemStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -32,6 +45,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/shell/update-banner";
 import { ResourcesDialog } from "@/components/shell/resources-dialog";
 import { StopProjectButton } from "@/components/shell/stop-project-button";
+import { ProjectSectionDialog } from "@/components/shell/project-section-dialog";
 import { GeneralActivity } from "@/components/jobs/job-activity";
 import type { UpdateInstaller } from "@/hooks/use-update-installer";
 import type { PushToast } from "@/hooks/use-toasts";
@@ -66,15 +80,24 @@ type AppSidebarProps = {
 };
 
 const NO_FAVORITES: string[] = [];
-type SidebarPreferences = { favorites: Record<string, string[]> };
+const NO_SECTIONS: ProjectSection[] = [];
+type SidebarPreferences = { favorites: Record<string, string[]>; sections: Record<string, ProjectSection[]> };
 const SIDEBAR_STORAGE_KEY = "sdk-local-manager.sidebar";
 function storedSidebarPreferences(): SidebarPreferences {
   try {
     const value = JSON.parse(window.localStorage.getItem(SIDEBAR_STORAGE_KEY) || "null");
-    return { favorites: value?.favorites && typeof value.favorites === "object" ? value.favorites : {} };
+    return {
+      favorites: value?.favorites && typeof value.favorites === "object" ? value.favorites : {},
+      sections: value?.sections && typeof value.sections === "object" ? value.sections : {},
+    };
   } catch {
-    return { favorites: {} };
+    return { favorites: {}, sections: {} };
   }
+}
+
+// Pas de crypto.randomUUID : indisponible quand l'interface est ouverte en http depuis le téléphone.
+function newSectionId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function AppSidebar({
@@ -111,6 +134,43 @@ export function AppSidebar({
   const [preferences, setPreferences] = useState(storedSidebarPreferences);
   const workspace = overview?.workspace || "";
   const favorites = Array.isArray(preferences.favorites[workspace]) ? preferences.favorites[workspace] : NO_FAVORITES;
+  const sections = Array.isArray(preferences.sections[workspace]) ? preferences.sections[workspace] : NO_SECTIONS;
+  // null : fenêtre fermée ; section : renommage ; sinon création, avec le projet à y ranger.
+  const [sectionDialog, setSectionDialog] = useState<{ section?: ProjectSection; project?: string } | null>(null);
+  // Glisser-déposer : projet tenu, et cible survolée (`section:<id>`, `before:<nom>` ou `unfiled`).
+  const [draggedProject, setDraggedProject] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  function dropZone(target: string, sectionId: string | null, before?: string) {
+    if (!draggedProject) return {};
+    return {
+      onDragOver: (event: DragEvent) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+        if (dropTarget !== target) setDropTarget(target);
+      },
+      onDrop: (event: DragEvent) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (before !== draggedProject) saveSections(moveProjectToSection(sections, draggedProject, sectionId, before));
+        setDraggedProject(null);
+        setDropTarget(null);
+      },
+    };
+  }
+  function saveSections(next: ProjectSection[]) {
+    savePreferences({ ...preferences, sections: { ...preferences.sections, [workspace]: next } });
+  }
+  function submitSectionDialog(name: string) {
+    const editing = sectionDialog?.section;
+    if (editing) {
+      saveSections(sections.map((section) => (section.id === editing.id ? { ...section, name } : section)));
+      return;
+    }
+    const id = newSectionId();
+    const created = [...sections, { id, name, projects: [], collapsed: false }];
+    saveSections(sectionDialog?.project ? moveProjectToSection(created, sectionDialog.project, id) : created);
+  }
   function savePreferences(next: SidebarPreferences) {
     setPreferences(next);
     try {
@@ -158,6 +218,178 @@ export function AppSidebar({
         return rank(right) - rank(left);
       });
   }, [overview, projectsFilter, favorites, projectLifecycleJobs]);
+
+  const searchActive = Boolean(projectsFilter.trim());
+  const projectGroups = groupProjectsBySection(filteredProjects, sections);
+  const projectRow = (project: Project, sectionId: string | null) => {
+    const running = project.odoo_status === "running";
+    const serverStopped = odooServerStopped(project);
+    const absent = project.odoo_status === "absent" || project.odoo_status === "docker off";
+    const lifecycleJob =
+      projectLifecycleJobs.get(`Démarrer ${project.name}`) || projectLifecycleJobs.get(`Arrêter ${project.name}`);
+    const switchingOn = lifecycleJob?.title.startsWith("Démarrer ") ?? false;
+    const displayedRunning = (running && !serverStopped) || switchingOn;
+    const displayedServerStopped = serverStopped && !switchingOn;
+    const busyJob = lifecycleJob || projectBusyJobs.get(project.name);
+    const selected = selectedProject?.name === project.name;
+    const databaseCount = runningProjectDatabaseCount(project);
+    // Bouton au survol : seulement s'il y a quelque chose à démarrer et que Docker répond.
+    const canStart = !busyJob && !displayedRunning && project.odoo_status !== "docker off";
+    // Même discrétion pour éteindre : dès qu'un des deux conteneurs tourne.
+    const canStop = !busyJob && (running || project.postgres_status === "running");
+
+    return (
+      <div
+        key={project.name}
+        draggable
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", project.name);
+          setDraggedProject(project.name);
+        }}
+        onDragEnd={() => {
+          setDraggedProject(null);
+          setDropTarget(null);
+        }}
+        {...(sectionId ? dropZone(`before:${project.name}`, sectionId, project.name) : {})}
+        className={cn(
+          "group rounded-lg border border-transparent transition-colors duration-150 hover:bg-hover",
+          absent && "bg-muted/35 text-muted-foreground",
+          selected && "border-primary/40 bg-selected hover:bg-selected",
+          draggedProject === project.name && "opacity-50",
+          // Trait au-dessus de la ligne : le projet glissé viendra se placer avant elle.
+          dropTarget === `before:${project.name}` && "shadow-[inset_0_2px_0_hsl(var(--primary))]",
+        )}
+      >
+        <div className="flex min-h-12 items-center gap-2 px-3">
+          <button
+            type="button"
+            aria-current={selected ? "page" : undefined}
+            className="-mx-1 min-w-0 flex-1 rounded-md px-1 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            onClick={() => {
+              setExternalLogView(null);
+              openProject(project);
+            }}
+          >
+            <span
+              className={cn(
+                "block truncate text-sm font-semibold uppercase",
+                absent && !selected ? "text-muted-foreground" : "text-foreground",
+              )}
+            >
+              {project.name}
+            </span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              {project.odoo_version ? `Odoo ${project.odoo_version}` : "Version inconnue"}
+            </span>
+          </button>
+          <button
+            type="button"
+            className={cn(
+              "shrink-0 rounded p-1.5 text-muted-foreground hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              // Étoile vide seulement au survol ou au clavier : les favoris restent seuls visibles.
+              !favorites.includes(project.name) &&
+                "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
+            )}
+            aria-label={`${favorites.includes(project.name) ? "Retirer" : "Ajouter"} ${project.name} ${favorites.includes(project.name) ? "des" : "aux"} favoris`}
+            aria-pressed={favorites.includes(project.name)}
+            onClick={() => toggleFavorite(project.name)}
+          >
+            <Star className={cn("h-3.5 w-3.5", favorites.includes(project.name) && "fill-primary text-primary")} />
+          </button>
+          <DropdownMenu.Root modal={false}>
+            <DropdownMenu.Trigger>
+              <button
+                type="button"
+                className="shrink-0 rounded p-1.5 text-muted-foreground opacity-0 hover:bg-hover focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100"
+                title={`Ranger ${project.name} dans une section`}
+                aria-label={`Ranger ${project.name} dans une section`}
+              >
+                <FolderInput className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="end" className="min-w-48">
+              <DropdownMenu.Label>Ranger {project.name}</DropdownMenu.Label>
+              {sections.map((section) => (
+                <DropdownMenu.Item
+                  key={section.id}
+                  onSelect={() => saveSections(moveProjectToSection(sections, project.name, section.id))}
+                >
+                  {section.projects.includes(project.name) ? (
+                    <Check className="h-4 w-4" aria-hidden="true" />
+                  ) : (
+                    <span className="w-4" aria-hidden="true" />
+                  )}
+                  {section.name}
+                </DropdownMenu.Item>
+              ))}
+              {sections.some((section) => section.projects.includes(project.name)) && (
+                <DropdownMenu.Item onSelect={() => saveSections(moveProjectToSection(sections, project.name, null))}>
+                  <span className="w-4" aria-hidden="true" />
+                  Sortir de la section
+                </DropdownMenu.Item>
+              )}
+              {sections.length > 0 && <DropdownMenu.Separator />}
+              <DropdownMenu.Item onSelect={() => setSectionDialog({ project: project.name })}>
+                <ListPlus className="h-4 w-4" aria-hidden="true" />
+                Nouvelle section…
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
+          {/* Éteint : aucune pastille, la ligne reste calme ; elles n'apparaissent qu'au démarrage. */}
+          <div className="flex shrink-0 items-center gap-1">
+            {canStart && (
+              <button
+                type="button"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-primary text-primary-foreground opacity-0 shadow-sm transition-opacity hover:bg-primary/90 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100"
+                title={`Démarrer ${project.name}`}
+                aria-label={`Démarrer ${project.name}`}
+                onClick={() => void startProject(project)}
+              >
+                <Play className="h-3 w-3 fill-current" aria-hidden="true" />
+              </button>
+            )}
+            {canStop && (
+              <StopProjectButton
+                name={project.name}
+                onStop={stopProject}
+                className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+              />
+            )}
+            {busyJob && (
+              <Loader2
+                className="mr-0.5 h-3.5 w-3.5 animate-spin text-primary"
+                aria-label={`En cours : ${busyJob.title}`}
+              />
+            )}
+            {(displayedRunning || displayedServerStopped) && (
+              <StatusChip
+                tone={displayedRunning ? "odoo" : "warn"}
+                label={
+                  displayedRunning ? "Odoo allumé" : "Odoo arrêté : le conteneur tourne, Démarrer relance le serveur"
+                }
+              >
+                <OdooMark />
+              </StatusChip>
+            )}
+            {project.postgres_status === "running" && (
+              <StatusChip
+                tone="database"
+                label={
+                  databaseCount === null
+                    ? "PostgreSQL allumé"
+                    : `PostgreSQL allumé · ${databaseCount} base${databaseCount === 1 ? "" : "s"}`
+                }
+              >
+                <Database className="h-3.5 w-3.5" aria-hidden="true" />
+                {databaseCount !== null && <span className="tabular-nums">{databaseCount}</span>}
+              </StatusChip>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <aside className="min-w-0 border-b bg-card lg:sticky lg:top-0 lg:h-screen lg:w-80 lg:flex-none lg:border-b-0 lg:border-r">
@@ -236,14 +468,26 @@ export function AppSidebar({
               </Badge>
             )}
           </div>
-          <div className="relative mt-4">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              placeholder="Rechercher un projet"
-              value={projectsFilter}
-              onChange={(event) => setProjectsFilter(event.target.value)}
-            />
+          <div className="mt-4 flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                placeholder="Rechercher un projet"
+                value={projectsFilter}
+                onChange={(event) => setProjectsFilter(event.target.value)}
+              />
+            </div>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-9 w-9 shrink-0"
+              title="Nouvelle section pour ranger les projets"
+              aria-label="Nouvelle section"
+              onClick={() => setSectionDialog({})}
+            >
+              <ListPlus className="h-4 w-4" />
+            </Button>
           </div>
         </div>
         <div className="min-h-0 max-h-[260px] flex-1 space-y-1 overflow-auto px-2 py-2 sm:max-h-[340px] lg:max-h-none">
@@ -285,124 +529,101 @@ export function AppSidebar({
               Aucun projet ne correspond à la recherche.
             </p>
           )}
-          {filteredProjects.map((project) => {
-            const running = project.odoo_status === "running";
-            const serverStopped = odooServerStopped(project);
-            const absent = project.odoo_status === "absent" || project.odoo_status === "docker off";
-            const lifecycleJob =
-              projectLifecycleJobs.get(`Démarrer ${project.name}`) ||
-              projectLifecycleJobs.get(`Arrêter ${project.name}`);
-            const switchingOn = lifecycleJob?.title.startsWith("Démarrer ") ?? false;
-            const displayedRunning = (running && !serverStopped) || switchingOn;
-            const displayedServerStopped = serverStopped && !switchingOn;
-            const busyJob = lifecycleJob || projectBusyJobs.get(project.name);
-            const selected = selectedProject?.name === project.name;
-            const databaseCount = runningProjectDatabaseCount(project);
-            // Bouton au survol : seulement s'il y a quelque chose à démarrer et que Docker répond.
-            const canStart = !busyJob && !displayedRunning && project.odoo_status !== "docker off";
-            // Même discrétion pour éteindre : dès qu'un des deux conteneurs tourne.
-            const canStop = !busyJob && (running || project.postgres_status === "running");
-
+          {projectGroups.map(({ section, projects }) => {
+            if (!section) {
+              // Vide, la zone n'apparaît que pendant un glisser, pour sortir un projet de sa section.
+              if (!projects.length && !draggedProject) return null;
+              return (
+                <div
+                  key="unfiled"
+                  {...dropZone("unfiled", null)}
+                  className={cn("space-y-1 rounded-lg", dropTarget === "unfiled" && "bg-primary/[0.06]")}
+                >
+                  {sections.length > 0 && (
+                    <p className="px-3 pb-0.5 pt-2 text-xs font-semibold text-muted-foreground">Autres projets</p>
+                  )}
+                  {projects.map((project) => projectRow(project, null))}
+                  {!projects.length && (
+                    <p className="px-3 pb-2 text-xs text-muted-foreground">
+                      Dépose ici pour sortir le projet de sa section.
+                    </p>
+                  )}
+                </div>
+              );
+            }
+            // Recherche : les sections sans résultat disparaissent, les autres s'ouvrent.
+            if (searchActive && !projects.length) return null;
+            const expanded = searchActive || !section.collapsed;
+            // Repliée, la section garde visible le projet ouvert.
+            const shown = expanded ? projects : projects.filter((project) => project.name === selectedProject?.name);
+            const runningCount = projects.filter((project) => project.odoo_status === "running").length;
             return (
               <div
-                key={project.name}
+                key={section.id}
+                {...dropZone(`section:${section.id}`, section.id)}
                 className={cn(
-                  "group rounded-lg border border-transparent transition-colors duration-150 hover:bg-hover",
-                  absent && "bg-muted/35 text-muted-foreground",
-                  selected && "border-primary/40 bg-selected hover:bg-selected",
+                  "space-y-1 rounded-lg",
+                  dropTarget === `section:${section.id}` && "bg-primary/[0.06] ring-1 ring-inset ring-primary/40",
                 )}
               >
-                <div className="flex min-h-12 items-center gap-2 px-3">
+                <div className="group flex items-center gap-1 rounded-md pr-1 hover:bg-hover">
                   <button
                     type="button"
-                    aria-current={selected ? "page" : undefined}
-                    className="-mx-1 min-w-0 flex-1 rounded-md px-1 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    aria-expanded={expanded}
+                    disabled={searchActive}
+                    onClick={() =>
+                      saveSections(
+                        sections.map((item) =>
+                          item.id === section.id ? { ...item, collapsed: !item.collapsed } : item,
+                        ),
+                      )
+                    }
+                  >
+                    {expanded ? (
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    )}
+                    <span className="truncate">{section.name}</span>
+                    <span className="shrink-0 font-normal tabular-nums">{projects.length}</span>
+                    {!expanded && runningCount > 0 && (
+                      <span className="ml-auto shrink-0 rounded px-1.5 py-0.5 font-medium text-[#714B67] ring-1 ring-inset ring-[#714B67]/30 dark:text-[#D8B4CF] dark:ring-[#C49BBB]/35">
+                        {runningCount} allumé{runningCount > 1 ? "s" : ""}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-hover focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100"
+                    title={`Renommer la section ${section.name}`}
+                    aria-label={`Renommer la section ${section.name}`}
+                    onClick={() => setSectionDialog({ section })}
+                  >
+                    <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-hover focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100"
+                    title={`Supprimer la section ${section.name} (les projets restent dans la liste)`}
+                    aria-label={`Supprimer la section ${section.name}`}
                     onClick={() => {
-                      setExternalLogView(null);
-                      openProject(project);
+                      saveSections(sections.filter((item) => item.id !== section.id));
+                      pushToast(
+                        "info",
+                        `Section ${section.name} supprimée : ses projets sont dans « Autres projets ».`,
+                      );
                     }}
                   >
-                    <span
-                      className={cn(
-                        "block truncate text-sm font-semibold uppercase",
-                        absent && !selected ? "text-muted-foreground" : "text-foreground",
-                      )}
-                    >
-                      {project.name}
-                    </span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {project.odoo_version ? `Odoo ${project.odoo_version}` : "Version inconnue"}
-                    </span>
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "shrink-0 rounded p-1.5 text-muted-foreground hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      // Étoile vide seulement au survol ou au clavier : les favoris restent seuls visibles.
-                      !favorites.includes(project.name) &&
-                        "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
-                    )}
-                    aria-label={`${favorites.includes(project.name) ? "Retirer" : "Ajouter"} ${project.name} ${favorites.includes(project.name) ? "des" : "aux"} favoris`}
-                    aria-pressed={favorites.includes(project.name)}
-                    onClick={() => toggleFavorite(project.name)}
-                  >
-                    <Star
-                      className={cn("h-3.5 w-3.5", favorites.includes(project.name) && "fill-primary text-primary")}
-                    />
-                  </button>
-                  {/* Éteint : aucune pastille, la ligne reste calme ; elles n'apparaissent qu'au démarrage. */}
-                  <div className="flex shrink-0 items-center gap-1">
-                    {canStart && (
-                      <button
-                        type="button"
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-primary text-primary-foreground opacity-0 shadow-sm transition-opacity hover:bg-primary/90 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100"
-                        title={`Démarrer ${project.name}`}
-                        aria-label={`Démarrer ${project.name}`}
-                        onClick={() => void startProject(project)}
-                      >
-                        <Play className="h-3 w-3 fill-current" aria-hidden="true" />
-                      </button>
-                    )}
-                    {canStop && (
-                      <StopProjectButton
-                        name={project.name}
-                        onStop={stopProject}
-                        className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
-                      />
-                    )}
-                    {busyJob && (
-                      <Loader2
-                        className="mr-0.5 h-3.5 w-3.5 animate-spin text-primary"
-                        aria-label={`En cours : ${busyJob.title}`}
-                      />
-                    )}
-                    {(displayedRunning || displayedServerStopped) && (
-                      <StatusChip
-                        tone={displayedRunning ? "odoo" : "warn"}
-                        label={
-                          displayedRunning
-                            ? "Odoo allumé"
-                            : "Odoo arrêté : le conteneur tourne, Démarrer relance le serveur"
-                        }
-                      >
-                        <OdooMark />
-                      </StatusChip>
-                    )}
-                    {project.postgres_status === "running" && (
-                      <StatusChip
-                        tone="database"
-                        label={
-                          databaseCount === null
-                            ? "PostgreSQL allumé"
-                            : `PostgreSQL allumé · ${databaseCount} base${databaseCount === 1 ? "" : "s"}`
-                        }
-                      >
-                        <Database className="h-3.5 w-3.5" aria-hidden="true" />
-                        {databaseCount !== null && <span className="tabular-nums">{databaseCount}</span>}
-                      </StatusChip>
-                    )}
-                  </div>
                 </div>
+                {expanded && !projects.length && (
+                  <p className="px-3 pb-1 text-xs text-muted-foreground">
+                    Vide : glisse un projet ici, ou utilise l’icône dossier de sa ligne.
+                  </p>
+                )}
+                {shown.map((project) => projectRow(project, section.id))}
               </div>
             );
           })}
@@ -431,6 +652,13 @@ export function AppSidebar({
           </Button>
         </div>
       </div>
+      <ProjectSectionDialog
+        open={sectionDialog !== null}
+        onOpenChange={(open) => !open && setSectionDialog(null)}
+        initialName={sectionDialog?.section?.name ?? ""}
+        project={sectionDialog?.project}
+        onSubmit={submitSectionDialog}
+      />
       <ResourcesDialog
         open={resourcesOpen}
         onOpenChange={setResourcesOpen}

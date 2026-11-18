@@ -157,3 +157,41 @@ export function windowsPathFromMount(path: string) {
   if (!match) return path;
   return `${match[1].toUpperCase()}:\\${(match[2] || "").replace(/\//g, "\\")}`;
 }
+
+/** Section de la liste des projets, rangée dans les préférences du navigateur (une liste par dossier de projets). */
+export type ProjectSection = { id: string; name: string; projects: string[]; collapsed: boolean };
+
+/**
+ * Répartit les projets entre les sections, puis un dernier groupe `section: null` pour les projets
+ * non rangés (qui gardent l'ordre reçu). Dans une section, l'ordre est celui choisi en glissant les
+ * projets. Les noms de projets disparus sont ignorés.
+ */
+export function groupProjectsBySection<P extends { name: string }>(projects: P[], sections: ProjectSection[]) {
+  const byName = new Map(projects.map((project) => [project.name, project]));
+  const filed = new Set<string>();
+  const groups = sections.map((section) => {
+    const names = section.projects.filter((name) => byName.has(name) && !filed.has(name));
+    for (const name of names) filed.add(name);
+    return { section, projects: names.map((name) => byName.get(name) as P) };
+  });
+  return [...groups, { section: null, projects: projects.filter((project) => !filed.has(project.name)) }];
+}
+
+/**
+ * Range un projet dans une section (ou nulle part avec `null`), avant le projet `before` s'il s'y
+ * trouve, sinon en dernier : il quitte toujours sa place précédente.
+ */
+export function moveProjectToSection(
+  sections: ProjectSection[],
+  project: string,
+  sectionId: string | null,
+  before?: string,
+) {
+  return sections.map((section) => {
+    const projects = section.projects.filter((name) => name !== project);
+    if (section.id !== sectionId) return { ...section, projects };
+    const index = before ? projects.indexOf(before) : -1;
+    projects.splice(index < 0 ? projects.length : index, 0, project);
+    return { ...section, projects };
+  });
+}

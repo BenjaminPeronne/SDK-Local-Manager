@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  groupProjectsBySection,
+  moveProjectToSection,
   odooAccessUrl,
   odooServerStopped,
   projectListRank,
@@ -56,4 +58,43 @@ test("a project whose container runs without Odoo stays above the stopped ones",
   assert.ok(odooOn > containerOnly && containerOnly > stopped);
   assert.equal(stopped, absent);
   assert.equal(projectListRank({ odoo_status: "absent", odoo_server: null }, true), odooOn);
+});
+
+test("projects follow their section order, with unfiled ones last in the order received", () => {
+  const sections = [
+    { id: "a", name: "Clients", projects: ["c", "gone", "a"], collapsed: false },
+    { id: "b", name: "Vide", projects: [], collapsed: true },
+  ];
+  const groups = groupProjectsBySection([{ name: "a" }, { name: "b" }, { name: "c" }], sections);
+  assert.deepEqual(
+    groups.map((group) => [group.section?.id ?? null, group.projects.map((project) => project.name)]),
+    [
+      ["a", ["c", "a"]],
+      ["b", []],
+      [null, ["b"]],
+    ],
+  );
+});
+
+test("moving a project takes it out of its previous section", () => {
+  const sections = [
+    { id: "a", name: "A", projects: ["x"], collapsed: false },
+    { id: "b", name: "B", projects: [], collapsed: false },
+  ];
+  const moved = moveProjectToSection(sections, "x", "b");
+  assert.deepEqual(
+    moved.map((section) => section.projects),
+    [[], ["x"]],
+  );
+  assert.deepEqual(
+    moveProjectToSection(moved, "x", null).map((section) => section.projects),
+    [[], []],
+  );
+});
+
+test("a dragged project lands before the project it is dropped on", () => {
+  const sections = [{ id: "a", name: "A", projects: ["x", "y", "z"], collapsed: false }];
+  assert.deepEqual(moveProjectToSection(sections, "z", "a", "x")[0].projects, ["z", "x", "y"]);
+  assert.deepEqual(moveProjectToSection(sections, "x", "a", "z")[0].projects, ["y", "x", "z"]);
+  assert.deepEqual(moveProjectToSection(sections, "x", "a", "gone")[0].projects, ["y", "z", "x"]);
 });
