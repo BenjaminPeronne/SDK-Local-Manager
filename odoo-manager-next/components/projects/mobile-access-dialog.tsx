@@ -43,7 +43,9 @@ function MobileAccessContent({
   const [error, setError] = useState("");
   const [closing, setClosing] = useState(false);
   const started = useRef(false);
-  const ready = Boolean(project && mobile?.running && mobile.project === project.name);
+  // Revérifié à chaque ouverture : un accès déjà ouvert garde l'adresse Wi-Fi d'avant un changement de réseau.
+  const [checked, setChecked] = useState(false);
+  const ready = Boolean(checked && project && mobile?.running && mobile.project === project.name);
   // Sous Windows, l'adresse donnée au téléphone est celle du relais Wi-Fi de l'application.
   const relay = desktopBridge()?.wslLanRelay;
   const [relayBase, setRelayBase] = useState("");
@@ -66,11 +68,12 @@ function MobileAccessContent({
   }
 
   useEffect(() => {
-    if (ready || started.current || !project) return;
+    if (started.current || !project) return;
     started.current = true;
-    void runJob("start_mobile_access", { project: project.name });
+    // Le serveur garde le relais s'il est à jour, le refait sur l'adresse actuelle sinon.
+    void runJob("start_mobile_access", { project: project.name }).then(() => setChecked(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- une seule ouverture par affichage de la fenêtre.
-  }, [ready, project]);
+  }, [project]);
 
   useEffect(() => {
     const base = ready ? (mobile?.url ?? "") : "";
