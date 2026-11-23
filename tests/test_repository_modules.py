@@ -771,12 +771,17 @@ class RepositoryModulesTests(ModuleLayoutTests):
         )
 
         (clone / "alpha/__manifest__.py").write_text("{'name': 'changed'}")
+        # Nouveau fichier non suivi, présent aussi sur la branche visée : il doit partir avec la mise de côté.
+        (clone / "gamma").mkdir()
+        (clone / "gamma/__manifest__.py").write_text("{'name': 'local gamma'}")
         # Fichier modifié non indexé : la ligne de `git status` commence par une espace, que la capture
         # retire de la première ligne ; le nom du fichier doit rester entier.
-        with self.assertRaisesRegex(RuntimeError, r"non enregistrés dans Git \(1\) : alpha/__manifest__\.py\."):
+        with self.assertRaisesRegex(RuntimeError, r"non enregistrés dans Git \(2\) : alpha/__manifest__\.py, gamma/\."):
             web.switch_repository_branch_job(DummyJob(), self.project, repository, "feature")
         self.assertEqual("master", web.git_checkouts.read_checkout(clone)["branch"])
-        self.assertEqual(["alpha/__manifest__.py"], web.repository_branches(self.project, repository)["local_changes"])
+        self.assertEqual(
+            ["alpha/__manifest__.py", "gamma/"], web.repository_branches(self.project, repository)["local_changes"]
+        )
 
         # Choix « mettre de côté » : la modification part dans git stash, récupérable.
         job = DummyJob()
@@ -799,10 +804,13 @@ class RepositoryModulesTests(ModuleLayoutTests):
 
         # Revenir sur master réutilise la branche locale ; choix « effacer » : la modification disparaît.
         (clone / "alpha/__manifest__.py").write_text("{'name': 'thrown away'}")
+        (clone / "delta").mkdir()
+        (clone / "delta/__manifest__.py").write_text("{'name': 'delta'}")
         web.switch_repository_branch_job(DummyJob(), self.project, repository, "master", local_changes="discard")
         self.assertNotIn("thrown away", (clone / "alpha/__manifest__.py").read_text())
         self.assertEqual("master", web.git_checkouts.read_checkout(clone)["branch"])
         self.assertTrue((clone / "beta/__manifest__.py").is_file())
+        self.assertFalse((clone / "delta").exists())
 
     @unittest.skipUnless(shutil.which("git"), "Git requis")
     def test_git_clone_is_compared_with_the_server_and_updated_on_its_branch(self):

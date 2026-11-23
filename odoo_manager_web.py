@@ -7981,8 +7981,9 @@ def repository_module_names(creator, root):
 
 
 def checkout_local_changes(creator, root):
-    """Fichiers suivis par Git et modifiés dans le clone `root`, pas encore enregistrés (commit)."""
-    code, changes = checkout_git(creator, root, "status", "--porcelain", "--untracked-files=no", timeout=60)
+    """Fichiers modifiés ou nouveaux (hors fichiers ignorés) du clone `root`, pas encore enregistrés (commit)."""
+    # Les nouveaux fichiers comptent : présents aussi sur la branche visée, ils bloqueraient le changement.
+    code, changes = checkout_git(creator, root, "status", "--porcelain", timeout=60)
     if code:
         raise RuntimeError(f"Lecture de l'état du dépôt {root.name} impossible.")
     # La capture retire l'espace de tête de la première ligne (« ␣M fichier » pour un fichier modifié non
@@ -8007,7 +8008,7 @@ def switch_checkout_branch(job, creator, root, branch, local_changes=""):
 
     changed = checkout_local_changes(creator, root)
     if changed and local_changes == "stash":
-        code, output = git("stash", "push", "--message", f"Odoo Manager : avant la branche {branch}")
+        code, output = git("stash", "push", "--include-untracked", "--message", f"Odoo Manager : avant la branche {branch}")
         if code:
             raise RuntimeError(f"Mise de côté des modifications de {root.name} impossible : {output.strip()[-400:]}")
         job.add(
@@ -8016,6 +8017,8 @@ def switch_checkout_branch(job, creator, root, branch, local_changes=""):
         )
     elif changed and local_changes == "discard":
         code, output = git("reset", "--hard", "-q")
+        if not code:
+            code, output = git("clean", "-f", "-d", "-q")
         if code:
             raise RuntimeError(f"Effacement des modifications de {root.name} impossible : {output.strip()[-400:]}")
         job.add(f"{len(changed)} fichier(s) modifié(s) de {root.name} remis comme au dernier commit.")
