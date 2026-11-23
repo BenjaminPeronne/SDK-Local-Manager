@@ -13,6 +13,16 @@ import sys
 
 RELEASE_NOTES = (
     (
+        "0.53.2",
+        "2026-11-23",
+        (
+            "« Ouvrir sur mobile » donne toujours l’adresse actuelle du poste : après un changement de Wi-Fi, "
+            "le QR code menait à une ancienne adresse et la page restait noire sur le téléphone.",
+            "Avant de changer de branche d’un dépôt, les fichiers ajoutés depuis la dernière sauvegarde sont eux "
+            "aussi mis de côté ou abandonnés, selon ton choix.",
+        ),
+    ),
+    (
         "0.53.1",
         "2026-11-18",
         (
