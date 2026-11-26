@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld(
     ...wslCapabilities,
     relaunch: () => ipcRenderer.invoke("sdk:relaunch"),
     stopLegacyTraefik: () => ipcRenderer.invoke("sdk:stop-legacy-traefik"),
+    uninstall: (deleteProjects) => ipcRenderer.invoke("sdk:uninstall", { deleteProjects: deleteProjects === true }),
     pickDirectory: (defaultPath) => ipcRenderer.invoke("sdk:pick-directory", defaultPath),
     notificationsSupported: () => ipcRenderer.invoke("sdk:notifications-supported"),
     notify: (title, body) => ipcRenderer.invoke("sdk:notify", { title, body }),

@@ -32,6 +32,7 @@ import { MigrationProposal } from "@/components/projects/migration-proposal";
 import { AllowedOriginsPanel } from "@/components/settings/allowed-origins-panel";
 import { DiskUsagePanel } from "@/components/settings/disk-usage-panel";
 import { PerformancePanel } from "@/components/settings/performance-panel";
+import { UninstallPanel } from "@/components/settings/uninstall-panel";
 import {
   SETTINGS_SAVED_KEYS,
   SETTINGS_SECTIONS,
@@ -825,6 +826,11 @@ export function SettingsDialog({
                       <div className="mt-1 break-all">Configuration : {settingsDraft.config_file || "-"}</div>
                     </div>
                   </SettingsSection>
+                )}
+                {settingsSection === "advanced" && desktopRuntime && (
+                  <div className="mt-8">
+                    <UninstallPanel createJob={createJob} jobs={jobs} pushToast={pushToast} />
+                  </div>
                 )}
 
                 {settingsSection === "performance" && (

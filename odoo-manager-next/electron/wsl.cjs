@@ -946,6 +946,12 @@ class WslEnvironment {
   }
 
   /** Arrête tout WSL : au prochain démarrage, il relit .wslconfig. */
+  // Désinstallation avec les projets : la distribution et tout ce qu'elle contient disparaissent.
+  async unregister() {
+    this.log(`Désinstallation : ${this.distribution} est désinscrite.`);
+    await this.run("wsl.exe", ["--unregister", this.distribution], { allowFailure: true, timeout: TIMEOUTS.import });
+  }
+
   async shutdown() {
     this.log("Arrêt de WSL pour appliquer ses nouvelles ressources.");
     await this.run("wsl.exe", ["--shutdown"], { allowFailure: true, timeout: TIMEOUTS.control });

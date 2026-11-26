@@ -31,6 +31,7 @@ const { GitLabClient } = require("./gitlab.cjs");
 const { LanRelay } = require("./lan-relay.cjs");
 const { allowThroughFirewall, firewallStatus } = require("./windows-firewall.cjs");
 const { AppUpdater } = require("./updater.cjs");
+const { appRemoval, cleanupCommand, debPackageName, foldersToRemove } = require("./uninstall.cjs");
 const {
   LINUX_WORKSPACE,
   WslEnvironment,
@@ -207,6 +208,45 @@ async function applyWslResources(request) {
   app.exit(0);
 }
 
+// Attend la fin de la commande et rend sa sortie, contrairement à run().
+function capture(command, args) {
+  return new Promise((resolve, reject) =>
+    execFile(command, args, { windowsHide: true }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
+  );
+}
+
+/**
+ * Appelée une fois la tâche « uninstall » du backend terminée (conteneurs et données retirés).
+ * Le paquet .deb demande le mot de passe administrateur ; à défaut, la commande est donnée.
+ */
+async function uninstallApp(deleteProjects) {
+  await backend.stop();
+  const removal = app.isPackaged && !smokePath ? appRemoval() : null;
+  // L'environnement Linux contient les projets : il ne part qu'avec eux.
+  if (wsl && deleteProjects) await wsl.unregister();
+  if (removal?.kind === "trash") await shell.trashItem(removal.path);
+  if (removal?.kind === "deb") {
+    const name =
+      debPackageName(await capture("dpkg-query", ["-S", removal.path]).catch(() => "")) || "odoo-manager-next";
+    await capture("pkexec", ["apt-get", "remove", "-y", name]).catch(() =>
+      dialog.showMessageBox(window, {
+        type: "info",
+        message: "Il reste à retirer l'application du système.",
+        detail: `Ouvre un terminal et tape :\n\nsudo apt remove ${name}`,
+      }),
+    );
+  }
+  const paths = foldersToRemove({
+    folders: [path.dirname(configPath()), app.getPath("userData"), app.getPath("logs")],
+    keep: wsl && !deleteProjects ? wsl.installRoot : "",
+  });
+  if (removal?.kind === "file") paths.push(removal.path);
+  const [command, args] = cleanupCommand({ paths, then: removal?.kind === "nsis" ? removal.path : "" });
+  spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true }).unref();
+  quitting = true;
+  app.quit();
+}
+
 function installHandlers() {
   const handle = (name, callback) =>
     ipcMain.handle("sdk:" + name, (event, ...args) => {
@@ -295,6 +335,7 @@ function installHandlers() {
     app.quit();
   });
   handle("stop-legacy-traefik", stopLegacyTraefik);
+  handle("uninstall", (options) => uninstallApp(options?.deleteProjects === true));
   handle(
     "wsl-import-ssh-key",
     onWindows(() => wsl.importSshKey(path.join(app.getPath("home"), ".ssh"))),

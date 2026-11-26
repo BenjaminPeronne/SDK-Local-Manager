@@ -179,3 +179,42 @@ class ICloudDetectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UninstallJobTests(unittest.TestCase):
+    LogJob = DiskCleanupJobTests.LogJob
+    setUp = DiskCleanupJobTests.setUp
+    tearDown = DiskCleanupJobTests.tearDown
+
+    def run_uninstall(self, delete_projects, docker_ok=True):
+        (self.workspace / "DEMO" / "postgresql_data").mkdir(parents=True)
+        (self.workspace / "DEMO" / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+        (self.workspace / ".odoo_manager_runtime").mkdir()
+        commands = []
+        with (
+            patch.object(web, "docker_available", return_value=(docker_ok, "")),
+            patch.object(web, "docker_command", side_effect=lambda _settings, *args: ["docker", *args]),
+            patch.object(web, "run_stream", side_effect=lambda _job, command, **_kw: commands.append(command) or 0),
+            patch.object(web, "project_service") as service,
+            patch.object(web, "container_statuses", return_value={"mailpit": "running", "iotbox": "absent"}),
+        ):
+            service.return_value.is_managed_traefik.return_value = True
+            web.uninstall_job(self.LogJob(), delete_projects)
+        return commands
+
+    def test_projects_are_kept_but_containers_and_manager_folders_go(self):
+        commands = self.run_uninstall(delete_projects=False)
+
+        self.assertIn(["docker", "compose", "down"], commands)
+        self.assertIn(["docker", "rm", "-f", "mailpit"], commands)
+        self.assertEqual(["DEMO"], sorted(child.name for child in self.workspace.iterdir()))
+
+    def test_deleting_projects_empties_the_workspace(self):
+        self.run_uninstall(delete_projects=True)
+
+        self.assertFalse(self.workspace.exists())
+
+    def test_projects_still_in_docker_need_docker(self):
+        with self.assertRaisesRegex(RuntimeError, "Démarre Docker"):
+            self.run_uninstall(delete_projects=True, docker_ok=False)
+        self.assertTrue((self.workspace / "DEMO").is_dir())

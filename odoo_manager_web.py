@@ -291,6 +291,7 @@ API_ACTIONS = (
     "prune_docker_build_cache",
     "purge_deleted_projects",
     "purge_manager_folder",
+    "uninstall",
     "remove_docker_images",
     "restore_deleted_project",
     "scan_disk_usage",
@@ -5780,6 +5781,48 @@ def prune_docker_build_cache_job(job):
     update_disk_usage_report(lambda report: report["docker"].update(build_cache_bytes=0))
 
 
+# --- Désinstallation ------------------------------------------------------------------
+# Le backend retire ce qui exige Docker ou des droits sur les données des conteneurs ;
+# l'application de bureau efface ensuite la configuration et se retire elle-même.
+MANAGER_CONTAINERS = (mailpit.MAILPIT_CONTAINER, iot_box.IOTBOX_CONTAINER)
+
+
+def uninstall_job(job, delete_projects):
+    projects = project_dirs()  # Job exclusif (ressource « * ») : plus aucune action ne tourne.
+    if docker_available()[0]:
+        for project in projects:
+            job.add(f"Arrêt et retrait des conteneurs de {project}...")
+            if run_stream(job, docker_command(SETTINGS, "compose", "down"), cwd=WORKSPACE / project) != 0:
+                raise RuntimeError(f"Les conteneurs de {project} ne se sont pas arrêtés : rien d'autre n'a été retiré.")
+        instance = project_service().traefik_instance(refresh=True)
+        if instance and project_service().is_managed_traefik(instance):
+            job.add("Arrêt de Traefik...")
+            run_stream(job, docker_command(SETTINGS, "compose", "down"), cwd=local_traefik_directory())
+        present = [name for name, state in container_statuses(MANAGER_CONTAINERS).items() if state != "absent"]
+        if present:
+            run_stream(job, docker_command(SETTINGS, "rm", "-f", *present))
+    elif projects:
+        raise RuntimeError("Démarre Docker avant de désinstaller : les projets tournent encore dans Docker.")
+    with job_control.protected("désinstallation", irreversible=True):
+        targets = [WORKSPACE / project for project in projects] if delete_projects else []
+        targets += sorted(WORKSPACE.glob(".odoo_manager_*")) if WORKSPACE.is_dir() else []
+        for path in targets:
+            job.add(f"Suppression de {path}...")
+            if path.is_dir() and not path.is_symlink():
+                remove_tree(job, path)
+            else:
+                path.unlink(missing_ok=True)
+        if delete_projects:
+            try:
+                WORKSPACE.rmdir()  # Seulement s'il ne reste rien d'autre dedans.
+            except OSError:
+                pass
+    job.add(
+        "Conteneurs et données du gestionnaire retirés."
+        + ("" if delete_projects else f" Projets conservés dans {WORKSPACE}.")
+    )
+
+
 # --- Performances : ressources de Docker et réglages PostgreSQL -----------------------
 # Calculs : odoo_manager_core/performance.py. Ici, la lecture de l'état et le redémarrage de
 # Docker Desktop qui applique la recommandation (macOS : Docker Desktop relit ses réglages au démarrage).
@@ -9714,6 +9757,13 @@ def delete_project_action(payload):
     )
 
 
+def uninstall_action(payload):
+    delete_projects = payload.get("delete_projects") is True
+    return unfinished_job(uninstall_job, None) or Job(
+        "Désinstaller SDK Local Manager", uninstall_job, (delete_projects,), resources={"*"}
+    )
+
+
 def delete_module_code_action(payload):
     project = payload_project(payload)
     modules = validate_modules(payload.get("modules", ""))
@@ -9823,6 +9873,7 @@ JOB_ACTIONS = {
     "restore_deleted_project": lambda payload: Job(
         "Restaurer un projet supprimé", restore_deleted_project_job, (str(payload.get("name", "")),), resources={"disk"}
     ),
+    "uninstall": uninstall_action,
     "purge_manager_folder": lambda payload: Job(
         "Vider un dossier du gestionnaire",
         purge_manager_folder_job,

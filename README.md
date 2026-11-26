@@ -228,6 +228,12 @@ SDK-Local-Manager/
 
 Installer le paquet correspondant au système (`.dmg`, `.exe`, `.deb` ou `.AppImage`) puis lancer **SDK Local Manager**.
 
+### Désinstaller
+
+**Paramètres › Avancé › Désinstaller**, sur les trois systèmes. Le backend arrête et retire les conteneurs des projets, Traefik (s'il a été installé par le gestionnaire), Mailpit et l'IoT Box, puis efface la corbeille et les dossiers `.odoo_manager_*` du dossier des projets ; les données écrites par PostgreSQL, qui appartiennent à root sous Linux, passent par un conteneur. L'application efface ensuite sa configuration, ses journaux et les accès enregistrés, puis se retire : corbeille sous macOS, désinstallateur sous Windows, fichier `.AppImage` supprimé, ou `apt-get remove` avec le mot de passe administrateur pour le paquet `.deb` (la commande est donnée si la demande est refusée).
+
+La case **Supprimer aussi mes projets et leurs bases** efface en plus chaque projet ; sous Windows, elle désinscrit l'environnement Linux « SDK-Manager », qui contient les projets. Décochée, les projets restent sur le disque (et l'environnement Linux sous Windows). Les images Docker, `~/docker-local-tools` et Docker lui-même ne sont pas retirés : d'autres outils du poste peuvent s'en servir.
+
 ### Environnement de développement
 
 Cloner le dépôt :
