@@ -13,6 +13,14 @@ import sys
 
 RELEASE_NOTES = (
     (
+        "0.55.0",
+        "2026-11-26",
+        (
+            "Paramètres › Avancé › Désinstaller retire l'application de l'ordinateur, avec ce qu'elle a installé et "
+            "ses réglages. Vos projets restent sur le disque, sauf si vous cochez la case pour les supprimer aussi.",
+        ),
+    ),
+    (
         "0.54.0",
         "2026-11-26",
         ("Dans la liste des bases, vous pouvez en cocher plusieurs et les supprimer en une seule fois.",),
