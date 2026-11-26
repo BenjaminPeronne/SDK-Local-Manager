@@ -35,7 +35,7 @@ export function ProjectSettingsTab({
 }: ProjectSettingsTabProps) {
   return (
     <TabsContent value="actions">
-      <div className="mx-auto max-w-4xl space-y-6">
+      <div className="space-y-6">
         <RefinedSectionHeader
           title="Réglages du projet"
           description={selectedProject ? `Paramètres et actions de ${selectedProject.name}.` : undefined}
