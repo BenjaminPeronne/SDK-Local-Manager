@@ -723,6 +723,7 @@ textarea {
   gap: 0.5rem;
   /* Fenêtre étroite : les boutons Mobile et Actions, posés par-dessus la ligne, passent dessous. */
   padding-bottom: 3.25rem;
+  padding-left: 3rem;
 }
 .sdk-database-list-actions {
   bottom: 0.5rem;
@@ -757,7 +758,7 @@ textarea {
   }
   .sdk-database-list-heading {
     grid-template-columns: minmax(0, 1fr) 5rem 14rem 12rem;
-    padding: 0.75rem 1rem;
+    padding: 0.75rem 1rem 0.75rem 3rem;
   }
   .sdk-database-list-row > * {
     margin-top: 0;

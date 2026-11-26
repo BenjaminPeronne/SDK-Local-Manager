@@ -41,6 +41,7 @@ import type {
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { InteractiveCard } from "@/components/ui/card";
 import { TabsContent } from "@/components/ui/tabs";
 import {
@@ -52,6 +53,7 @@ import {
 } from "@/components/common/refined-layout";
 import { Notice } from "@/components/common/notice";
 import { dependencySummary } from "@/components/databases/dependencies-dialog";
+import { DropDatabaseDialog } from "@/components/databases/drop-database-dialog";
 import { FirstDatabaseCallout } from "@/components/databases/first-database-callout";
 
 // Couleur de l'échéance : grise au loin, orange dans les deux semaines, rouge dans les trois jours.
@@ -82,6 +84,7 @@ type DatabasesTabProps = {
   chooseDatabase: (db: string, projectName?: string | undefined) => void;
   createJob: (action: string, payload?: Record<string, unknown>) => Promise<Job | null>;
   dependencyReport: DependencyReport | null;
+  dropDatabase: (project: string, db: string) => Promise<boolean>;
   executeDatabaseAction: (action: DatabaseMenuAction) => void;
   extendDatabaseRetention: (project: string, db: string) => void;
   loading: boolean;
@@ -104,6 +107,7 @@ export function DatabasesTab({
   chooseDatabase,
   createJob,
   dependencyReport,
+  dropDatabase,
   executeDatabaseAction,
   extendDatabaseRetention,
   loading,
@@ -130,9 +134,15 @@ export function DatabasesTab({
     incomplete: string[];
   } | null>(null);
   const [viewPreferences, setViewPreferences] = useState(storedDatabaseViews);
+  const [checkedDatabases, setCheckedDatabases] = useState<string[]>([]);
+  const [databasesToDrop, setDatabasesToDrop] = useState<string[]>([]);
+  const [submittingDeletion, setSubmittingDeletion] = useState(false);
   const preferenceKey = JSON.stringify([workspace, selectedProject?.name || ""]);
   const listView = (viewPreferences[preferenceKey] || (odooDatabases.length > 4 ? "list" : "cards")) === "list";
+  const checked = odooDatabases.filter((db) => checkedDatabases.includes(db));
+  const allChecked = checked.length > 0 && checked.length === odooDatabases.length;
   function chooseView(view: DatabaseView) {
+    if (view === "cards") setCheckedDatabases([]);
     const next = { ...viewPreferences, [preferenceKey]: view };
     setViewPreferences(next);
     try {
@@ -172,6 +182,22 @@ export function DatabasesTab({
   const incomplete = (
     databaseVersions && databaseVersions.project === projectName ? databaseVersions.incomplete : []
   ).filter((db) => odooDatabases.includes(db));
+
+  async function dropCheckedDatabases() {
+    if (!projectName || loading || submittingDeletion || !databasesToDrop.length) return;
+    if (!databasesToDrop.every((db) => odooDatabases.includes(db))) return;
+    setSubmittingDeletion(true);
+    const submitted = new Set<string>();
+    try {
+      for (const db of databasesToDrop) {
+        if (await dropDatabase(projectName, db)) submitted.add(db);
+      }
+    } finally {
+      setCheckedDatabases((current) => current.filter((db) => !submitted.has(db)));
+      setDatabasesToDrop([]);
+      setSubmittingDeletion(false);
+    }
+  }
 
   function runDatabaseAction(db: string, action: DatabaseMenuAction) {
     if (db !== selectedDb) {
@@ -250,25 +276,50 @@ export function DatabasesTab({
         />
 
         {odooDatabases.length > 0 && (
-          <div className="flex justify-end gap-1" role="group" aria-label="Affichage des bases">
-            <Button
-              size="sm"
-              variant={!listView ? "secondary" : "ghost"}
-              aria-pressed={!listView}
-              onClick={() => chooseView("cards")}
-            >
-              <LayoutGrid className="h-4 w-4" />
-              Cartes
-            </Button>
-            <Button
-              size="sm"
-              variant={listView ? "secondary" : "ghost"}
-              aria-pressed={listView}
-              onClick={() => chooseView("list")}
-            >
-              <List className="h-4 w-4" />
-              Liste
-            </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {listView && (
+              <div className="mr-auto flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={allChecked ? true : checked.length ? "indeterminate" : false}
+                    disabled={submittingDeletion}
+                    onCheckedChange={() => setCheckedDatabases(allChecked ? [] : [...odooDatabases])}
+                  />
+                  Tout sélectionner
+                </label>
+                {checked.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={loading || submittingDeletion || !projectName}
+                    onClick={() => setDatabasesToDrop(checked)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Supprimer la sélection ({checked.length})
+                  </Button>
+                )}
+              </div>
+            )}
+            <div className="flex gap-1" role="group" aria-label="Affichage des bases">
+              <Button
+                size="sm"
+                variant={!listView ? "secondary" : "ghost"}
+                aria-pressed={!listView}
+                onClick={() => chooseView("cards")}
+              >
+                <LayoutGrid className="h-4 w-4" />
+                Cartes
+              </Button>
+              <Button
+                size="sm"
+                variant={listView ? "secondary" : "ghost"}
+                aria-pressed={listView}
+                onClick={() => chooseView("list")}
+              >
+                <List className="h-4 w-4" />
+                Liste
+              </Button>
+            </div>
           </div>
         )}
         {odooDatabases.length ? (
@@ -293,6 +344,17 @@ export function DatabasesTab({
               const deletion = expiresAt === null ? null : deletionLabel(expiresAt);
               return (
                 <div key={db} className={cn("relative min-w-0", listView && "border-b last:border-b-0")}>
+                  {listView && (
+                    <Checkbox
+                      className="absolute left-4 top-4 z-10 lg:top-1/2 lg:-translate-y-1/2"
+                      aria-label={`Cocher ${db} pour la suppression`}
+                      checked={checkedDatabases.includes(db)}
+                      disabled={submittingDeletion}
+                      onCheckedChange={(value) =>
+                        setCheckedDatabases(value === true ? [...checked, db] : checked.filter((name) => name !== db))
+                      }
+                    />
+                  )}
                   <DatabaseItem
                     type="button"
                     aria-label={`Sélectionner la base ${db}`}
@@ -517,6 +579,20 @@ export function DatabasesTab({
           )}
         </RefinedPanel>
       </div>
+      {databasesToDrop.length > 0 && (
+        <DropDatabaseDialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !submittingDeletion) setDatabasesToDrop([]);
+          }}
+          project={selectedProject}
+          databases={databasesToDrop}
+          disabled={
+            loading || submittingDeletion || !projectName || !databasesToDrop.every((db) => odooDatabases.includes(db))
+          }
+          onSubmit={dropCheckedDatabases}
+        />
+      )}
       <MobileAccessDialog
         createJob={createJob}
         db={mobileDb ?? ""}

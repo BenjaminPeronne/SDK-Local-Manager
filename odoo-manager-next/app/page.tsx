@@ -1368,23 +1368,30 @@ export default function Home() {
     writeRememberedDatabases(rememberedDatabases.current);
   }
 
-  // Base en cours de suppression : une fois l'action réussie, elle est oubliée. Une liste vide
-  // conserve sinon la sélection (sonde Postgres lente) et pointerait vers une base disparue.
-  const droppedDatabase = useRef<{ jobId: number; project: string; db: string } | null>(null);
+  // Une liste vide conserve la base de travail pendant une sonde lente. Une suppression réussie l'oublie.
+  const droppedDatabases = useRef(new Map<number, { project: string; db: string }>());
   useEffect(() => {
-    const dropped = droppedDatabase.current;
-    if (!dropped) return;
-    const job = jobs.find((item) => item.id === dropped.jobId);
-    if (!job || isJobActive(job)) return;
-    droppedDatabase.current = null;
-    if (job.status !== "done") return;
-    if (rememberedDatabases.current[dropped.project] === dropped.db) {
-      const { [dropped.project]: _forgotten, ...others } = rememberedDatabases.current;
-      rememberedDatabases.current = others;
-      writeRememberedDatabases(others);
+    for (const job of jobs) {
+      const dropped = droppedDatabases.current.get(job.id);
+      if (!dropped || isJobActive(job)) continue;
+      droppedDatabases.current.delete(job.id);
+      if (job.status !== "done") continue;
+      if (rememberedDatabases.current[dropped.project] === dropped.db) {
+        const { [dropped.project]: _forgotten, ...others } = rememberedDatabases.current;
+        rememberedDatabases.current = others;
+        writeRememberedDatabases(others);
+      }
+      if (selectedProject?.name === dropped.project)
+        setSelectedDb((current) => (current === dropped.db ? "" : current));
     }
-    if (selectedProject?.name === dropped.project) setSelectedDb((current) => (current === dropped.db ? "" : current));
   }, [jobs, selectedProject?.name]);
+
+  async function dropDatabase(project: string, db: string) {
+    const job = await createJob("drop_database", { project, db });
+    if (!job) return false;
+    droppedDatabases.current.set(job.id, { project, db });
+    return true;
+  }
 
   function executeDatabaseAction(action: DatabaseMenuAction) {
     if (action === "regenerate_assets") void regenerateOdooAssets();
@@ -1985,10 +1992,12 @@ export default function Home() {
 
                   {selectedProjectOnline && (
                     <DatabasesTab
+                      key={JSON.stringify([overview?.workspace, selectedProject?.name])}
                       workspace={overview?.workspace || ""}
                       chooseDatabase={chooseDatabase}
                       createJob={createJob}
                       dependencyReport={databaseDependencies.report}
+                      dropDatabase={dropDatabase}
                       executeDatabaseAction={executeDatabaseAction}
                       extendDatabaseRetention={(project, db) => void extendDatabasesRetention([{ project, db }])}
                       loading={loading}
@@ -2393,13 +2402,10 @@ export default function Home() {
         open={dropDbOpen}
         onOpenChange={setDropDbOpen}
         project={selectedProject}
-        database={selectedDb}
+        databases={selectedDb ? [selectedDb] : []}
         disabled={!canUseDb || loading}
         onSubmit={async () => {
-          const job = await createJob("drop_database", { project: selectedProject?.name, db: selectedDb });
-          if (job && selectedProject)
-            droppedDatabase.current = { jobId: job.id, project: selectedProject.name, db: selectedDb };
-          if (job) setDropDbOpen(false);
+          if (selectedProject && (await dropDatabase(selectedProject.name, selectedDb))) setDropDbOpen(false);
         }}
       />
 

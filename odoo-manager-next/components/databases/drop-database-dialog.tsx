@@ -11,18 +11,20 @@ export function DropDatabaseDialog({
   open,
   onOpenChange,
   project,
-  database,
+  databases,
   disabled,
   onSubmit,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   project?: Project;
-  database: string;
+  databases: readonly string[];
   disabled: boolean;
   onSubmit: () => Promise<void>;
 }) {
   const [confirm, setConfirm] = useState("");
+  const multiple = databases.length > 1;
+  const confirmation = multiple ? "SUPPRIMER" : (databases[0] ?? "");
 
   useEffect(() => {
     if (!open) setConfirm("");
@@ -32,23 +34,33 @@ export function DropDatabaseDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Supprimer {database || "la base"}</DialogTitle>
+          <DialogTitle>Supprimer {multiple ? `${databases.length} bases` : databases[0] || "la base"}</DialogTitle>
           <DialogDescription>
             {project ? `Projet : ${project.name}. ` : ""}
-            La base PostgreSQL et son filestore seront supprimés définitivement, même si Odoo n’arrive pas à l’ouvrir.
-            Saisis le nom de la base pour confirmer.
+            {multiple
+              ? "Les bases ci-dessous et leurs filestores seront supprimés définitivement. Saisis SUPPRIMER pour confirmer."
+              : "La base PostgreSQL et son filestore seront supprimés définitivement, même si Odoo n’arrive pas à l’ouvrir. Saisis le nom de la base pour confirmer."}
           </DialogDescription>
         </DialogHeader>
+        {multiple && (
+          <ul className="max-h-40 shrink-0 list-disc space-y-1 overflow-y-auto rounded-md border py-2 pl-7 pr-3 text-sm">
+            {databases.map((database) => (
+              <li key={database} className="break-all">
+                {database}
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/45 dark:text-red-100">
-          Cette opération est irréversible. Pense à sauvegarder la base avant si nécessaire.
+          Cette opération est irréversible. Pense à faire une sauvegarde avant si nécessaire.
         </div>
         <div className="grid gap-4">
           <label className="grid gap-1.5 text-sm font-medium">
-            Nom de la base
+            {multiple ? "Mot de confirmation" : "Nom de la base"}
             <Input
               value={confirm}
               onChange={(event) => setConfirm(event.target.value)}
-              placeholder={database}
+              placeholder={confirmation}
               autoComplete="off"
             />
           </label>
@@ -60,7 +72,7 @@ export function DropDatabaseDialog({
           <Button
             data-dialog-submit
             variant="destructive"
-            disabled={disabled || !database || confirm !== database}
+            disabled={disabled || !confirmation || confirm !== confirmation}
             onClick={() => onSubmit()}
           >
             <Trash2 className="h-4 w-4" />
