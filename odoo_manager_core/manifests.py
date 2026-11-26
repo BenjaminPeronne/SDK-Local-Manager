@@ -7,6 +7,7 @@ les chemins ou les textes de manifestes qu'il a trouvés.
 import ast
 import posixpath
 import re
+import warnings
 from pathlib import Path
 
 # États pour lesquels Odoo considère une dépendance comme satisfaite.
@@ -26,7 +27,10 @@ def read_manifest_dict(path):
 
 def parse_manifest_text(text):
     try:
-        manifest = ast.literal_eval(text)
+        # Un « \ » dans une description de module tiers ferait écrire un avertissement à chaque lecture.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            manifest = ast.literal_eval(text)
     except (ValueError, SyntaxError, MemoryError, RecursionError):
         return {}
     return manifest if isinstance(manifest, dict) else {}
