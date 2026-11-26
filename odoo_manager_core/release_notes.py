@@ -13,6 +13,11 @@ import sys
 
 RELEASE_NOTES = (
     (
+        "0.54.0",
+        "2026-11-26",
+        ("Dans la liste des bases, vous pouvez en cocher plusieurs et les supprimer en une seule fois.",),
+    ),
+    (
         "0.53.2",
         "2026-11-23",
         (
