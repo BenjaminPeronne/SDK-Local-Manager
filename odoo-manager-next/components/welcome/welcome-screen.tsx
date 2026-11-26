@@ -16,13 +16,11 @@ import {
 import { newYearGreeting, type Season } from "@/lib/seasonal";
 import type { DockerSummary } from "@/lib/system-notices";
 import type { MailpitStatus } from "@/lib/types";
-import { Notice } from "@/components/common/notice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChristmasHat, Snowfall } from "@/components/seasonal/christmas";
 import { BunnyEars, EasterEggs } from "@/components/seasonal/easter";
 import { Bats, WitchHat } from "@/components/seasonal/halloween";
-import { cn } from "@/lib/utils";
 
 /**
  * Accueil affiché quand aucun projet n'est ouvert.
@@ -100,28 +98,32 @@ export function WelcomeScreen({
 
       {!hasProjects &&
         otherProjectFolders.map((folder) => (
-          <div key={folder} className="mt-6 w-full max-w-xl text-left">
-            <Notice
-              tone="info"
-              icon={FolderOpen}
-              title="Des projets Odoo existent déjà sur cet ordinateur"
-              actions={
-                <Button size="sm" onClick={() => onUseFolder(folder)}>
-                  Afficher ces projets
-                </Button>
-              }
-            >
-              Ils se trouvent dans <span className="break-all font-mono">{folder}</span>, un autre dossier que celui
-              où le gestionnaire les cherche.
-            </Notice>
+          // Encadré neutre et bouton secondaire : « Nouveau projet » reste la seule action principale de l'écran.
+          <div
+            key={folder}
+            className="mt-6 flex w-full max-w-2xl flex-wrap items-center gap-4 rounded-lg border bg-card px-4 py-4 text-left"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-selected text-primary">
+              <FolderOpen className="h-[18px] w-[18px]" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">Des projets Odoo existent déjà sur cet ordinateur</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Ils se trouvent dans <span className="break-all font-mono text-foreground">{folder}</span>, un autre
+                dossier que celui où le gestionnaire les cherche.
+              </p>
+            </div>
+            <Button size="sm" variant="outline" className="shrink-0" onClick={() => onUseFolder(folder)}>
+              Afficher ces projets
+            </Button>
           </div>
         ))}
 
-      <section aria-labelledby="welcome-services-title" className="mt-8 w-full max-w-xl text-left">
-        <h3 id="welcome-services-title" className="mb-3 text-sm font-semibold">
+      <section aria-labelledby="welcome-services-title" className="mt-8 w-full max-w-2xl text-left">
+        <h3 id="welcome-services-title" className="mb-2.5 text-sm font-semibold text-muted-foreground">
           État de l’environnement
         </h3>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="divide-y rounded-lg border bg-card">
           <WelcomeStatus
             title="Docker"
             ready={docker.state === "ready"}
@@ -130,7 +132,6 @@ export function WelcomeScreen({
             message={docker.message}
             detail={docker.detail}
             action={docker.action}
-            actionBelow
           />
           <WelcomeStatus
             title="Traefik"
@@ -140,11 +141,9 @@ export function WelcomeScreen({
             pendingLabel={traefik?.waiting ? "En attente" : traefik ? "À vérifier" : "Vérification"}
             message={traefik?.message || "Vérification en cours…"}
             action={traefik?.action}
-            actionBelow
           />
           {mailpit && (
             <WelcomeStatus
-              className="sm:col-span-2"
               title="Mailpit"
               ready={mailpit.running}
               optional
@@ -169,7 +168,7 @@ export function WelcomeScreen({
         </div>
       </section>
 
-      <div className="mt-8 flex w-full max-w-xl flex-col gap-2 sm:flex-row sm:justify-center">
+      <div className="mt-8 flex w-full max-w-2xl flex-col gap-2 sm:flex-row sm:justify-center">
         <Button className="w-full sm:w-auto" variant={hasProjects ? "outline" : "default"} onClick={onCreateProject}>
           <FolderPlus className="h-4 w-4" />
           Nouveau projet
@@ -207,11 +206,9 @@ function WelcomeStatus({
   readyLabel = "Prêt",
   pendingLabel = "À vérifier",
   action,
-  className,
   optional = false,
   busy = false,
   waiting = false,
-  actionBelow = false,
 }: {
   title: string;
   ready: boolean;
@@ -221,40 +218,35 @@ function WelcomeStatus({
   readyLabel?: string;
   pendingLabel?: string;
   action?: ReactNode;
-  className?: string;
   // Un outil facultatif arrêté n'est pas un problème : pas d'alerte orange.
   optional?: boolean;
   /** Vérification ou démarrage en cours. */
   busy?: boolean;
   /** Dépend d'un autre outil encore arrêté : rien à faire de son côté. */
   waiting?: boolean;
-  /** Carte étroite : le bouton passe sous le texte au lieu de l'écraser. */
-  actionBelow?: boolean;
 }) {
+  // Une ligne par service dans une seule carte : nom, état en clair, pastille, puis l'action qui le débloque.
   return (
-    <div className={cn("flex min-w-0 items-start gap-3 rounded-lg border bg-card px-4 py-3 text-left", className)}>
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-left">
       {ready ? (
-        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
       ) : busy ? (
-        <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-muted-foreground" />
+        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-muted-foreground" />
       ) : waiting ? (
-        <Hourglass className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+        <Hourglass className="h-5 w-5 shrink-0 text-muted-foreground" />
       ) : optional ? (
-        <Mail className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+        <Mail className="h-5 w-5 shrink-0 text-muted-foreground" />
       ) : (
-        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+        <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
       )}
-      <div className="min-w-0">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          {title}
-          <Badge variant={ready ? "success" : "outline"}>{ready ? readyLabel : pendingLabel}</Badge>
-        </div>
-        <p className="mt-0.5 break-words text-xs text-muted-foreground" title={detail || undefined}>
-          {message}
-        </p>
-        {action && actionBelow && <div className="mt-2">{action}</div>}
-      </div>
-      {action && !actionBelow && <div className="ml-auto shrink-0 self-center">{action}</div>}
+      <span className="w-20 shrink-0 text-sm font-semibold">{title}</span>
+      <p className="min-w-0 flex-1 break-words text-sm text-muted-foreground" title={detail || undefined}>
+        {message}
+      </p>
+      <Badge className="shrink-0" variant={ready ? "success" : "outline"}>
+        {ready ? readyLabel : pendingLabel}
+      </Badge>
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }
