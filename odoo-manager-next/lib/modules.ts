@@ -17,6 +17,29 @@ export function normalizedModuleOrigin(origin?: string, sourcePath?: string): Mo
   return "other";
 }
 
+/** Filtres d'état de l'onglet Modules, dans l'ordre des pastilles. */
+export const MODULE_STATUS_FILTERS = [
+  { value: "all", label: "Tous" },
+  { value: "installed", label: "Installés" },
+  { value: "to upgrade", label: "À mettre à jour" },
+  { value: "uninstalled", label: "Disponibles" },
+] as const;
+
+export function moduleMatchesStatus(state: string | undefined, status: string) {
+  // L'ancien backend renvoie « disponible » pour un module non installé.
+  return status === "all" || state === status || (status === "uninstalled" && state === "disponible");
+}
+
+/** Nombre de modules pour chaque filtre d'état, affiché sur les pastilles. */
+export function countModulesByStatus(modules: { state?: string }[]) {
+  return Object.fromEntries(
+    MODULE_STATUS_FILTERS.map(({ value }) => [
+      value,
+      modules.filter((module) => moduleMatchesStatus(module.state, value)).length,
+    ]),
+  ) as Record<(typeof MODULE_STATUS_FILTERS)[number]["value"], number>;
+}
+
 const MODULE_ORIGIN_LABELS: Record<ModuleOrigin, string> = {
   odoo: "Odoo Community",
   enterprise: "Odoo Enterprise",

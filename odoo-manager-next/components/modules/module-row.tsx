@@ -111,11 +111,11 @@ export const ModuleRow = memo(function ModuleRow({
         </span>
       </div>
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-        {module.state === "installed" ? (
+        {module.state === "installed" || module.state === "to upgrade" ? (
           <Button
             className="w-full"
             size="sm"
-            variant="accent"
+            variant="outline"
             disabled={!actions.canUseDb}
             onClick={() => actions.updateModule(module.name)}
           >
@@ -126,7 +126,7 @@ export const ModuleRow = memo(function ModuleRow({
           <Button
             className="w-full"
             size="sm"
-            variant="success"
+            variant="outline"
             disabled={!actions.canUseDb}
             onClick={() => actions.installModule(module.name)}
           >

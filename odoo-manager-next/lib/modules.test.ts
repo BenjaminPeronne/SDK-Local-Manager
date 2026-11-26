@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { moduleOriginLabel, normalizedModuleOrigin } from "./modules.ts";
+import { countModulesByStatus, moduleMatchesStatus, moduleOriginLabel, normalizedModuleOrigin } from "./modules.ts";
 
 test("module origins separate standard Odoo, Enterprise and other code", () => {
   assert.equal(normalizedModuleOrigin("odoo", "/w/demo/odoo/odoo/addons/sale"), "odoo");
@@ -15,4 +15,11 @@ test("module origins separate standard Odoo, Enterprise and other code", () => {
     "Odoo Enterprise",
     "Autre",
   ]);
+});
+
+test("module status counts match the status filters, old backend wording included", () => {
+  const modules = [{ state: "installed" }, { state: "to upgrade" }, { state: "uninstalled" }, { state: "disponible" }];
+  assert.deepEqual(countModulesByStatus(modules), { all: 4, installed: 1, "to upgrade": 1, uninstalled: 2 });
+  assert.equal(moduleMatchesStatus("disponible", "uninstalled"), true);
+  assert.equal(moduleMatchesStatus("installed", "to upgrade"), false);
 });

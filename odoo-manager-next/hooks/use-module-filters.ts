@@ -3,7 +3,7 @@
 import { type SetStateAction, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { moduleAuthors, moduleHasAuthor, searchModules } from "@/lib/module-search";
 import { normalizeSearchText } from "@/lib/format";
-import { normalizedModuleOrigin } from "@/lib/modules";
+import { countModulesByStatus, moduleMatchesStatus, normalizedModuleOrigin } from "@/lib/modules";
 import type { ModuleInfo } from "@/lib/types";
 
 export const MODULES_PER_PAGE = 50;
@@ -121,20 +121,23 @@ export function useModuleFilters(
       a.label.localeCompare(b.label, "fr"),
     );
   }, [modules]);
-  const filtered = useMemo(() => {
+  // Recherche, origine et auteur d'abord : les pastilles d'état comptent sur ce résultat,
+  // pour dire combien de modules chaque état afficherait.
+  const matching = useMemo(() => {
     // Le titre affiché (« Ventes ») compte autant que le nom technique (sale_management), et les
     // résultats arrivent du plus pertinent au moins pertinent : l'application d'abord.
     return searchModules(modules, deferredSearch)
       .filter(
         (module) =>
-          status === "all" || module.state === status || (status === "uninstalled" && module.state === "disponible"),
-      )
-      .filter(
-        (module) =>
           origin === "all" || normalizedModuleOrigin(module.origin, module.source_path || module.path) === origin,
       )
       .filter((module) => author === "all" || moduleHasAuthor(module.author, author.slice("author:".length)));
-  }, [deferredSearch, modules, status, origin, author]);
+  }, [deferredSearch, modules, origin, author]);
+  const statusCounts = useMemo(() => countModulesByStatus(matching), [matching]);
+  const filtered = useMemo(
+    () => matching.filter((module) => moduleMatchesStatus(module.state, status)),
+    [matching, status],
+  );
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / MODULES_PER_PAGE));
   const visible = useMemo(() => {
@@ -156,6 +159,7 @@ export function useModuleFilters(
     setSearch,
     status,
     setStatus,
+    statusCounts,
     origin,
     setOrigin,
     author,

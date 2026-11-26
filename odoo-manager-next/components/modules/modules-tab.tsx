@@ -24,6 +24,7 @@ import {
   FolderGit2,
   List,
   Loader2,
+  MoreHorizontal,
   PlusCircle,
   RefreshCcw,
   RotateCcw,
@@ -47,7 +48,9 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TabsContent } from "@/components/ui/tabs";
+import { MODULE_STATUS_FILTERS, moduleMatchesStatus } from "@/lib/modules";
 import {
+  REFINED_FOCUS_RING,
   REFINED_LABEL,
   REFINED_MODULE_COLUMNS,
   RefinedPanel,
@@ -221,6 +224,11 @@ export function ModulesTab({
     ],
   );
   const repositoryView = moduleFilters.view === "repository";
+  // Sur tous les modules du projet, filtres compris ou non : l'action ne dépend pas de ce qui est affiché.
+  const modulesToUpgrade = useMemo(
+    () => modules.filter((module) => moduleMatchesStatus(module.state, "to upgrade")).map((module) => module.name),
+    [modules],
+  );
   // Commits plus récents sur le serveur, cherchés à l'ouverture de la vue « Par dépôt » pour tous les
   // dépôts du projet (pas seulement ceux de la recherche) : chaque en-tête le signale.
   useRepositoryUpdateChecks(projectName, moduleRepositories, repositoryView && !loadingModules);
@@ -260,55 +268,33 @@ export function ModulesTab({
     });
   }
   // Filtres et sélection des modules : identiques en affichage classique et affiné.
+  // Base, recherche, filtres et affichage tiennent sur une seule barre : la liste commence plus haut.
   const databaseBlock = (
-    <section
-      aria-labelledby="modules-database-title"
-      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/25 bg-primary/[0.04] px-4 py-3 dark:bg-primary/[0.08]"
-    >
-      <div className="min-w-0">
-        <h4 id="modules-database-title" className="text-sm font-semibold">
-          Base de travail
-        </h4>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {canUseDb
-            ? "Les installations et mises à jour s’appliquent à cette base."
-            : "Choisis une base disponible pour installer ou mettre à jour des modules."}
-        </p>
-      </div>
-      <div className="w-full min-w-0 sm:w-64">
-        <Select value={selectedDb} onValueChange={(db) => chooseDatabase(db)}>
-          <SelectTrigger placeholder="Choisir une base" aria-label="Base de travail">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {odooDatabases.map((db) => (
-              <SelectItem key={db} value={db}>
-                {db}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-    </section>
+    <div className="flex w-full min-w-0 items-center gap-2 sm:w-64">
+      <span className="shrink-0 text-sm font-semibold text-muted-foreground">Base</span>
+      <Select value={selectedDb} onValueChange={(db) => chooseDatabase(db)}>
+        <SelectTrigger
+          placeholder="Choisir une base"
+          aria-label="Base de travail"
+          className={cn("min-w-0 font-mono", !canUseDb && "ring-2 ring-primary/60")}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {odooDatabases.map((db) => (
+            <SelectItem key={db} value={db}>
+              {db}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
   const moduleFiltersBlock = (
-    <section aria-labelledby="modules-filters-title" className="space-y-3 rounded-md border bg-card px-4 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <h4 id="modules-filters-title" className="text-sm font-semibold">
-          Rechercher et filtrer
-        </h4>
-        {moduleFilters.active && (
-          <button
-            type="button"
-            className="text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={moduleFilters.reset}
-          >
-            Effacer les filtres
-          </button>
-        )}
-      </div>
-      <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_170px_220px_200px]">
-        <div className="relative">
+    <section aria-label="Base de travail, recherche et filtres" className="space-y-2 rounded-md border bg-card p-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {databaseBlock}
+        <div className="relative min-w-[220px] flex-1">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
           <Input
             className="pl-9"
@@ -318,28 +304,19 @@ export function ModulesTab({
             onChange={(event) => moduleFilters.setSearch(event.target.value)}
           />
         </div>
-        <Select value={moduleFilters.status} onValueChange={moduleFilters.setStatus}>
-          <SelectTrigger placeholder="État" aria-label="Filtrer par état">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tous les états</SelectItem>
-            <SelectItem value="installed">Installés</SelectItem>
-            <SelectItem value="uninstalled">Disponibles</SelectItem>
-            <SelectItem value="to upgrade">À mettre à jour</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={moduleFilters.origin} onValueChange={moduleFilters.setOrigin}>
-          <SelectTrigger placeholder="Origine" aria-label="Filtrer par origine">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Toutes les origines</SelectItem>
-            <SelectItem value="odoo">Odoo Community</SelectItem>
-            <SelectItem value="enterprise">Odoo Enterprise</SelectItem>
-            <SelectItem value="other">Autre</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-full min-w-0 sm:w-48">
+          <Select value={moduleFilters.origin} onValueChange={moduleFilters.setOrigin}>
+            <SelectTrigger placeholder="Origine" aria-label="Filtrer par origine">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Toutes les origines</SelectItem>
+              <SelectItem value="odoo">Odoo Community</SelectItem>
+              <SelectItem value="enterprise">Odoo Enterprise</SelectItem>
+              <SelectItem value="other">Autre</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <Dialog
           open={authorDialogOpen}
           onOpenChange={(open) => {
@@ -348,7 +325,7 @@ export function ModulesTab({
           }}
         >
           <DialogTrigger>
-            <Button variant="outline" className="w-full min-w-0 justify-between" aria-label="Filtrer par auteur">
+            <Button variant="outline" className="w-full min-w-0 justify-between sm:w-48" aria-label="Filtrer par auteur">
               <span className="truncate">{selectedAuthor?.label || "Tous les auteurs"}</span>
               <ChevronDown className="h-4 w-4 shrink-0" />
             </Button>
@@ -397,30 +374,67 @@ export function ModulesTab({
             </div>
           </DialogContent>
         </Dialog>
+        <SegmentedControl.Root
+          size="2"
+          value={moduleFilters.view}
+          onValueChange={(value) => moduleFilters.setView(value as ModuleView)}
+          aria-label="Affichage des modules"
+        >
+          <SegmentedControl.Item value="list">
+            <span className="flex items-center gap-1.5">
+              <List className="h-3.5 w-3.5" aria-hidden="true" />
+              Liste
+            </span>
+          </SegmentedControl.Item>
+          <SegmentedControl.Item value="repository">
+            <span className="flex items-center gap-1.5">
+              <FolderGit2 className="h-3.5 w-3.5" aria-hidden="true" />
+              Par dépôt
+            </span>
+          </SegmentedControl.Item>
+        </SegmentedControl.Root>
       </div>
+      {!canUseDb && (
+        <p className="text-xs font-medium text-primary">
+          Choisis une base pour installer ou mettre à jour des modules.
+        </p>
+      )}
     </section>
   );
+  // Pastilles d'état avec leur nombre de modules : l'état du projet se lit d'un coup d'œil.
   const moduleViewBlock = (
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <SegmentedControl.Root
-        size="1"
-        value={moduleFilters.view}
-        onValueChange={(value) => moduleFilters.setView(value as ModuleView)}
-        aria-label="Affichage des modules"
-      >
-        <SegmentedControl.Item value="list">
-          <span className="flex items-center gap-1.5">
-            <List className="h-3.5 w-3.5" aria-hidden="true" />
-            Liste
-          </span>
-        </SegmentedControl.Item>
-        <SegmentedControl.Item value="repository">
-          <span className="flex items-center gap-1.5">
-            <FolderGit2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Par dépôt
-          </span>
-        </SegmentedControl.Item>
-      </SegmentedControl.Root>
+      <div role="radiogroup" aria-label="Filtrer par état" className="flex flex-wrap items-center gap-2">
+        {MODULE_STATUS_FILTERS.map(({ value, label }) => {
+          const checked = moduleFilters.status === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              onClick={() => moduleFilters.setStatus(value)}
+              className={cn(
+                "inline-flex h-8 items-center gap-2 rounded-full border px-3 text-sm font-medium transition-colors",
+                REFINED_FOCUS_RING,
+                checked ? "border-foreground bg-foreground text-background" : "hover:bg-hover",
+              )}
+            >
+              {label}
+              <span className="font-mono text-xs tabular-nums opacity-80">{moduleFilters.statusCounts[value]}</span>
+            </button>
+          );
+        })}
+        {moduleFilters.active && (
+          <button
+            type="button"
+            className="ml-1 text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={moduleFilters.reset}
+          >
+            Effacer les filtres
+          </button>
+        )}
+      </div>
       {repositoryView && repositoryGroups.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-xs text-muted-foreground">
@@ -526,9 +540,20 @@ export function ModulesTab({
               </Button>
               {/* Les imports de code sont regroupés : ils mènent tous à « ajouter des modules au projet ».
                     Menus non modaux : le verrou de défilement de Radix détache l'en-tête et la barre latérale collés. */}
+              {/* Action préconisée : tant que des modules attendent leur mise à jour, elle passe devant. */}
+              {modulesToUpgrade.length > 0 && (
+                <Button
+                  disabled={!selectedProjectReady || !canUseDb || loading}
+                  title={canUseDb ? undefined : "Choisis une base pour mettre à jour les modules"}
+                  onClick={() => moduleSelectionBarProps.onUpdate(modulesToUpgrade)}
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  Mettre à jour {modulesToUpgrade.length} module{modulesToUpgrade.length > 1 ? "s" : ""}
+                </Button>
+              )}
               <DropdownMenu.Root modal={false}>
                 <DropdownMenu.Trigger>
-                  <Button disabled={!selectedProjectReady}>
+                  <Button disabled={!selectedProjectReady} variant={modulesToUpgrade.length > 0 ? "outline" : "default"}>
                     <PlusCircle className="h-4 w-4" />
                     Ajouter des modules
                     <ChevronDown className="h-4 w-4" />
@@ -545,37 +570,44 @@ export function ModulesTab({
                   </DropdownMenu.Item>
                 </DropdownMenu.Content>
               </DropdownMenu.Root>
-              <Button variant="outline" onClick={openSocleDialog} disabled={!selectedProjectReady || loading}>
-                <Boxes className="h-4 w-4" />
-                Installer un socle
-              </Button>
-              <Button
-                variant="outline"
-                disabled={!selectedProjectReady || loading || checkingUpdatePrerequisites}
-                onClick={requestUpdateAllOdooModules}
-              >
-                {checkingUpdatePrerequisites ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCcw className="h-4 w-4" />
-                )}
-                Mise à jour complète Odoo
-              </Button>
+              {/* Actions plus rares rangées dans « ⋯ » : « Ajouter des modules » reste la seule action principale. */}
+              <DropdownMenu.Root modal={false}>
+                <DropdownMenu.Trigger>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    aria-label="Autres actions sur les modules"
+                    title="Autres actions sur les modules"
+                  >
+                    {checkingUpdatePrerequisites ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <MoreHorizontal className="h-4 w-4" />
+                    )}
+                  </Button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end" className="min-w-64">
+                  <DropdownMenu.Item disabled={!selectedProjectReady || loading} onSelect={openSocleDialog}>
+                    <Boxes className="h-4 w-4" />
+                    Installer un socle
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    disabled={!selectedProjectReady || loading || checkingUpdatePrerequisites}
+                    onSelect={() => void requestUpdateAllOdooModules()}
+                  >
+                    <RefreshCcw className="h-4 w-4" />
+                    Mise à jour complète Odoo
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Root>
             </>
           }
         />
-        {databaseBlock}
         {moduleFiltersBlock}
-        <section aria-labelledby="modules-results-title" className="space-y-3 pt-1">
-          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-            <h4 id="modules-results-title" className="text-sm font-semibold">
-              {repositoryView ? "Dépôts et modules" : "Liste des modules"}
-            </h4>
-            <span className="text-xs text-muted-foreground">
-              {moduleFilters.filtered.length} module{moduleFilters.filtered.length > 1 ? "s" : ""}
-              {moduleFilters.active ? " après filtrage" : ""}
-            </span>
-          </div>
+        <section aria-labelledby="modules-results-title" className="space-y-3">
+          <h4 id="modules-results-title" className="sr-only">
+            {repositoryView ? "Dépôts et modules" : "Liste des modules"}
+          </h4>
           {moduleViewBlock}
           <div ref={selectionBannerRef}>
             <ModuleSelectionBar {...selectionBarProps} />
