@@ -13,6 +13,8 @@ import {
   Info,
   ListPlus,
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Play,
   Search,
@@ -95,6 +97,15 @@ function storedSidebarPreferences(): SidebarPreferences {
   }
 }
 
+const SIDEBAR_COLLAPSED_KEY = "sdk-local-manager.sidebar-collapsed";
+function storedSidebarCollapsed() {
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 // Pas de crypto.randomUUID : indisponible quand l'interface est ouverte en http depuis le téléphone.
 function newSectionId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -132,6 +143,16 @@ export function AppSidebar({
   const [workspaceCopied, setWorkspaceCopied] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
   const [preferences, setPreferences] = useState(storedSidebarPreferences);
+  // Barre repliée : une colonne d'icônes sur grand écran, une seule ligne en haut sur petit écran.
+  const [collapsed, setCollapsedState] = useState(storedSidebarCollapsed);
+  function setCollapsed(next: boolean) {
+    setCollapsedState(next);
+    try {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+    } catch {
+      // Préférence de confort : sans stockage, elle vaut jusqu'à la fermeture.
+    }
+  }
   const workspace = overview?.workspace || "";
   const favorites = Array.isArray(preferences.favorites[workspace]) ? preferences.favorites[workspace] : NO_FAVORITES;
   const sections = Array.isArray(preferences.sections[workspace]) ? preferences.sections[workspace] : NO_SECTIONS;
@@ -391,6 +412,61 @@ export function AppSidebar({
     );
   };
 
+  if (collapsed) {
+    return (
+      <aside
+        aria-label="Barre des projets repliée"
+        className="flex min-w-0 items-center gap-2 border-b bg-card px-3 py-2 lg:sticky lg:top-0 lg:h-screen lg:w-16 lg:flex-none lg:flex-col lg:border-b-0 lg:border-r lg:px-2 lg:py-4"
+      >
+        <img
+          src={selectedAppIcon.src}
+          alt=""
+          aria-hidden="true"
+          className={cn(
+            "h-9 w-9 shrink-0 object-contain",
+            settings?.interface_icon === "local" ? "rounded-full" : "rounded-[9px]",
+          )}
+        />
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-9 w-9 shrink-0"
+          title="Afficher la liste des projets"
+          aria-label="Afficher la liste des projets"
+          onClick={() => setCollapsed(false)}
+        >
+          <PanelLeftOpen className="h-4 w-4" />
+        </Button>
+        {/* Petit écran : le projet ouvert reste nommé dans la ligne repliée. */}
+        {selectedProject && (
+          <span className="min-w-0 truncate text-sm font-semibold uppercase lg:hidden">{selectedProject.name}</span>
+        )}
+        <div className="ml-auto flex items-center gap-1 lg:ml-0 lg:mt-auto lg:flex-col">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-9 w-9"
+            title="Nouveau projet"
+            aria-label="Nouveau projet"
+            onClick={openCreateProjectDialog}
+          >
+            <FolderPlus className="h-4 w-4" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-9 w-9"
+            title="Paramètres"
+            aria-label="Paramètres"
+            onClick={openSettingsDialog}
+          >
+            <Settings className="h-4 w-4" />
+          </Button>
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside className="min-w-0 border-b bg-card lg:sticky lg:top-0 lg:h-screen lg:w-80 lg:flex-none lg:border-b-0 lg:border-r">
       <div className="flex h-full flex-col">
@@ -416,7 +492,19 @@ export function AppSidebar({
                 <h1 className="sdk-brand-name text-sm font-extrabold leading-tight">SDK Local Manager</h1>
               </div>
             </div>
-            <ThemeToggle />
+            <div className="flex shrink-0 items-center gap-1">
+              <ThemeToggle />
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                title="Masquer la liste des projets"
+                aria-label="Masquer la liste des projets"
+                onClick={() => setCollapsed(true)}
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
           <div className="mt-1 flex min-w-0 items-center gap-2">
             <p

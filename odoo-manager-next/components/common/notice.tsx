@@ -89,26 +89,32 @@ export function Notice({
   return (
     <section
       role={tone === "danger" ? "alert" : "status"}
-      className={cn("relative mb-3 overflow-hidden rounded-lg border shadow-sm", style.container)}
+      className={cn("relative mb-2 overflow-hidden rounded-lg border", style.container)}
     >
       <span aria-hidden="true" className={cn("absolute inset-y-0 left-0 w-1", style.bar)} />
-      <div className={cn("flex flex-col gap-3 py-3.5 pl-5 pr-4 sm:flex-row sm:items-center", onDismiss && "pr-11")}>
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full", style.icon)}>
-            <Icon className={cn("h-4 w-4", iconClassName)} aria-hidden="true" />
+      {/* Bandeau compact : titre et explication sur une ligne quand la place le permet, pour laisser
+          l'écran aux menus et aux listes. Le texte passe à la ligne plutôt que d'être coupé. */}
+      <div className={cn("flex flex-col gap-2 py-2 pl-4 pr-3 sm:flex-row sm:items-center", onDismiss && "pr-10")}>
+        <div className="flex min-w-0 flex-1 items-start gap-2.5">
+          <span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full", style.icon)}>
+            <Icon className={cn("h-3.5 w-3.5", iconClassName)} aria-hidden="true" />
           </span>
-          <div className="min-w-0 flex-1 pt-1 text-sm">
-            <div className="font-semibold leading-5">{title}</div>
-            {children && <div className={cn("mt-1 break-words leading-relaxed", style.body)}>{children}</div>}
+          <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm leading-6">
+            <div className="font-semibold">{title}</div>
+            {children && <div className={cn("min-w-0 break-words", style.body)}>{children}</div>}
           </div>
         </div>
-        {actions && <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:pl-3">{actions}</div>}
+        {actions && (
+          <div className="flex shrink-0 flex-wrap items-center gap-2 sm:pl-2 [&_button]:min-h-8 [&_button]:py-1">
+            {actions}
+          </div>
+        )}
       </div>
       {onDismiss && (
         <Button
           size="icon"
           variant="ghost"
-          className={cn("absolute right-2 top-2 h-7 w-7", style.dismiss)}
+          className={cn("absolute right-1.5 top-1.5 h-7 w-7", style.dismiss)}
           title={dismissLabel}
           onClick={onDismiss}
         >

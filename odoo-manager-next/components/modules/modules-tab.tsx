@@ -29,12 +29,13 @@ import {
   RefreshCcw,
   RotateCcw,
   Search,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useModuleFilters, type ModuleView, MODULES_PER_PAGE } from "@/hooks/use-module-filters";
 import { useRepositoryUpdateChecks } from "@/hooks/use-repository-updates";
 import { groupModulesByRepository } from "@/lib/module-repositories";
 import { normalizeSearchText } from "@/lib/format";
-import type { Job, ModuleInfo, ModuleRepository, Overview, Project } from "@/lib/types";
+import type { Job, ModuleInfo, ModuleOrigin, ModuleRepository, Overview, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,7 +49,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TabsContent } from "@/components/ui/tabs";
-import { MODULE_STATUS_FILTERS, moduleMatchesStatus } from "@/lib/modules";
+import { MODULE_STATUS_FILTERS, moduleMatchesStatus, moduleOriginLabel } from "@/lib/modules";
 import {
   REFINED_FOCUS_RING,
   REFINED_LABEL,
@@ -158,6 +159,9 @@ export function ModulesTab({
   const [authorDialogOpen, setAuthorDialogOpen] = useState(false);
   const [authorSearch, setAuthorSearch] = useState("");
   const selectedAuthor = moduleFilters.authors.find((author) => author.value === moduleFilters.author);
+  const originLabel =
+    moduleFilters.origin === "all" ? "" : moduleOriginLabel(moduleFilters.origin as ModuleOrigin);
+  const extraFilterCount = Number(moduleFilters.origin !== "all") + Number(moduleFilters.author !== "all");
   const authorQuery = normalizeSearchText(authorSearch.trim());
   const matchingAuthors = moduleFilters.authors.filter((author) =>
     normalizeSearchText(author.label).includes(authorQuery),
@@ -276,7 +280,7 @@ export function ModulesTab({
         <SelectTrigger
           placeholder="Choisir une base"
           aria-label="Base de travail"
-          className={cn("min-w-0 font-mono", !canUseDb && "ring-2 ring-primary/60")}
+          className={cn("min-w-0 flex-1", !canUseDb && "ring-2 ring-primary/60")}
         >
           <SelectValue />
         </SelectTrigger>
@@ -294,29 +298,20 @@ export function ModulesTab({
     <section aria-label="Base de travail, recherche et filtres" className="space-y-2 rounded-md border bg-card p-3">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         {databaseBlock}
-        <div className="relative min-w-[220px] flex-1">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+        <div className="relative min-w-[160px] flex-1">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
           <Input
             className="pl-9"
             aria-label="Rechercher un module par nom, titre ou auteur"
-            placeholder="Rechercher un module ou un auteur"
+            placeholder="Rechercher un module"
             value={moduleFilters.search}
             onChange={(event) => moduleFilters.setSearch(event.target.value)}
           />
         </div>
-        <div className="w-full min-w-0 sm:w-48">
-          <Select value={moduleFilters.origin} onValueChange={moduleFilters.setOrigin}>
-            <SelectTrigger placeholder="Origine" aria-label="Filtrer par origine">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Toutes les origines</SelectItem>
-              <SelectItem value="odoo">Odoo Community</SelectItem>
-              <SelectItem value="enterprise">Odoo Enterprise</SelectItem>
-              <SelectItem value="other">Autre</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        {/* Origine et auteur derrière un seul bouton : la barre tient sur une ligne même sur un petit écran. */}
         <Dialog
           open={authorDialogOpen}
           onOpenChange={(open) => {
@@ -325,16 +320,45 @@ export function ModulesTab({
           }}
         >
           <DialogTrigger>
-            <Button variant="outline" className="w-full min-w-0 justify-between sm:w-48" aria-label="Filtrer par auteur">
-              <span className="truncate">{selectedAuthor?.label || "Tous les auteurs"}</span>
-              <ChevronDown className="h-4 w-4 shrink-0" />
+            <Button
+              variant="outline"
+              className="shrink-0 font-normal shadow-[inset_0_0_0_1px_hsl(var(--input))]"
+              aria-label={
+                extraFilterCount
+                  ? `Filtres : ${[originLabel, selectedAuthor?.label].filter(Boolean).join(", ")}`
+                  : "Filtres par origine et par auteur"
+              }
+              title={[originLabel, selectedAuthor?.label].filter(Boolean).join(" · ") || undefined}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Filtres
+              {extraFilterCount > 0 && (
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground">
+                  {extraFilterCount}
+                </span>
+              )}
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-lg gap-4 overflow-hidden">
             <DialogHeader>
-              <DialogTitle>Filtrer par auteur</DialogTitle>
-              <DialogDescription>Recherche un auteur puis sélectionne-le pour afficher ses modules.</DialogDescription>
+              <DialogTitle>Filtres</DialogTitle>
+              <DialogDescription>Choisis l’origine des modules, puis un auteur si besoin.</DialogDescription>
             </DialogHeader>
+            <div className="space-y-1.5">
+              <span className="text-sm font-semibold">Origine</span>
+              <Select value={moduleFilters.origin} onValueChange={moduleFilters.setOrigin}>
+                <SelectTrigger placeholder="Origine" aria-label="Filtrer par origine">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toutes les origines</SelectItem>
+                  <SelectItem value="odoo">Odoo Community</SelectItem>
+                  <SelectItem value="enterprise">Odoo Enterprise</SelectItem>
+                  <SelectItem value="other">Autre</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <span className="-mb-2 text-sm font-semibold">Auteur</span>
             <Input
               aria-label="Rechercher un auteur"
               placeholder="Rechercher un auteur"
@@ -375,22 +399,17 @@ export function ModulesTab({
           </DialogContent>
         </Dialog>
         <SegmentedControl.Root
-          size="2"
+          size="3"
           value={moduleFilters.view}
           onValueChange={(value) => moduleFilters.setView(value as ModuleView)}
           aria-label="Affichage des modules"
         >
-          <SegmentedControl.Item value="list">
-            <span className="flex items-center gap-1.5">
-              <List className="h-3.5 w-3.5" aria-hidden="true" />
-              Liste
-            </span>
+          {/* Icônes seules : le nom reste lu par les lecteurs d'écran et s'affiche au survol. */}
+          <SegmentedControl.Item value="list" title="Liste" aria-label="Liste">
+            <List className="h-4 w-4" aria-hidden="true" />
           </SegmentedControl.Item>
-          <SegmentedControl.Item value="repository">
-            <span className="flex items-center gap-1.5">
-              <FolderGit2 className="h-3.5 w-3.5" aria-hidden="true" />
-              Par dépôt
-            </span>
+          <SegmentedControl.Item value="repository" title="Par dépôt" aria-label="Par dépôt">
+            <FolderGit2 className="h-4 w-4" aria-hidden="true" />
           </SegmentedControl.Item>
         </SegmentedControl.Root>
       </div>
@@ -417,7 +436,11 @@ export function ModulesTab({
               className={cn(
                 "inline-flex h-8 items-center gap-2 rounded-full border px-3 text-sm font-medium transition-colors",
                 REFINED_FOCUS_RING,
-                checked ? "border-foreground bg-foreground text-background" : "hover:bg-hover",
+                checked
+                  ? "border-foreground bg-foreground text-background"
+                  : moduleFilters.statusCounts[value] === 0
+                    ? "text-muted-foreground hover:bg-hover"
+                    : "hover:bg-hover",
               )}
             >
               {label}
@@ -436,33 +459,35 @@ export function ModulesTab({
         )}
       </div>
       {repositoryView && repositoryGroups.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="text-xs text-muted-foreground">
-            {repositoryGroups.filter((group) => group.repository).length} dépôt(s) · sélectionne un dépôt pour voir ses
-            modules
+        // Compteur court et boutons en icônes : la ligne reste à côté des pastilles sur un petit écran.
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <span className="mr-1 text-xs text-muted-foreground">
+            {repositoryGroups.filter((group) => group.repository).length} dépôt(s)
           </span>
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={expandedGroups === repositoryGroups.length}
-              onClick={() => foldAllGroups(true)}
-            >
-              <ChevronsUpDown className="h-4 w-4" />
-              Tout déplier
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={expandedGroups === 0}
-              onClick={() => foldAllGroups(false)}
-            >
-              <ChevronsDownUp className="h-4 w-4" />
-              Tout replier
-            </Button>
-          </div>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8"
+            disabled={expandedGroups === repositoryGroups.length}
+            onClick={() => foldAllGroups(true)}
+            aria-label="Tout déplier"
+            title="Tout déplier"
+          >
+            <ChevronsUpDown className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8"
+            disabled={expandedGroups === 0}
+            onClick={() => foldAllGroups(false)}
+            aria-label="Tout replier"
+            title="Tout replier"
+          >
+            <ChevronsDownUp className="h-4 w-4" />
+          </Button>
         </div>
       )}
     </div>
