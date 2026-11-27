@@ -13,6 +13,18 @@ import sys
 
 RELEASE_NOTES = (
     (
+        "0.56.0",
+        "2026-11-26",
+        (
+            "Modules : quand des modules attendent une mise à jour, un bouton « Mettre à jour » les met tous à jour "
+            "en un clic. Des pastilles montrent combien de modules sont installés, à mettre à jour ou disponibles.",
+            "Modules : la base, la recherche et les filtres tiennent sur une seule ligne, même sur un petit écran.",
+            "La liste des projets à gauche peut être repliée pour laisser plus de place au projet ouvert.",
+            "Les messages d'information en haut de l'écran prennent moins de place, et l'accueil et les réglages "
+            "du projet sont plus lisibles.",
+        ),
+    ),
+    (
         "0.55.0",
         "2026-11-26",
         (
